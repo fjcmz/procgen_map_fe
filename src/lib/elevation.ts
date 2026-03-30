@@ -2,13 +2,12 @@ import type { Cell } from './types';
 import type { NoiseSampler } from './noise';
 import { fbm } from './noise';
 
-const SEA_LEVEL = 0.4;
-
 export function assignElevation(
   cells: Cell[],
   width: number,
   height: number,
-  noise: NoiseSampler
+  noise: NoiseSampler,
+  waterRatio: number
 ): void {
   const cx = width / 2;
   const cy = height / 2;
@@ -29,7 +28,14 @@ export function assignElevation(
     elev = Math.max(0, Math.min(1, elev));
 
     cell.elevation = elev;
-    cell.isWater = elev < SEA_LEVEL;
+  }
+
+  // Derive sea level from the desired water ratio using the actual elevation distribution
+  const sorted = cells.map(c => c.elevation).sort((a, b) => a - b);
+  const seaLevel = sorted[Math.floor(waterRatio * (sorted.length - 1))];
+
+  for (const cell of cells) {
+    cell.isWater = cell.elevation < seaLevel;
   }
 
   // Mark coast cells
