@@ -16,7 +16,8 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Settlements** — cities and capitals placed on suitable terrain, connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
-- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, and labels
+- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, and the biome legend
+- **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
 
 ## Tech Stack
 
