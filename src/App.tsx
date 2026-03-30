@@ -1,7 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { MapData, LayerVisibility, WorkerMessage } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
+import type { MapCanvasHandle } from './components/MapCanvas';
 import { Controls } from './components/Controls';
+import { ZoomControls } from './components/ZoomControls';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -23,6 +25,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
+  const mapCanvasRef = useRef<MapCanvasHandle>(null);
 
   // Clean up worker on unmount
   useEffect(() => {
@@ -81,7 +84,12 @@ export default function App() {
 
   return (
     <>
-      <MapCanvas mapData={mapData} layers={layers} seed={seed} />
+      <MapCanvas ref={mapCanvasRef} mapData={mapData} layers={layers} seed={seed} />
+      <ZoomControls
+        onZoomIn={() => mapCanvasRef.current?.zoomIn()}
+        onZoomOut={() => mapCanvasRef.current?.zoomOut()}
+        onReset={() => mapCanvasRef.current?.reset()}
+      />
       <Controls
         seed={seed}
         onSeedChange={setSeed}
