@@ -10,6 +10,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 
 - **Seed-based generation** — reproducible maps from any seed string
 - **Configurable detail** — cell count from 500 to 100,000 for fast previews or high-detail renders
+- **Water ratio** — slider to control the percentage of water vs land (0–100%)
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
 - **Settlements** — cities and capitals placed on suitable terrain, connected by roads via A* pathfinding
@@ -46,7 +47,7 @@ npm run preview
 ## Generation Pipeline
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
-2. **Elevation** — multi-octave FBM noise with radial island falloff
+2. **Elevation** — multi-octave FBM noise with radial island falloff; sea level derived by ranking cells so the exact requested water ratio is always achieved
 3. **Moisture** — separate FBM noise layer with coastal humidity boost
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
