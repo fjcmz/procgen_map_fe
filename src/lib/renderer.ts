@@ -23,10 +23,17 @@ function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
 }
 
 function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[]): void {
+  // Draw land first, water last — ensures water always wins at shared polygon edges
+  // regardless of cell index order (which has no spatial meaning in Voronoi).
   for (const cell of cells) {
-    if (cell.vertices.length < 2) continue;
-    const info = BIOME_INFO[cell.biome];
-    ctx.fillStyle = info.fillColor;
+    if (cell.isWater || cell.vertices.length < 2) continue;
+    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+  for (const cell of cells) {
+    if (!cell.isWater || cell.vertices.length < 2) continue;
+    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
     cellPath(ctx, cell);
     ctx.fill();
   }
@@ -40,7 +47,7 @@ function drawWaterDepth(
 ): void {
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
-    const depth = 1 - cell.elevation / 0.4; // 0=shallow, 1=deep
+    const depth = Math.max(0, 1 - cell.elevation / 0.4); // 0=shallow, 1=deep
     const alpha = depth * 0.3;
     ctx.fillStyle = `rgba(20,50,100,${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
