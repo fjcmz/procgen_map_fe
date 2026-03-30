@@ -19,51 +19,61 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const isPanning = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
+  const rafRef = useRef<number | null>(null);
 
+  // Re-render at full canvas resolution using ctx transform whenever anything changes.
+  // This avoids CSS-transform pixelation: the canvas always draws at native pixel density.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !mapData) return;
 
-    canvas.width = mapData.width;
-    canvas.height = mapData.height;
+    // Canvas covers the viewport; sizing it here clears any stale pixels.
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    render(ctx, mapData, layers, seed);
-  }, [mapData, layers, seed]);
+    // Dark border for areas outside the map when panned/zoomed out
+    ctx.fillStyle = '#2a1a0a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Re-render when layers change but mapData hasn't changed
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !mapData) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    // Apply zoom/pan so the renderer draws in map-coordinate space,
+    // which lands correctly at whatever zoom level we're at.
+    ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
     render(ctx, mapData, layers, seed);
-  }, [layers]); // eslint-disable-line react-hooks/exhaustive-deps
+    ctx.resetTransform();
+  }, [mapData, layers, seed, transform]);
 
-  // Wheel zoom centered on cursor
+  // Wheel zoom centered on cursor — uses RAF to coalesce rapid scroll events
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-      setTransform(prev => {
-        const newScale = Math.min(10, Math.max(0.1, prev.scale * factor));
-        const contentX = (e.clientX - prev.x) / prev.scale;
-        const contentY = (e.clientY - prev.y) / prev.scale;
-        return {
-          scale: newScale,
-          x: e.clientX - contentX * newScale,
-          y: e.clientY - contentY * newScale,
-        };
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+        setTransform(prev => {
+          const newScale = Math.min(10, Math.max(0.1, prev.scale * factor));
+          const contentX = (e.clientX - prev.x) / prev.scale;
+          const contentY = (e.clientY - prev.y) / prev.scale;
+          return {
+            scale: newScale,
+            x: e.clientX - contentX * newScale,
+            y: e.clientY - contentY * newScale,
+          };
+        });
       });
     };
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
-    return () => canvas.removeEventListener('wheel', handleWheel);
+    return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
   }, []);
 
   // Middle mouse button pan
@@ -73,7 +83,7 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
 
     const handleMouseDown = (e: MouseEvent) => {
       if (e.button !== 1) return;
-      e.preventDefault(); // prevent browser autoscroll
+      e.preventDefault();
       isPanning.current = true;
       lastMouse.current = { x: e.clientX, y: e.clientY };
       canvas.style.cursor = 'grabbing';
@@ -112,8 +122,6 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
         top: 0,
         left: 0,
         display: 'block',
-        transformOrigin: '0 0',
-        transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
       }}
     />
   );
