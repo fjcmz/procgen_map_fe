@@ -14,7 +14,7 @@ function post(msg: WorkerMessage): void {
 }
 
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
-  const { seed, numCells, width, height } = e.data;
+  const { seed, numCells, width, height, waterRatio } = e.data;
 
   try {
     post({ type: 'PROGRESS', step: 'Building Voronoi diagram…', pct: 5 });
@@ -22,7 +22,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
 
     post({ type: 'PROGRESS', step: 'Shaping terrain…', pct: 20 });
     const noise = createNoiseSamplers(seed);
-    assignElevation(cells, width, height, noise);
+    assignElevation(cells, width, height, noise, waterRatio);
 
     post({ type: 'PROGRESS', step: 'Calculating moisture…', pct: 35 });
     assignMoisture(cells, width, height, noise);

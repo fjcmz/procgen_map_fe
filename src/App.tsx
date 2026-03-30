@@ -7,6 +7,7 @@ import { ZoomControls } from './components/ZoomControls';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
+const DEFAULT_WATER_RATIO = 0.4;
 
 const DEFAULT_LAYERS: LayerVisibility = {
   rivers: true,
@@ -19,6 +20,7 @@ const DEFAULT_LAYERS: LayerVisibility = {
 export default function App() {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numCells, setNumCells] = useState(DEFAULT_CELLS);
+  const [waterRatio, setWaterRatio] = useState(DEFAULT_WATER_RATIO);
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -75,8 +77,8 @@ export default function App() {
       setProgress(null);
     };
 
-    worker.postMessage({ type: 'GENERATE', seed, numCells, width, height });
-  }, [generating, seed, numCells]);
+    worker.postMessage({ type: 'GENERATE', seed, numCells, width, height, waterRatio });
+  }, [generating, seed, numCells, waterRatio]);
 
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -95,6 +97,8 @@ export default function App() {
         onSeedChange={setSeed}
         numCells={numCells}
         onNumCellsChange={setNumCells}
+        waterRatio={waterRatio}
+        onWaterRatioChange={setWaterRatio}
         layers={layers}
         onLayerToggle={handleLayerToggle}
         onGenerate={handleGenerate}

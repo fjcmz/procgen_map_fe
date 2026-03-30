@@ -64,6 +64,7 @@ export interface GenerateRequest {
   numCells: number;
   width: number;
   height: number;
+  waterRatio: number;
 }
 
 export type WorkerMessage =

@@ -6,6 +6,8 @@ interface ControlsProps {
   onSeedChange: (s: string) => void;
   numCells: number;
   onNumCellsChange: (n: number) => void;
+  waterRatio: number;
+  onWaterRatioChange: (r: number) => void;
   layers: LayerVisibility;
   onLayerToggle: (key: keyof LayerVisibility) => void;
   onGenerate: () => void;
@@ -28,6 +30,8 @@ export function Controls({
   onSeedChange,
   numCells,
   onNumCellsChange,
+  waterRatio,
+  onWaterRatioChange,
   layers,
   onLayerToggle,
   onGenerate,
@@ -67,6 +71,21 @@ export function Controls({
             </button>
           ))}
         </div>
+      </label>
+
+      <label style={styles.label}>
+        Water ({Math.round(waterRatio * 100)}%)
+        <input
+          style={styles.slider}
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(waterRatio * 100)}
+          onChange={(e: ChangeEvent<HTMLInputElement>) =>
+            onWaterRatioChange(Number(e.target.value) / 100)
+          }
+          disabled={generating}
+        />
       </label>
 
       <div style={styles.label}>
@@ -154,6 +173,11 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: '#2a1a00',
     outline: 'none',
+  },
+  slider: {
+    width: '100%',
+    accentColor: '#8b4513',
+    cursor: 'pointer',
   },
   cellBtns: {
     display: 'flex',
