@@ -13,7 +13,7 @@ interface ControlsProps {
   progress: { step: string; pct: number } | null;
 }
 
-const CELL_OPTIONS = [500, 1000, 2000, 4000];
+const CELL_OPTIONS = [500, 1000, 2000, 4000, 10000, 50000, 100000];
 
 const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   rivers: 'Rivers',
