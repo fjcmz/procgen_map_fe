@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { MapData, LayerVisibility } from '../lib/types';
 import { render } from '../lib/renderer';
 
@@ -14,6 +14,19 @@ interface Transform {
   scale: number;
 }
 
+export interface MapCanvasHandle {
+  zoomIn: () => void;
+  zoomOut: () => void;
+  reset: () => void;
+}
+
+function zoomAround(prev: Transform, cx: number, cy: number, factor: number): Transform {
+  const newScale = Math.min(10, Math.max(0.1, prev.scale * factor));
+  const contentX = (cx - prev.x) / prev.scale;
+  const contentY = (cy - prev.y) / prev.scale;
+  return { scale: newScale, x: cx - contentX * newScale, y: cy - contentY * newScale };
+}
+
 function getTouchDist(t1: Touch, t2: Touch) {
   return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
 }
@@ -22,7 +35,10 @@ function getTouchMid(t1: Touch, t2: Touch) {
   return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
 }
 
-export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
+export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
+  { mapData, layers, seed }: MapCanvasProps,
+  ref,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const isPanning = useRef(false);
@@ -30,6 +46,18 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
   const rafRef = useRef<number | null>(null);
   const lastTouchDist = useRef(0);
   const lastTouchMid = useRef({ x: 0, y: 0 });
+
+  useImperativeHandle(ref, () => ({
+    zoomIn() {
+      setTransform(prev => zoomAround(prev, window.innerWidth / 2, window.innerHeight / 2, 1.5));
+    },
+    zoomOut() {
+      setTransform(prev => zoomAround(prev, window.innerWidth / 2, window.innerHeight / 2, 1 / 1.5));
+    },
+    reset() {
+      setTransform({ x: 0, y: 0, scale: 1 });
+    },
+  }));
 
   // Re-render at full canvas resolution using ctx transform whenever anything changes.
   // This avoids CSS-transform pixelation: the canvas always draws at native pixel density.
@@ -66,16 +94,7 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
         const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        setTransform(prev => {
-          const newScale = Math.min(10, Math.max(0.1, prev.scale * factor));
-          const contentX = (e.clientX - prev.x) / prev.scale;
-          const contentY = (e.clientY - prev.y) / prev.scale;
-          return {
-            scale: newScale,
-            x: e.clientX - contentX * newScale,
-            y: e.clientY - contentY * newScale,
-          };
-        });
+        setTransform(prev => zoomAround(prev, e.clientX, e.clientY, factor));
       });
     };
 
@@ -107,16 +126,10 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
         const newDist = getTouchDist(e.touches[0], e.touches[1]);
         const newMid = getTouchMid(e.touches[0], e.touches[1]);
         const distFactor = newDist / lastTouchDist.current;
+        // zoomAround the old midpoint, then shift by the pan delta
         setTransform(prev => {
-          const newScale = Math.min(10, Math.max(0.1, prev.scale * distFactor));
-          // Keep the content under the old midpoint anchored to the new midpoint (handles pan + zoom together)
-          const contentX = (lastTouchMid.current.x - prev.x) / prev.scale;
-          const contentY = (lastTouchMid.current.y - prev.y) / prev.scale;
-          return {
-            scale: newScale,
-            x: newMid.x - contentX * newScale,
-            y: newMid.y - contentY * newScale,
-          };
+          const zoomed = zoomAround(prev, lastTouchMid.current.x, lastTouchMid.current.y, distFactor);
+          return { ...zoomed, x: zoomed.x + (newMid.x - lastTouchMid.current.x), y: zoomed.y + (newMid.y - lastTouchMid.current.y) };
         });
         lastTouchDist.current = newDist;
         lastTouchMid.current = newMid;
@@ -187,4 +200,4 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
       }}
     />
   );
-}
+});
