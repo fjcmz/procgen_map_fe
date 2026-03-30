@@ -37,7 +37,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/noise.ts` | Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers |
 | `src/lib/renderer.ts` | Canvas 2D rendering — the largest file (~450 lines) |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
-| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggle UI |
+| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, collapsible panel UI |
 | `src/workers/mapgen.worker.ts` | Orchestrates the full generation pipeline, posts progress events |
 
 ### Data Model
@@ -73,6 +73,12 @@ All randomness goes through the seeded `mulberry32` PRNG in `noise.ts`. Never us
 - Coastlines use noisy edges from `noisyEdges.ts` for an organic look
 - City icons are drawn as simple SVG-path-like canvas commands
 - `drawBiomeFill` renders land cells first, water cells second — this ensures water always wins at shared polygon edges (Voronoi cell indices have no spatial order, so rendering in index order causes land to bleed over water)
+- The biome legend is drawn on the canvas and controlled by `layers.legend` (part of `LayerVisibility`); it is not a separate React component
+
+### UI Panels
+
+- **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`).
+- **Legend**: toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `renderer.ts` before calling `drawLegend`.
 
 ## Deployment
 
