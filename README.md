@@ -47,7 +47,7 @@ npm run preview
 ## Generation Pipeline
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
-2. **Elevation** — multi-octave FBM noise with radial island falloff; sea level derived by ranking cells so the exact requested water ratio is always achieved
+2. **Elevation** — multi-octave FBM noise with radial island falloff; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
 3. **Moisture** — separate FBM noise layer with coastal humidity boost
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
