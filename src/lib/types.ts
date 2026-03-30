@@ -78,6 +78,7 @@ export interface LayerVisibility {
   borders: boolean;
   icons: boolean;
   labels: boolean;
+  legend: boolean;
 }
 
 export interface BiomeInfo {

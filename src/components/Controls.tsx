@@ -1,4 +1,4 @@
-import { type ChangeEvent } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import type { LayerVisibility } from '../lib/types';
 
 interface ControlsProps {
@@ -23,6 +23,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   borders: 'Borders',
   icons: 'Icons',
   labels: 'Labels',
+  legend: 'Legend',
 };
 
 export function Controls({
@@ -38,89 +39,98 @@ export function Controls({
   generating,
   progress,
 }: ControlsProps) {
+  const [collapsed, setCollapsed] = useState(false);
   return (
     <div style={styles.panel}>
-      <h2 style={styles.title}>Fantasy Map Generator</h2>
-
-      <label style={styles.label}>
-        Seed
-        <input
-          style={styles.input}
-          type="text"
-          value={seed}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => onSeedChange(e.target.value)}
-          placeholder="e.g. fantasy"
-          disabled={generating}
-        />
-      </label>
-
-      <label style={styles.label}>
-        Detail ({numCells.toLocaleString()} cells)
-        <div style={styles.cellBtns}>
-          {CELL_OPTIONS.map(n => (
-            <button
-              key={n}
-              style={{
-                ...styles.cellBtn,
-                ...(numCells === n ? styles.cellBtnActive : {}),
-              }}
-              onClick={() => onNumCellsChange(n)}
-              disabled={generating}
-            >
-              {n >= 1000 ? `${n / 1000}k` : n}
-            </button>
-          ))}
-        </div>
-      </label>
-
-      <label style={styles.label}>
-        Water ({Math.round(waterRatio * 100)}%)
-        <input
-          style={styles.slider}
-          type="range"
-          min={0}
-          max={100}
-          value={Math.round(waterRatio * 100)}
-          onChange={(e: ChangeEvent<HTMLInputElement>) =>
-            onWaterRatioChange(Number(e.target.value) / 100)
-          }
-          disabled={generating}
-        />
-      </label>
-
-      <div style={styles.label}>
-        Layers
-        <div style={styles.toggleRow}>
-          {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[]).map(key => (
-            <label key={key} style={styles.toggle}>
-              <input
-                type="checkbox"
-                checked={layers[key]}
-                onChange={() => onLayerToggle(key)}
-              />
-              {LAYER_LABELS[key]}
-            </label>
-          ))}
-        </div>
+      <div style={styles.titleRow}>
+        <h2 style={styles.title}>Fantasy Map Generator</h2>
+        <button style={styles.collapseBtn} onClick={() => setCollapsed(c => !c)} title={collapsed ? 'Expand' : 'Collapse'}>
+          {collapsed ? '▾' : '▴'}
+        </button>
       </div>
-
-      <button
-        style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
-        onClick={onGenerate}
-        disabled={generating}
-      >
-        {generating ? 'Generating…' : 'Generate Map'}
-      </button>
-
-      {progress && (
-        <div style={styles.progressWrap}>
-          <div style={styles.progressBar}>
-            <div
-              style={{ ...styles.progressFill, width: `${progress.pct}%` }}
+      {!collapsed && (
+        <>
+          <label style={styles.label}>
+            Seed
+            <input
+              style={styles.input}
+              type="text"
+              value={seed}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => onSeedChange(e.target.value)}
+              placeholder="e.g. fantasy"
+              disabled={generating}
             />
+          </label>
+
+          <label style={styles.label}>
+            Detail ({numCells.toLocaleString()} cells)
+            <div style={styles.cellBtns}>
+              {CELL_OPTIONS.map(n => (
+                <button
+                  key={n}
+                  style={{
+                    ...styles.cellBtn,
+                    ...(numCells === n ? styles.cellBtnActive : {}),
+                  }}
+                  onClick={() => onNumCellsChange(n)}
+                  disabled={generating}
+                >
+                  {n >= 1000 ? `${n / 1000}k` : n}
+                </button>
+              ))}
+            </div>
+          </label>
+
+          <label style={styles.label}>
+            Water ({Math.round(waterRatio * 100)}%)
+            <input
+              style={styles.slider}
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(waterRatio * 100)}
+              onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                onWaterRatioChange(Number(e.target.value) / 100)
+              }
+              disabled={generating}
+            />
+          </label>
+
+          <div style={styles.label}>
+            Layers
+            <div style={styles.toggleRow}>
+              {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[]).map(key => (
+                <label key={key} style={styles.toggle}>
+                  <input
+                    type="checkbox"
+                    checked={layers[key]}
+                    onChange={() => onLayerToggle(key)}
+                  />
+                  {LAYER_LABELS[key]}
+                </label>
+              ))}
+            </div>
           </div>
-          <span style={styles.progressLabel}>{progress.step}</span>
-        </div>
+
+          <button
+            style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
+            onClick={onGenerate}
+            disabled={generating}
+          >
+            {generating ? 'Generating…' : 'Generate Map'}
+          </button>
+
+          {progress && (
+            <div style={styles.progressWrap}>
+              <div style={styles.progressBar}>
+                <div
+                  style={{ ...styles.progressFill, width: `${progress.pct}%` }}
+                />
+              </div>
+              <span style={styles.progressLabel}>{progress.step}</span>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -146,13 +156,26 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
     userSelect: 'none',
   },
+  titleRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   title: {
     margin: 0,
     fontSize: 14,
     fontWeight: 'bold',
     color: '#3a1a00',
-    textAlign: 'center',
     letterSpacing: 0.5,
+  },
+  collapseBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 14,
+    color: '#5a3a10',
+    padding: '0 2px',
+    lineHeight: 1,
   },
   label: {
     display: 'flex',
