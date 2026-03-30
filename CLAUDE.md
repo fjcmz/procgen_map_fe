@@ -35,9 +35,9 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/types.ts` | All shared TypeScript types — start here |
 | `src/lib/voronoi.ts` | Cell generation via D3-Delaunay + Lloyd relaxation |
 | `src/lib/noise.ts` | Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers |
-| `src/lib/renderer.ts` | Canvas 2D rendering — the largest file (~440 lines) |
+| `src/lib/renderer.ts` | Canvas 2D rendering — the largest file (~450 lines) |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
-| `src/components/Controls.tsx` | Seed input, cell count, layer toggle UI |
+| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggle UI |
 | `src/workers/mapgen.worker.ts` | Orchestrates the full generation pipeline, posts progress events |
 
 ### Data Model
@@ -53,12 +53,26 @@ The central type is `Cell` (defined in `types.ts`). Every generation step annota
 
 All randomness goes through the seeded `mulberry32` PRNG in `noise.ts`. Never use `Math.random()` directly — pass the seeded RNG to any function that needs randomness to ensure reproducibility.
 
+### Generation Parameters
+
+`GenerateRequest` (in `types.ts`) carries all user-controlled inputs to the worker:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `seed` | `string` | Deterministic seed string |
+| `numCells` | `number` | Voronoi cell count (500–100,000) |
+| `waterRatio` | `number` | Fraction of cells that are water (0–1, default 0.4) |
+| `width` / `height` | `number` | Canvas dimensions |
+
+`waterRatio` is implemented by ranking all cells by elevation and marking the lowest `waterRatio * N` as water. This guarantees the exact ratio regardless of the terrain shape, unlike a fixed elevation threshold.
+
 ### Rendering
 
 `renderer.ts` draws everything onto a single `<canvas>` element. Layer visibility is controlled by the `LayerVisibility` type. When modifying rendering:
-- Biome colors are defined in `biomes.ts` (`BIOME_COLORS`)
+- Biome colors are defined in `biomes.ts` (`BIOME_INFO`)
 - Coastlines use noisy edges from `noisyEdges.ts` for an organic look
 - City icons are drawn as simple SVG-path-like canvas commands
+- `drawBiomeFill` renders land cells first, water cells second — this ensures water always wins at shared polygon edges (Voronoi cell indices have no spatial order, so rendering in index order causes land to bleed over water)
 
 ## Deployment
 
