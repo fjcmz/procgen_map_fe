@@ -14,12 +14,22 @@ interface Transform {
   scale: number;
 }
 
+function getTouchDist(t1: Touch, t2: Touch) {
+  return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+}
+
+function getTouchMid(t1: Touch, t2: Touch) {
+  return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+}
+
 export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const isPanning = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
   const rafRef = useRef<number | null>(null);
+  const lastTouchDist = useRef(0);
+  const lastTouchMid = useRef({ x: 0, y: 0 });
 
   // Re-render at full canvas resolution using ctx transform whenever anything changes.
   // This avoids CSS-transform pixelation: the canvas always draws at native pixel density.
@@ -76,6 +86,57 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
     };
   }, []);
 
+  // Touch: pinch-to-zoom + single-finger pan
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        lastTouchDist.current = getTouchDist(e.touches[0], e.touches[1]);
+        lastTouchMid.current = getTouchMid(e.touches[0], e.touches[1]);
+      } else if (e.touches.length === 1) {
+        lastTouchMid.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 2) {
+        const newDist = getTouchDist(e.touches[0], e.touches[1]);
+        const newMid = getTouchMid(e.touches[0], e.touches[1]);
+        const distFactor = newDist / lastTouchDist.current;
+        setTransform(prev => {
+          const newScale = Math.min(10, Math.max(0.1, prev.scale * distFactor));
+          // Keep the content under the old midpoint anchored to the new midpoint (handles pan + zoom together)
+          const contentX = (lastTouchMid.current.x - prev.x) / prev.scale;
+          const contentY = (lastTouchMid.current.y - prev.y) / prev.scale;
+          return {
+            scale: newScale,
+            x: newMid.x - contentX * newScale,
+            y: newMid.y - contentY * newScale,
+          };
+        });
+        lastTouchDist.current = newDist;
+        lastTouchMid.current = newMid;
+      } else if (e.touches.length === 1) {
+        const dx = e.touches[0].clientX - lastTouchMid.current.x;
+        const dy = e.touches[0].clientY - lastTouchMid.current.y;
+        lastTouchMid.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      }
+    };
+
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', handleTouchStart);
+      canvas.removeEventListener('touchmove', handleTouchMove);
+    };
+  }, []);
+
   // Middle mouse button pan
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -122,6 +183,7 @@ export function MapCanvas({ mapData, layers, seed }: MapCanvasProps) {
         top: 0,
         left: 0,
         display: 'block',
+        touchAction: 'none',
       }}
     />
   );
