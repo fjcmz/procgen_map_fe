@@ -30,6 +30,20 @@ export function assignElevation(
     cell.elevation = elev;
   }
 
+  // Normalize elevations so the highest cell reaches 1.0. Without this, FBM
+  // noise rarely exceeds ~0.8 in practice, and after the island falloff the
+  // elevation range is compressed further — preventing mountain biomes from
+  // ever forming.
+  let maxElev = 0;
+  for (const cell of cells) {
+    if (cell.elevation > maxElev) maxElev = cell.elevation;
+  }
+  if (maxElev > 0) {
+    for (const cell of cells) {
+      cell.elevation = cell.elevation / maxElev;
+    }
+  }
+
   // Mark the lowest-elevation cells as water to hit the desired ratio exactly.
   // A threshold comparison against a percentile value breaks when many cells share
   // the minimum elevation (0), so we rank cells directly instead.
