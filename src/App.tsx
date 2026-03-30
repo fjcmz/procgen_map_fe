@@ -15,6 +15,7 @@ const DEFAULT_LAYERS: LayerVisibility = {
   borders: true,
   icons: true,
   labels: true,
+  legend: true,
 };
 
 export default function App() {

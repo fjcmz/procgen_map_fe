@@ -442,6 +442,6 @@ export function render(
   // Layer 8: City labels
   if (layers.labels) drawLabels(ctx, data);
 
-  // Layer 9: Legend (always shown)
-  drawLegend(ctx, data);
+  // Layer 9: Legend
+  if (layers.legend) drawLegend(ctx, data);
 }
