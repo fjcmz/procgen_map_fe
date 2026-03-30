@@ -30,13 +30,14 @@ export function assignElevation(
     cell.elevation = elev;
   }
 
-  // Derive sea level from the desired water ratio using the actual elevation distribution
-  const sorted = cells.map(c => c.elevation).sort((a, b) => a - b);
-  const seaLevel = sorted[Math.floor(waterRatio * (sorted.length - 1))];
-
-  for (const cell of cells) {
-    cell.isWater = cell.elevation < seaLevel;
-  }
+  // Mark the lowest-elevation cells as water to hit the desired ratio exactly.
+  // A threshold comparison against a percentile value breaks when many cells share
+  // the minimum elevation (0), so we rank cells directly instead.
+  const targetWaterCount = Math.round(waterRatio * cells.length);
+  const byElevation = [...cells].sort((a, b) => a.elevation - b.elevation);
+  byElevation.forEach((cell, i) => {
+    cell.isWater = i < targetWaterCount;
+  });
 
   // Mark coast cells
   for (const cell of cells) {
