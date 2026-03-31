@@ -1,7 +1,7 @@
-import type { MapData, LayerVisibility, Cell } from './types';
-import { BIOME_INFO } from './biomes';
+import type { MapData, LayerVisibility, Cell } from '../types';
+import { BIOME_INFO } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
-import { getOwnershipAtYear } from './history';
+import { getOwnershipAtYear } from '../history/history';
 
 // Kingdom colors (semi-transparent fills and border strokes)
 const KINGDOM_COLORS = [

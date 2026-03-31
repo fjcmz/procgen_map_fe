@@ -1,4 +1,4 @@
-import type { Cell, River } from './types';
+import type { Cell, River } from '../types';
 
 const FLOW_THRESHOLD = 4;
 

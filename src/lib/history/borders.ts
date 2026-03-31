@@ -1,4 +1,4 @@
-import type { Cell, City } from './types';
+import type { Cell, City } from '../types';
 
 const MOUNTAIN_THRESHOLD = 0.72;
 

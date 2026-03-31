@@ -1,4 +1,4 @@
-import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData } from './types';
+import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData } from '../types';
 import { generateRoads } from './roads';
 
 const MOUNTAIN_THRESHOLD = 0.72;

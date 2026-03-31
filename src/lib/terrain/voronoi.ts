@@ -1,5 +1,5 @@
 import { Delaunay } from 'd3-delaunay';
-import type { Cell } from './types';
+import type { Cell } from '../types';
 import { seededPRNG } from './noise';
 
 /** Generate evenly-distributed random points using LCG seeded RNG. */
