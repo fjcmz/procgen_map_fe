@@ -4,7 +4,9 @@ This file provides context and guidelines for AI assistants working on this code
 
 ## Project Overview
 
-Procedural fantasy map generator built with React, TypeScript, and Vite. Generates Voronoi-based terrain maps with biomes, rivers, cities, kingdoms, and roads — all deterministic from a seed string.
+Procedural fantasy map generator built with React, TypeScript, and Vite. Generates Voronoi-based terrain maps with biomes and rivers (always), and optionally a full civilizational history (countries, wars, conquests, city placement, kingdom borders, roads) — all deterministic from a seed string.
+
+**Key design principle**: Cities and kingdoms are outputs of the history simulation, not independent pipeline steps. When history is disabled, the map shows terrain only.
 
 ## Commands
 
@@ -23,8 +25,11 @@ There is no test suite. Verify correctness by running `npm run build` (catches t
 All heavy computation runs in `src/workers/mapgen.worker.ts` (a Web Worker). The pipeline is strictly sequential:
 
 ```
-voronoi → elevation → moisture → biomes → rivers → cities → roads → borders
+voronoi → elevation → moisture → biomes → rivers
+  └─ (if generateHistory=true) → history → roads
 ```
+
+The terrain steps (voronoi through rivers) always run. The history step is opt-in via `GenerateRequest.generateHistory`. If history is disabled, the pipeline ends after rivers — no cities, roads, or kingdom borders are generated.
 
 Each step is a pure function in `src/lib/` that takes cells and returns updated cells or derived data.
 
@@ -35,19 +40,31 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/types.ts` | All shared TypeScript types — start here |
 | `src/lib/voronoi.ts` | Cell generation via D3-Delaunay + Lloyd relaxation |
 | `src/lib/noise.ts` | Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers |
-| `src/lib/renderer.ts` | Canvas 2D rendering — the largest file (~450 lines) |
+| `src/lib/history.ts` | History simulation: city placement, year-0 kingdom BFS, year-by-year event loop |
+| `src/lib/renderer.ts` | Canvas 2D rendering — uses historical cell ownership when history data is present |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
-| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, collapsible panel UI |
+| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, history toggle + sim-years slider |
+| `src/components/Timeline.tsx` | Year scrubber + event log panel (rendered only when `mapData.history` exists) |
 | `src/workers/mapgen.worker.ts` | Orchestrates the full generation pipeline, posts progress events |
 
 ### Data Model
 
-The central type is `Cell` (defined in `types.ts`). Every generation step annotates cells with new fields:
+The central type is `Cell` (defined in `types.ts`). Every terrain step annotates cells with new fields:
 
 - `elevation`, `moisture` → set by `elevation.ts` / `moisture.ts`
 - `biome` → set by `biomes.ts`
 - `river`, `flow` → set by `rivers.ts`
-- `kingdom` → set by `borders.ts`
+- `kingdom` → set by `history.ts` (year-0 BFS, updated by renderer at selected year)
+
+`MapData` (returned from worker) carries:
+- `cells` — always present
+- `cities?`, `roads?` — only present when history was generated
+- `history?` — `HistoryData` with `countries`, `years[]`, decade `snapshots`
+
+`HistoryData` structure:
+- `countries: Country[]` — each country has id, name, capitalCellIndex, color, isAlive
+- `years: HistoryYear[]` — per-year events (Wars, Conquests, Merges, Collapses) + sparse `ownershipDeltas`
+- `snapshots` — full `Int16Array` of cell→countryId at every 10th year (for fast scrubbing)
 
 ### Randomness
 
@@ -63,6 +80,8 @@ All randomness goes through the seeded `mulberry32` PRNG in `noise.ts`. Never us
 | `numCells` | `number` | Voronoi cell count (500–100,000) |
 | `waterRatio` | `number` | Fraction of cells that are water (0–1, default 0.4) |
 | `width` / `height` | `number` | Canvas dimensions |
+| `generateHistory` | `boolean` | Whether to run the history simulation (default false) |
+| `numSimYears` | `number` | Years to simulate (50–500, default 200); only used when `generateHistory` is true |
 
 `waterRatio` is implemented by ranking all cells by elevation and marking the lowest `waterRatio * N` as water. This guarantees the exact ratio regardless of the terrain shape, unlike a fixed elevation threshold.
 
@@ -74,11 +93,15 @@ All randomness goes through the seeded `mulberry32` PRNG in `noise.ts`. Never us
 - City icons are drawn as simple SVG-path-like canvas commands
 - `drawBiomeFill` renders land cells first, water cells second — this ensures water always wins at shared polygon edges (Voronoi cell indices have no spatial order, so rendering in index order causes land to bleed over water)
 - The biome legend is drawn on the canvas and controlled by `layers.legend` (part of `LayerVisibility`); it is not a separate React component
+- When `historyData` is present, kingdom borders/fills use `getOwnerAtYear(history, selectedYear, cellIndex)` instead of `cell.kingdom`; city/road/border layers are hidden entirely when no history data exists
+- `getOwnerAtYear` finds the nearest decade snapshot ≤ target year, then replays `ownershipDeltas` forward to the exact year
 
 ### UI Panels
 
 - **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`).
 - **Legend**: toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `renderer.ts` before calling `drawLegend`.
+- **History settings**: "Generate History" checkbox + "Sim years" slider (50–500) appear in the Controls panel. When history is off, the roads/borders/icons/labels layer toggles are hidden (they have no effect without history data).
+- **Timeline panel** (`Timeline.tsx`): rendered below the map canvas in `App.tsx`, only when `mapData.history` exists. Contains a year slider (0 to `numYears`) and a scrollable event log for the selected year. Year changes update `selectedYear` state in `App.tsx`, which triggers a re-render of the canvas.
 
 ## Deployment
 
@@ -91,3 +114,6 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`, which builds and deploy
 - **Cell count performance**: Generation above ~10,000 cells is slow. Default is 5,000. Test UI changes at low cell counts.
 - **Base path**: Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source.
 - **Elevation normalization**: After computing FBM + island-falloff elevations, `elevation.ts` divides all values by the observed maximum so the highest cell always reaches 1.0. Without this, FBM noise in practice tops out around 0.8, and the island mask compresses it further — leaving the Whittaker mountain band (elevation > 0.8) unreachable. Do not remove this normalization step.
+- **History is the cities/kingdoms source**: Do not call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `history.ts` owns that responsibility. Calling both would double-place cities and corrupt kingdom state.
+- **Ownership reconstruction**: `getOwnerAtYear` must apply deltas in strict year order. Out-of-order application produces incorrect borders. The snapshots are keyed by decade (0, 10, 20…); always start from `Math.floor(year / 10) * 10`.
+- **`cell.kingdom` vs history**: `cell.kingdom` is written once by `history.ts` as the year-0 state. The renderer overwrites the visual ownership at the selected year but must never mutate `cell.kingdom` — it is the baseline and is needed to reconstruct history from scratch.

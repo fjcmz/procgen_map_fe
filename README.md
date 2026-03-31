@@ -1,6 +1,6 @@
 # Procedural Fantasy Map Generator
 
-A browser-based procedural fantasy map generator that creates detailed, interactive maps with terrain, rivers, roads, cities, and kingdoms — all from a single seed value.
+A browser-based procedural fantasy map generator that creates detailed, interactive maps with terrain, rivers, roads, cities, kingdoms, and multi-century civilizational history — all from a single seed value.
 
 ## Demo
 
@@ -13,8 +13,10 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Water ratio** — slider to control the percentage of water vs land (0–100%)
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
-- **Settlements** — cities and capitals placed on suitable terrain, connected by roads via A* pathfinding
-- **Kingdoms** — territory assignment with color-coded borders
+- **History simulation** — optional multi-century timeline: countries form, go to war, conquer territory, and collapse; cities and kingdoms are derived from this simulation
+- **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
+- **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
+- **Timeline scrubber** — interactive year slider to replay how kingdoms rose and fell
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, and the biome legend
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
@@ -52,25 +54,29 @@ npm run preview
 3. **Moisture** — separate FBM noise layer with coastal humidity boost
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
-6. **Cities** — capitals and settlements placed on habitable terrain
-7. **Roads** — A* pathfinding connects cities across the terrain
-8. **Borders** — kingdom territories assigned and rendered with color overlays
+6. **History** *(optional)* — if enabled, simulates N years of civilizational history: places capitals/cities on suitable terrain, BFS-assigns initial kingdoms, then runs a year-by-year event loop (wars, conquests, merges, collapses); cities and kingdom borders are derived entirely from this step
+7. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
+
+If history is **disabled**, steps 6–7 are skipped and the map shows terrain only (no cities, roads, or kingdoms).
 
 ## Project Structure
 
 ```
 src/
-├── components/       # React UI components (Controls, MapCanvas, ZoomControls)
+├── components/       # React UI components
+│   ├── Controls.tsx  # Generation parameters, layer toggles, history settings
+│   ├── MapCanvas.tsx # Zoom/pan interaction and canvas lifecycle
+│   ├── Timeline.tsx  # Year scrubber and event log (shown when history enabled)
+│   └── ZoomControls.tsx
 ├── lib/              # Core generation modules
 │   ├── voronoi.ts    # Cell generation
 │   ├── elevation.ts  # Terrain height
 │   ├── moisture.ts   # Water availability
 │   ├── biomes.ts     # Terrain classification
 │   ├── rivers.ts     # River generation
-│   ├── cities.ts     # Settlement placement
-│   ├── roads.ts      # Road pathfinding
-│   ├── borders.ts    # Kingdom territories
-│   ├── renderer.ts   # Canvas rendering
+│   ├── history.ts    # History simulation: city placement, kingdom BFS, year-by-year events
+│   ├── roads.ts      # Road pathfinding (uses history-generated cities)
+│   ├── renderer.ts   # Canvas rendering (uses historical ownership at selected year)
 │   ├── noise.ts      # Seeded noise utilities
 │   ├── noisyEdges.ts # Organic coastline generation
 │   └── types.ts      # TypeScript type definitions
@@ -81,5 +87,7 @@ src/
 ## Architecture Notes
 
 - Map generation runs in a **Web Worker** to keep the UI responsive; progress events drive the loading bar.
-- The **Mulberry32 PRNG** ensures fully deterministic output from any seed string.
+- The **Mulberry32 PRNG** ensures fully deterministic output from any seed string — including history events.
 - Canvas is rendered at native pixel density to avoid blurriness on high-DPI displays.
+- Cities and kingdoms are **only generated when history is enabled** — they are outputs of the history simulation, not independent pipeline steps.
+- The Timeline scrubber reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag.
