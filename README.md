@@ -63,25 +63,33 @@ If history is **disabled**, steps 6–7 are skipped and the map shows terrain on
 
 ```
 src/
-├── components/       # React UI components
-│   ├── Controls.tsx  # Generation parameters, layer toggles, history settings
-│   ├── MapCanvas.tsx # Zoom/pan interaction and canvas lifecycle
-│   ├── Timeline.tsx  # Year scrubber and event log (shown when history enabled)
+├── components/           # React UI components
+│   ├── Controls.tsx      # Generation parameters, layer toggles, history settings
+│   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
+│   ├── Timeline.tsx      # Year scrubber and event log (shown when history enabled)
 │   └── ZoomControls.tsx
-├── lib/              # Core generation modules
-│   ├── voronoi.ts    # Cell generation
-│   ├── elevation.ts  # Terrain height
-│   ├── moisture.ts   # Water availability
-│   ├── biomes.ts     # Terrain classification
-│   ├── rivers.ts     # River generation
-│   ├── history.ts    # History simulation: city placement, kingdom BFS, year-by-year events
-│   ├── roads.ts      # Road pathfinding (uses history-generated cities)
-│   ├── renderer.ts   # Canvas rendering (uses historical ownership at selected year)
-│   ├── noise.ts      # Seeded noise utilities
-│   ├── noisyEdges.ts # Organic coastline generation
-│   └── types.ts      # TypeScript type definitions
+├── lib/                  # Core generation modules
+│   ├── types.ts          # All shared TypeScript type definitions
+│   ├── terrain/          # Physical map generation
+│   │   ├── noise.ts      # Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers
+│   │   ├── voronoi.ts    # Cell generation via D3-Delaunay + Lloyd relaxation
+│   │   ├── elevation.ts  # FBM elevation + island falloff + water ratio marking
+│   │   ├── moisture.ts   # FBM moisture assignment
+│   │   ├── biomes.ts     # Whittaker biome classification + color palette
+│   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
+│   │   └── index.ts
+│   ├── history/          # Civilizational simulation
+│   │   ├── history.ts    # Year-by-year simulation + getOwnershipAtYear
+│   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
+│   │   ├── cities.ts     # City placement with spacing constraints
+│   │   ├── roads.ts      # A* road pathfinding between cities
+│   │   └── index.ts
+│   └── renderer/         # Canvas drawing logic
+│       ├── renderer.ts   # All rendering layers: biomes, borders, icons, legend
+│       ├── noisyEdges.ts # Recursive midpoint displacement for organic coastlines
+│       └── index.ts
 └── workers/
-    └── mapgen.worker.ts  # Web Worker for background generation
+    └── mapgen.worker.ts  # Web Worker — orchestrates the full generation pipeline
 ```
 
 ## Architecture Notes
