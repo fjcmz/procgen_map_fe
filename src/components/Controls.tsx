@@ -10,6 +10,10 @@ interface ControlsProps {
   onWaterRatioChange: (r: number) => void;
   layers: LayerVisibility;
   onLayerToggle: (key: keyof LayerVisibility) => void;
+  generateHistory: boolean;
+  onGenerateHistoryToggle: () => void;
+  numSimYears: number;
+  onNumSimYearsChange: (n: number) => void;
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
@@ -35,6 +39,10 @@ export function Controls({
   onWaterRatioChange,
   layers,
   onLayerToggle,
+  generateHistory,
+  onGenerateHistoryToggle,
+  numSimYears,
+  onNumSimYearsChange,
   onGenerate,
   generating,
   progress,
@@ -95,6 +103,34 @@ export function Controls({
               disabled={generating}
             />
           </label>
+
+          <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            <input
+              type="checkbox"
+              checked={generateHistory}
+              onChange={onGenerateHistoryToggle}
+              disabled={generating}
+            />
+            Generate History
+          </label>
+
+          {generateHistory && (
+            <label style={styles.label}>
+              Sim Years ({numSimYears})
+              <input
+                style={styles.slider}
+                type="range"
+                min={50}
+                max={500}
+                step={50}
+                value={numSimYears}
+                onChange={(e: ChangeEvent<HTMLInputElement>) =>
+                  onNumSimYearsChange(Number(e.target.value))
+                }
+                disabled={generating}
+              />
+            </label>
+          )}
 
           <div style={styles.label}>
             Layers

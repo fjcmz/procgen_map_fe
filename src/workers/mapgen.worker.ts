@@ -1,20 +1,18 @@
 import type { GenerateRequest, WorkerMessage } from '../lib/types';
-import { createNoiseSamplers } from '../lib/noise';
+import { createNoiseSamplers, seededPRNG } from '../lib/noise';
 import { buildCellGraph } from '../lib/voronoi';
 import { assignElevation } from '../lib/elevation';
 import { assignMoisture } from '../lib/moisture';
 import { assignBiomes } from '../lib/biomes';
 import { generateRivers } from '../lib/rivers';
-import { placeCities } from '../lib/cities';
-import { generateRoads } from '../lib/roads';
-import { assignKingdoms } from '../lib/borders';
+import { generateHistory } from '../lib/history';
 
 function post(msg: WorkerMessage): void {
   self.postMessage(msg);
 }
 
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
-  const { seed, numCells, width, height, waterRatio } = e.data;
+  const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = e.data;
 
   try {
     post({ type: 'PROGRESS', step: 'Building Voronoi diagram…', pct: 5 });
@@ -33,20 +31,24 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     post({ type: 'PROGRESS', step: 'Carving rivers…', pct: 55 });
     const rivers = generateRivers(cells);
 
-    post({ type: 'PROGRESS', step: 'Placing cities…', pct: 65 });
-    const cities = placeCities(cells, width);
+    let cities: ReturnType<typeof generateHistory>['cities'] = [];
+    let roads: ReturnType<typeof generateHistory>['roads'] = [];
+    let history: ReturnType<typeof generateHistory>['historyData'] | undefined;
 
-    post({ type: 'PROGRESS', step: 'Building roads…', pct: 75 });
-    const roads = generateRoads(cells, cities);
-
-    post({ type: 'PROGRESS', step: 'Drawing kingdom borders…', pct: 85 });
-    assignKingdoms(cells, cities);
+    if (doHistory) {
+      post({ type: 'PROGRESS', step: 'Simulating history…', pct: 65 });
+      const rng = seededPRNG(seed + '_history');
+      const result = generateHistory(cells, width, rng, numSimYears ?? 200);
+      cities = result.cities;
+      roads = result.roads;
+      history = result.historyData;
+    }
 
     post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
 
     post({
       type: 'DONE',
-      data: { cells, rivers, cities, roads, width, height },
+      data: { cells, rivers, cities, roads, width, height, history },
     });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });
