@@ -1,6 +1,7 @@
 import type { MapData, LayerVisibility, Cell } from './types';
 import { BIOME_INFO } from './biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
+import { getOwnershipAtYear } from './history';
 
 // Kingdom colors (semi-transparent fills and border strokes)
 const KINGDOM_COLORS = [
@@ -123,12 +124,23 @@ function drawRivers(
 
 function drawKingdomBorders(
   ctx: CanvasRenderingContext2D,
-  cells: Cell[]
+  cells: Cell[],
+  ownershipOverride?: Int16Array
 ): void {
+  const getOwner = (cell: Cell): number | null => {
+    if (ownershipOverride) {
+      const o = ownershipOverride[cell.index];
+      return o >= 0 ? o : null;
+    }
+    return cell.kingdom;
+  };
+
   // Fill kingdom regions
   for (const cell of cells) {
-    if (cell.kingdom === null || cell.isWater || cell.vertices.length < 2) continue;
-    const kc = KINGDOM_COLORS[cell.kingdom % KINGDOM_COLORS.length];
+    if (cell.isWater || cell.vertices.length < 2) continue;
+    const owner = getOwner(cell);
+    if (owner === null) continue;
+    const kc = KINGDOM_COLORS[owner % KINGDOM_COLORS.length];
     ctx.fillStyle = kc.fill;
     cellPath(ctx, cell);
     ctx.fill();
@@ -141,10 +153,12 @@ function drawKingdomBorders(
 
   for (const cell of cells) {
     if (cell.isWater) continue;
+    const cellOwner = getOwner(cell);
     for (const ni of cell.neighbors) {
       const neighbor = cells[ni];
       if (neighbor.isWater) continue;
-      if (cell.kingdom === neighbor.kingdom) continue;
+      const neighborOwner = getOwner(neighbor);
+      if (cellOwner === neighborOwner) continue;
       const key = [cell.index, ni].sort().join('-');
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
@@ -154,8 +168,8 @@ function drawKingdomBorders(
       );
       if (sharedVerts.length < 2) continue;
 
-      const kc = cell.kingdom !== null
-        ? KINGDOM_COLORS[cell.kingdom % KINGDOM_COLORS.length]
+      const kc = cellOwner !== null
+        ? KINGDOM_COLORS[cellOwner % KINGDOM_COLORS.length]
         : { stroke: '#888' };
       ctx.strokeStyle = kc.stroke;
       ctx.beginPath();
@@ -407,7 +421,8 @@ export function render(
   ctx: CanvasRenderingContext2D,
   data: MapData,
   layers: LayerVisibility,
-  seed: string
+  seed: string,
+  selectedYear?: number
 ): void {
   initNoisyEdges(seed);
 
@@ -431,7 +446,13 @@ export function render(
   if (layers.rivers) drawRivers(ctx, data);
 
   // Layer 5: Kingdom borders
-  if (layers.borders) drawKingdomBorders(ctx, data.cells);
+  if (layers.borders) {
+    const ownershipAtYear =
+      data.history && selectedYear !== undefined
+        ? getOwnershipAtYear(data.history, selectedYear)
+        : undefined;
+    drawKingdomBorders(ctx, data.cells, ownershipAtYear);
+  }
 
   // Layer 6: Roads
   if (layers.roads) drawRoads(ctx, data);

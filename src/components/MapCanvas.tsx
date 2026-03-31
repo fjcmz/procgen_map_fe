@@ -6,6 +6,7 @@ interface MapCanvasProps {
   mapData: MapData | null;
   layers: LayerVisibility;
   seed: string;
+  selectedYear?: number;
 }
 
 interface Transform {
@@ -36,7 +37,7 @@ function getTouchMid(t1: Touch, t2: Touch) {
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -79,9 +80,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     // Apply zoom/pan so the renderer draws in map-coordinate space,
     // which lands correctly at whatever zoom level we're at.
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed);
+    render(ctx, mapData, layers, seed, selectedYear);
     ctx.resetTransform();
-  }, [mapData, layers, seed, transform]);
+  }, [mapData, layers, seed, transform, selectedYear]);
 
   // Wheel zoom centered on cursor — uses RAF to coalesce rapid scroll events
   useEffect(() => {

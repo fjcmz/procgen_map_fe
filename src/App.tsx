@@ -4,6 +4,7 @@ import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle } from './components/MapCanvas';
 import { Controls } from './components/Controls';
 import { ZoomControls } from './components/ZoomControls';
+import { Timeline } from './components/Timeline';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -26,6 +27,9 @@ export default function App() {
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
+  const [generateHistory, setGenerateHistory] = useState(false);
+  const [numSimYears, setNumSimYears] = useState(200);
+  const [selectedYear, setSelectedYear] = useState(0);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -61,6 +65,9 @@ export default function App() {
         setProgress({ step: msg.step, pct: msg.pct });
       } else if (msg.type === 'DONE') {
         setMapData(msg.data);
+        if (msg.data.history) {
+          setSelectedYear(msg.data.history.numYears);
+        }
         setGenerating(false);
         setProgress(null);
         worker.terminate();
@@ -78,8 +85,17 @@ export default function App() {
       setProgress(null);
     };
 
-    worker.postMessage({ type: 'GENERATE', seed, numCells, width, height, waterRatio });
-  }, [generating, seed, numCells, waterRatio]);
+    worker.postMessage({
+      type: 'GENERATE',
+      seed,
+      numCells,
+      width,
+      height,
+      waterRatio,
+      generateHistory,
+      numSimYears,
+    });
+  }, [generating, seed, numCells, waterRatio, generateHistory, numSimYears]);
 
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -87,7 +103,13 @@ export default function App() {
 
   return (
     <>
-      <MapCanvas ref={mapCanvasRef} mapData={mapData} layers={layers} seed={seed} />
+      <MapCanvas
+        ref={mapCanvasRef}
+        mapData={mapData}
+        layers={layers}
+        seed={seed}
+        selectedYear={mapData?.history ? selectedYear : undefined}
+      />
       <ZoomControls
         onZoomIn={() => mapCanvasRef.current?.zoomIn()}
         onZoomOut={() => mapCanvasRef.current?.zoomOut()}
@@ -102,10 +124,21 @@ export default function App() {
         onWaterRatioChange={setWaterRatio}
         layers={layers}
         onLayerToggle={handleLayerToggle}
+        generateHistory={generateHistory}
+        onGenerateHistoryToggle={() => setGenerateHistory(v => !v)}
+        numSimYears={numSimYears}
+        onNumSimYearsChange={setNumSimYears}
         onGenerate={handleGenerate}
         generating={generating}
         progress={progress}
       />
+      {mapData?.history && (
+        <Timeline
+          historyData={mapData.history}
+          selectedYear={selectedYear}
+          onYearChange={setSelectedYear}
+        />
+      )}
     </>
   );
 }

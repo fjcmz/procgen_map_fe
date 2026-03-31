@@ -49,6 +49,38 @@ export interface Road {
   path: number[];
 }
 
+export interface Country {
+  id: number;
+  name: string;
+  capitalCellIndex: number;
+  isAlive: boolean;
+  absorbedById?: number;
+}
+
+export type HistoryEventType = 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION';
+
+export interface HistoryEvent {
+  type: HistoryEventType;
+  year: number;
+  initiatorId: number;
+  targetId?: number;
+  description: string;
+  cellsChanged?: number[];
+}
+
+export interface HistoryYear {
+  year: number;
+  events: HistoryEvent[];
+  ownershipDelta: Map<number, number>;
+}
+
+export interface HistoryData {
+  countries: Country[];
+  years: HistoryYear[];
+  numYears: number;
+  snapshots: Record<number, Int16Array>;
+}
+
 export interface MapData {
   cells: Cell[];
   rivers: River[];
@@ -56,6 +88,7 @@ export interface MapData {
   roads: Road[];
   width: number;
   height: number;
+  history?: HistoryData;
 }
 
 export interface GenerateRequest {
@@ -65,6 +98,8 @@ export interface GenerateRequest {
   width: number;
   height: number;
   waterRatio: number;
+  generateHistory?: boolean;
+  numSimYears?: number;
 }
 
 export type WorkerMessage =
