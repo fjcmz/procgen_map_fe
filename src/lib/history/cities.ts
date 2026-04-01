@@ -1,4 +1,4 @@
-import type { Cell, City } from './types';
+import type { Cell, City } from '../types';
 
 const CITY_NAMES = [
   'Ironhold', 'Ashenvale', 'Stormgate', 'Rivenmoor', 'Coldhaven',

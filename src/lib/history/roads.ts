@@ -1,4 +1,4 @@
-import type { Cell, City, Road } from './types';
+import type { Cell, City, Road } from '../types';
 
 function terrainCost(cell: Cell): number {
   if (cell.isWater) return 999;

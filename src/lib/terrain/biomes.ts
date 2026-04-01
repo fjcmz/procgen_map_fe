@@ -1,4 +1,4 @@
-import type { Cell, BiomeType, BiomeInfo } from './types';
+import type { Cell, BiomeType, BiomeInfo } from '../types';
 
 // Whittaker biome lookup: [elevationBand][moistureBand]
 // elevation bands: <0.3, 0.3-0.6, 0.6-0.8, 0.8+

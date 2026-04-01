@@ -1,4 +1,4 @@
-import type { Cell } from './types';
+import type { Cell } from '../types';
 import type { NoiseSampler } from './noise';
 import { fbm } from './noise';
 

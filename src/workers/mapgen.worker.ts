@@ -1,10 +1,5 @@
 import type { GenerateRequest, WorkerMessage } from '../lib/types';
-import { createNoiseSamplers, seededPRNG } from '../lib/noise';
-import { buildCellGraph } from '../lib/voronoi';
-import { assignElevation } from '../lib/elevation';
-import { assignMoisture } from '../lib/moisture';
-import { assignBiomes } from '../lib/biomes';
-import { generateRivers } from '../lib/rivers';
+import { createNoiseSamplers, seededPRNG, buildCellGraph, assignElevation, assignMoisture, assignBiomes, generateRivers } from '../lib/terrain';
 import { generateHistory } from '../lib/history';
 
 function post(msg: WorkerMessage): void {

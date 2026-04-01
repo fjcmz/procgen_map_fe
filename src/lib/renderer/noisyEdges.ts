@@ -1,4 +1,4 @@
-import { seededPRNG } from './noise';
+import { seededPRNG } from '../terrain/noise';
 
 type Point = [number, number];
 
