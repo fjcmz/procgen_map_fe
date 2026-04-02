@@ -17,7 +17,8 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
-- **Timeline scrubber** — interactive year slider to replay how kingdoms rose and fell
+- **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider
+- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with current-year highlighting and auto-scroll
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, region borders, and resource icons
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
@@ -68,7 +69,7 @@ src/
 ├── components/           # React UI components
 │   ├── Controls.tsx      # Generation parameters, layer toggles, history settings
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
-│   ├── Timeline.tsx      # Year scrubber and event log (shown when history enabled)
+│   ├── Timeline.tsx      # Playback controls, year slider, and cumulative event log side panel
 │   └── ZoomControls.tsx
 ├── lib/                  # Core generation modules
 │   ├── types.ts          # All shared TypeScript type definitions
@@ -107,4 +108,4 @@ src/
 - The **Mulberry32 PRNG** ensures fully deterministic output from any seed string — including history events.
 - Canvas is rendered at native pixel density to avoid blurriness on high-DPI displays.
 - Cities and kingdoms are **only generated when history is enabled** — they are outputs of the history simulation, not independent pipeline steps.
-- The Timeline scrubber reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag.
+- The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in a side panel shows all events up to the selected year.
