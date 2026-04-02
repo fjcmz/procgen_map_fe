@@ -40,14 +40,18 @@ export class YearGenerator {
     }
     year.worldPopulation = worldPop;
 
-    // Step 4: Increase populations using biome growth multiplier
+    // Step 4: Increase populations using biome growth multiplier + growth-tech multiplier
     for (const city of world.mapUsableCities.values()) {
       const region = world.mapRegions.get(city.regionId);
       if (region) {
         const growthRate = REGION_BIOME_GROWTH[region.biome];
+        // Growth tech multiplier: if city has 'growth' tech, multiply by (1 + level/10)
+        let techMultiplier = 1;
+        const growthTech = city.knownTechs.get('growth');
+        if (growthTech) techMultiplier = 1 + growthTech.level / 10;
         // growthRate values (0.3-1.5) are percentage-point annual growth rates
         city.currentPopulation = Math.floor(
-          city.currentPopulation * (1 + growthRate / 100)
+          city.currentPopulation * (1 + (growthRate / 100) * techMultiplier)
         );
       }
     }
@@ -138,54 +142,101 @@ export class YearGenerator {
       region.updateHasResources();
     }
 
-    // --- Phase 5: Generate events in order ---
+    // --- Phase 5: Generate events in order, with per-type size functions ---
 
-    // Foundation
-    const foundation = foundationGenerator.generate(rng, year, world);
-    if (foundation) year.foundations.push(foundation);
+    // Size helper: random [0, max(2, x)-1], floored, min 0
+    const rndSize = (n: number, offset: number) => Math.max(0, Math.floor(rng() * n) + offset);
 
-    // Contact
-    const contact = contactGenerator.generate(rng, year, world);
-    if (contact) year.contacts.push(contact);
+    // 1. Foundations: random [0, max(2, toFound/300)-1]
+    const toFound = world.mapCities.size - world.mapUsableCities.size;
+    const foundationCount = Math.floor(rng() * Math.max(2, Math.floor(toFound / 300)));
+    for (let i = 0; i < foundationCount; i++) {
+      const f = foundationGenerator.generate(rng, year, world);
+      if (f) year.foundations.push(f); else break;
+    }
 
-    // Country
-    const country = countryGenerator.generate(rng, year, world);
-    if (country) year.countries.push(country);
+    // 2. Contacts: rndSize(30, 2)
+    const contactCount = rndSize(30, 2);
+    for (let i = 0; i < contactCount; i++) {
+      const c = contactGenerator.generate(rng, year, world);
+      if (c) year.contacts.push(c); else break;
+    }
 
-    // Illustrate
-    const illustrate = illustrateGenerator.generate(rng, year, world);
-    if (illustrate) year.illustrates.push(illustrate);
+    // 3. Countries: rndSize(10, 0)
+    const countryCount = rndSize(10, 0);
+    for (let i = 0; i < countryCount; i++) {
+      const c = countryGenerator.generate(rng, year, world);
+      if (c) year.countries.push(c); else break;
+    }
 
-    // Religion
-    const religion = religionGenerator.generate(rng, year, world);
-    if (religion) year.religions.push(religion);
+    // 4. Illustrates: random [0, max(2, usableCities/500)-1]
+    const illustrateCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
+    for (let i = 0; i < illustrateCount; i++) {
+      const il = illustrateGenerator.generate(rng, year, world);
+      if (il) year.illustrates.push(il); else break;
+    }
 
-    // Trade
-    const trade = tradeGenerator.generate(rng, year, world);
-    if (trade) year.trades.push(trade);
+    // 5. Wonders: random [0, max(2, usableCities/500)-1]
+    const wonderCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
+    for (let i = 0; i < wonderCount; i++) {
+      const w = wonderGenerator.generate(rng, year, world);
+      if (w) year.wonders.push(w); else break;
+    }
 
-    // Wonder
-    const wonder = wonderGenerator.generate(rng, year, world);
-    if (wonder) year.wonders.push(wonder);
+    // 6. Religions: often zero (two consecutive boolean checks), else up to scaled count
+    if (rng() < 0.5 && rng() < 0.5) {
+      let withoutReligion = 0;
+      for (const city of world.mapUsableCities.values()) {
+        if (city.religions.size === 0) withoutReligion++;
+      }
+      const religionMax = Math.max(2, Math.floor(withoutReligion / 1000));
+      const religionCount = Math.floor(rng() * religionMax);
+      for (let i = 0; i < religionCount; i++) {
+        const r = religionGenerator.generate(rng, year, world);
+        if (r) year.religions.push(r); else break;
+      }
+    }
 
-    // Cataclysm
-    const cataclysm = cataclysmGenerator.generate(rng, year, world);
-    if (cataclysm) year.cataclysms.push(cataclysm);
+    // 7. Trades: roll(6, 10)
+    {
+      let tradesRoll = 0;
+      for (let i = 0; i < 6; i++) tradesRoll += Math.floor(rng() * 10) + 1;
+      for (let i = 0; i < tradesRoll; i++) {
+        const t = tradeGenerator.generate(rng, year, world);
+        if (t) year.trades.push(t); else break;
+      }
+    }
 
-    // War
-    const war = warGenerator.generate(rng, year, world);
-    if (war) year.wars.push(war);
+    // 8. Cataclysms: rndSize(6, -3)
+    const cataclysmCount = rndSize(6, -3);
+    for (let i = 0; i < cataclysmCount; i++) {
+      const c = cataclysmGenerator.generate(rng, year, world);
+      if (c) year.cataclysms.push(c); else break;
+    }
 
-    // Tech
-    const tech = techGenerator.generate(rng, year, world);
-    if (tech) year.techs.push(tech);
+    // 9. Wars: random [0, max(2, countries/50)-1]
+    const warCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapCountries.size / 50)));
+    for (let i = 0; i < warCount; i++) {
+      const w = warGenerator.generate(rng, year, world);
+      if (w) year.wars.push(w); else break;
+    }
 
-    // Conquer
-    const conquer = conquerGenerator.generate(rng, year, world);
-    if (conquer) {
-      year.conquers.push(conquer);
+    // 10. Techs: rndSize(5, 1)
+    const techCount = rndSize(5, 1);
+    for (let i = 0; i < techCount; i++) {
+      const t = techGenerator.generate(rng, year, world);
+      if (t) year.techs.push(t); else break;
+    }
 
-      // Empire: triggered by conquer event where conqueror is not in an empire
+    // 11. Conquers: rndSize(4, 1)
+    const conquerCount = rndSize(4, 1);
+    for (let i = 0; i < conquerCount; i++) {
+      const c = conquerGenerator.generate(rng, year, world);
+      if (c) year.conquers.push(c); else break;
+    }
+
+    // 12. Empires: exactly conquers.size() attempts (one per conquer this year)
+    for (const conquer of year.conquers) {
       const empire = empireGenerator.generate(rng, year, conquer);
       if (empire) year.empires.push(empire);
     }
