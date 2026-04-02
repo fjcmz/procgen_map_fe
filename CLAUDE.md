@@ -96,10 +96,12 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/timeline/Merge.ts` | Merge placeholder interface — reserved for future peaceful country merging |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
-| `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons, legend |
+| `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons |
+| `src/components/Draggable.tsx` | Reusable drag-to-reposition wrapper using Pointer Events; drag handles identified by `data-drag-handle` attribute; viewport clamping keeps panels visible; `touch-action: none` on handles for mobile; `baseTransform` prop for combining CSS transforms |
+| `src/components/Legend.tsx` | Draggable biome legend React component (replaces the old canvas-drawn legend); visibility controlled by `layers.legend` |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
 | `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, history toggle + sim-years slider |
-| `src/components/Timeline.tsx` | Playback controls (play/pause, step ±1/±10), year slider, and cumulative event log side panel (rendered only when `mapData.history` exists) |
+| `src/components/Timeline.tsx` | Two independent draggable panels: (1) bottom timeline controls (play/pause, step ±1/±10, year slider), (2) right-side event log (collapsible via ▴/▾ toggle). Rendered only when `mapData.history` exists |
 | `src/workers/mapgen.worker.ts` | Orchestrates terrain pipeline + delegates to `HistoryGenerator` for history, posts progress events |
 
 Each subdirectory has an `index.ts` that re-exports its public API.
@@ -207,19 +209,20 @@ All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`. 
 - Coastlines use noisy edges from `renderer/noisyEdges.ts` for an organic look
 - City icons are drawn as simple SVG-path-like canvas commands
 - `drawBiomeFill` renders land cells first, water cells second — this ensures water always wins at shared polygon edges (Voronoi cell indices have no spatial order, so rendering in index order causes land to bleed over water)
-- The biome legend is drawn on the canvas and controlled by `layers.legend` (part of `LayerVisibility`); it is not a separate React component
+- The biome legend is a React overlay component (`Legend.tsx`), not drawn on the canvas; it is controlled by `layers.legend` (part of `LayerVisibility`) and rendered in `App.tsx`
 - When `historyData` is present, kingdom borders/fills use `getOwnerAtYear(history, selectedYear, cellIndex)` instead of `cell.kingdom`; city/road/border layers are hidden entirely when no history data exists
 - `getOwnerAtYear` finds the nearest decade snapshot ≤ target year, then replays `ownershipDeltas` forward to the exact year
 
 ### UI Panels
 
 - **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`).
-- **Legend**: toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `renderer/renderer.ts` before calling `drawLegend`.
+- **Legend** (`Legend.tsx`): a draggable React overlay component. Toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `App.tsx`. Defaults to bottom-left position.
 - **History settings**: "Generate History" checkbox + "Sim years" slider (50–500) appear in the Controls panel. When history is off, the roads/borders/icons/labels layer toggles are hidden (they have no effect without history data).
-- **Timeline panel** (`Timeline.tsx`): rendered only when `mapData.history` exists. Two parts:
-  - **Bottom controls**: year slider (0 to `numYears`), play/pause auto-advance (200ms per year), step buttons (±1, ±10 years). Timeline starts at year 0 after generation. Play restarts from 0 if already at the end. Dragging the slider or pressing step buttons pauses auto-play.
-  - **Event log side panel** (right side): toggleable via "Show/Hide Log" button. Shows a cumulative list of all events from year 0 to the selected year, with year labels and event-type icons. Current-year events are highlighted. Auto-scrolls to the latest events as the year advances.
+- **Timeline panel** (`Timeline.tsx`): rendered only when `mapData.history` exists. Two independent draggable panels:
+  - **Bottom controls**: draggable panel (centered at bottom). Year slider (0 to `numYears`), play/pause auto-advance (200ms per year), step buttons (±1, ±10 years). Timeline starts at year 0 after generation. Play restarts from 0 if already at the end. Dragging the slider or pressing step buttons pauses auto-play.
+  - **Event log side panel** (defaults to top-right): draggable and collapsible (▴/▾ button in header). Toggleable via "Show/Hide Log" button in the timeline controls. Shows a cumulative list of all events from year 0 to the selected year, with year labels and event-type icons. Current-year events are highlighted. Auto-scrolls to the latest events as the year advances.
   - Year changes update `selectedYear` state in `App.tsx`, which triggers a re-render of the canvas.
+- **Draggable behavior** (`Draggable.tsx`): all draggable panels use `data-drag-handle` attributes on their title bars. Drag uses Pointer Events API (works on desktop and mobile). Panels are clamped so at least 40px remains visible within the viewport. Drag handles set `touch-action: none` to prevent browser scroll/pan interference on mobile. Re-clamps on window resize/orientation change.
 
 ## Deployment
 
