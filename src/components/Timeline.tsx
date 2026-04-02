@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
 import type { HistoryData, HistoryEvent } from '../lib/types';
+import { Draggable } from './Draggable';
 
 interface TimelineProps {
   historyData: HistoryData;
@@ -49,6 +50,7 @@ const PLAY_INTERVAL_MS = 200;
 export function Timeline({ historyData, selectedYear, onYearChange }: TimelineProps) {
   const [playing, setPlaying] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
+  const [logCollapsed, setLogCollapsed] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -117,90 +119,110 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
   return (
     <>
       {/* Bottom timeline controls */}
-      <div style={styles.panel}>
-        <div style={styles.header}>
-          <span style={styles.title}>History</span>
-          <span style={styles.info}>
-            Year {selectedYear} / {maxYear} &middot; {livingCount}/{totalCount} nations &middot; {currentYearEvents} events
-          </span>
-          <button
-            style={styles.logToggle}
-            onClick={() => setLogOpen((o: boolean) => !o)}
-            title={logOpen ? 'Hide event log' : 'Show event log'}
-          >
-            {logOpen ? 'Hide Log' : 'Show Log'}
-          </button>
-        </div>
+      <Draggable
+        defaultPosition={{ bottom: 16, left: '50%' }}
+        style={{ zIndex: 10 }}
+        baseTransform="translateX(-50%)"
+      >
+        <div style={styles.panel}>
+          <div style={styles.header} data-drag-handle>
+            <span style={styles.title}>History</span>
+            <span style={styles.info}>
+              Year {selectedYear} / {maxYear} &middot; {livingCount}/{totalCount} nations &middot; {currentYearEvents} events
+            </span>
+            <button
+              style={styles.logToggle}
+              onClick={() => setLogOpen((o: boolean) => !o)}
+              title={logOpen ? 'Hide event log' : 'Show event log'}
+            >
+              {logOpen ? 'Hide Log' : 'Show Log'}
+            </button>
+          </div>
 
-        <div style={styles.sliderRow}>
-          <span style={styles.yearLabel}>0</span>
-          <input
-            type="range"
-            min={0}
-            max={maxYear}
-            value={selectedYear}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => {
-              setPlaying(false);
-              onYearChange(Number(e.target.value));
-            }}
-            style={styles.slider}
-          />
-          <span style={styles.yearLabel}>{maxYear}</span>
-        </div>
+          <div style={styles.sliderRow}>
+            <span style={styles.yearLabel}>0</span>
+            <input
+              type="range"
+              min={0}
+              max={maxYear}
+              value={selectedYear}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => {
+                setPlaying(false);
+                onYearChange(Number(e.target.value));
+              }}
+              style={styles.slider}
+            />
+            <span style={styles.yearLabel}>{maxYear}</span>
+          </div>
 
-        <div style={styles.controls}>
-          <button style={styles.btn} onClick={() => step(-10)} title="Back 10 years">
-            &laquo; 10
-          </button>
-          <button style={styles.btn} onClick={() => step(-1)} title="Back 1 year">
-            &lsaquo; 1
-          </button>
-          <button style={{ ...styles.btn, ...styles.playBtn }} onClick={togglePlay} title={playing ? 'Pause' : 'Play'}>
-            {playing ? '\u23F8' : '\u25B6'}
-          </button>
-          <button style={styles.btn} onClick={() => step(1)} title="Forward 1 year">
-            1 &rsaquo;
-          </button>
-          <button style={styles.btn} onClick={() => step(10)} title="Forward 10 years">
-            10 &raquo;
-          </button>
+          <div style={styles.controls}>
+            <button style={styles.btn} onClick={() => step(-10)} title="Back 10 years">
+              &laquo; 10
+            </button>
+            <button style={styles.btn} onClick={() => step(-1)} title="Back 1 year">
+              &lsaquo; 1
+            </button>
+            <button style={{ ...styles.btn, ...styles.playBtn }} onClick={togglePlay} title={playing ? 'Pause' : 'Play'}>
+              {playing ? '\u23F8' : '\u25B6'}
+            </button>
+            <button style={styles.btn} onClick={() => step(1)} title="Forward 1 year">
+              1 &rsaquo;
+            </button>
+            <button style={styles.btn} onClick={() => step(10)} title="Forward 10 years">
+              10 &raquo;
+            </button>
+          </div>
         </div>
-      </div>
+      </Draggable>
 
       {/* Side panel event log */}
       {logOpen && (
-        <div style={styles.logPanel}>
-          <div style={styles.logHeader}>
-            <span style={styles.logTitle}>Event Log</span>
-            <span style={styles.logCount}>{cumulativeEvents.length} events</span>
-          </div>
-          <div style={styles.logList}>
-            {cumulativeEvents.length === 0 ? (
-              <div style={styles.noEvents}>No events yet.</div>
-            ) : (
-              cumulativeEvents.map((item, i) => {
-                const color = EVENT_COLORS[item.event.type] ?? '#888888';
-                return (
-                <div
-                  key={i}
-                  style={{
-                    ...styles.logEvent,
-                    borderLeft: `3px solid ${color}`,
-                    background: item.year === selectedYear
-                      ? `${color}22`
-                      : `${color}0d`,
-                  }}
-                >
-                  <span style={styles.logYear}>Y{item.year}</span>
-                  <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
-                  <span style={styles.logDesc}>{item.event.description}</span>
-                </div>
-                );
-              })
+        <Draggable
+          defaultPosition={{ top: 16, right: 16 }}
+          style={{ zIndex: 10 }}
+        >
+          <div style={styles.logPanel}>
+            <div style={styles.logHeader} data-drag-handle>
+              <span style={styles.logTitle}>Event Log</span>
+              <span style={styles.logCount}>{cumulativeEvents.length} events</span>
+              <button
+                style={styles.collapseBtn}
+                onClick={() => setLogCollapsed(c => !c)}
+                title={logCollapsed ? 'Expand' : 'Collapse'}
+              >
+                {logCollapsed ? '\u25BE' : '\u25B4'}
+              </button>
+            </div>
+            {!logCollapsed && (
+              <div style={styles.logList}>
+                {cumulativeEvents.length === 0 ? (
+                  <div style={styles.noEvents}>No events yet.</div>
+                ) : (
+                  cumulativeEvents.map((item, i) => {
+                    const color = EVENT_COLORS[item.event.type] ?? '#888888';
+                    return (
+                    <div
+                      key={i}
+                      style={{
+                        ...styles.logEvent,
+                        borderLeft: `3px solid ${color}`,
+                        background: item.year === selectedYear
+                          ? `${color}22`
+                          : `${color}0d`,
+                      }}
+                    >
+                      <span style={styles.logYear}>Y{item.year}</span>
+                      <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
+                      <span style={styles.logDesc}>{item.event.description}</span>
+                    </div>
+                    );
+                  })
+                )}
+                <div ref={logEndRef} />
+              </div>
             )}
-            <div ref={logEndRef} />
           </div>
-        </div>
+        </Draggable>
       )}
     </>
   );
@@ -208,10 +230,6 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
 
 const styles: Record<string, React.CSSProperties> = {
   panel: {
-    position: 'fixed',
-    bottom: 16,
-    left: '50%',
-    transform: 'translateX(-50%)',
     width: 520,
     maxWidth: 'calc(100vw - 32px)',
     background: 'rgba(255,248,230,0.93)',
@@ -222,16 +240,18 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: '#2a1a00',
     boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
-    zIndex: 10,
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
+    userSelect: 'none',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
+    cursor: 'grab',
+    touchAction: 'none',
   },
   title: {
     fontWeight: 'bold',
@@ -297,9 +317,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
   // Side panel styles
   logPanel: {
-    position: 'fixed',
-    top: 16,
-    right: 16,
     width: 300,
     maxHeight: 'calc(100vh - 120px)',
     background: 'rgba(255,248,230,0.93)',
@@ -309,10 +326,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 12,
     color: '#2a1a00',
     boxShadow: '0 4px 16px rgba(0,0,0,0.35)',
-    zIndex: 10,
     display: 'flex',
     flexDirection: 'column',
     overflow: 'hidden',
+    userSelect: 'none',
   },
   logHeader: {
     display: 'flex',
@@ -320,6 +337,9 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     padding: '10px 12px 8px',
     borderBottom: '1px solid #d4b896',
+    cursor: 'grab',
+    touchAction: 'none',
+    gap: 8,
   },
   logTitle: {
     fontWeight: 'bold',
@@ -331,6 +351,18 @@ const styles: Record<string, React.CSSProperties> = {
   logCount: {
     fontSize: 11,
     color: '#7a5a30',
+    flex: 1,
+    textAlign: 'right',
+  },
+  collapseBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 14,
+    color: '#5a3a10',
+    padding: '0 2px',
+    lineHeight: 1,
+    flexShrink: 0,
   },
   logList: {
     flex: 1,

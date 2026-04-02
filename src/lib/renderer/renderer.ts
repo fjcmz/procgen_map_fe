@@ -520,46 +520,6 @@ function drawResources(
   }
 }
 
-function drawLegend(
-  ctx: CanvasRenderingContext2D,
-  data: MapData
-): void {
-  const pad = 10;
-  const itemH = 16;
-  const boxW = 140;
-  const shownBiomes = new Set(data.cells.map(c => c.biome));
-  const entries = (Object.entries(BIOME_INFO) as [string, typeof BIOME_INFO[keyof typeof BIOME_INFO]][])
-    .filter(([k]) => shownBiomes.has(k as never))
-    .slice(0, 14);
-  const boxH = pad * 2 + entries.length * itemH + 20;
-
-  const x = pad;
-  const y = data.height - boxH - pad;
-
-  ctx.fillStyle = 'rgba(255,248,230,0.88)';
-  ctx.strokeStyle = '#8b6040';
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(x, y, boxW, boxH, 6);
-  ctx.fill(); ctx.stroke();
-
-  ctx.font = 'bold 10px Georgia, serif';
-  ctx.fillStyle = '#2a1a00';
-  ctx.fillText('Biomes', x + pad, y + pad + 10);
-
-  ctx.font = '9px Georgia, serif';
-  entries.forEach(([, info], i) => {
-    const iy = y + pad + 20 + i * itemH;
-    ctx.fillStyle = info.fillColor;
-    ctx.fillRect(x + pad, iy, 12, 10);
-    ctx.strokeStyle = '#8b6040';
-    ctx.lineWidth = 0.5;
-    ctx.strokeRect(x + pad, iy, 12, 10);
-    ctx.fillStyle = '#2a1a00';
-    ctx.fillText(info.label, x + pad + 16, iy + 9);
-  });
-}
-
 /** Draw active trade route lines between city pairs (persistent state layer). */
 function drawTradeRoutes(
   ctx: CanvasRenderingContext2D,
@@ -893,6 +853,4 @@ export function render(
   // Layer 8: City labels
   if (layers.labels) drawLabels(ctx, data, selectedYear);
 
-  // Layer 9: Legend
-  if (layers.legend) drawLegend(ctx, data);
 }

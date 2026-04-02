@@ -18,7 +18,8 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
 - **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider
-- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with current-year highlighting and auto-scroll
+- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with current-year highlighting and auto-scroll; collapsible to header-only
+- **Draggable UI panels** — the biome legend, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, region borders, and resource icons
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
@@ -68,8 +69,10 @@ If history is **disabled**, steps 7–8 are skipped and the map shows terrain an
 src/
 ├── components/           # React UI components
 │   ├── Controls.tsx      # Generation parameters, layer toggles, history settings
+│   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
+│   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
-│   ├── Timeline.tsx      # Playback controls, year slider, and cumulative event log side panel
+│   ├── Timeline.tsx      # Draggable playback controls + draggable/collapsible event log side panel
 │   └── ZoomControls.tsx
 ├── lib/                  # Core generation modules
 │   ├── types.ts          # All shared TypeScript type definitions
@@ -123,7 +126,7 @@ src/
 │   │   ├── roads.ts      # A* road pathfinding between cities
 │   │   └── index.ts
 │   └── renderer/         # Canvas drawing logic
-│       ├── renderer.ts   # All rendering layers: biomes, borders, icons, legend
+│       ├── renderer.ts   # All rendering layers: biomes, borders, icons
 │       ├── noisyEdges.ts # Recursive midpoint displacement for organic coastlines
 │       └── index.ts
 └── workers/
