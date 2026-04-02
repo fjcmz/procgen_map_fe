@@ -56,10 +56,10 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/roads.ts` | A* road pathfinding between cities |
 | **`src/lib/history/physical/`** | Physical model — data classes (Phase 2) + generators/visitors (Phase 3) |
 | `src/lib/history/physical/Resource.ts` | Resource entity: weighted type enum (17 types across strategic/agricultural/luxury), TRADE_MIN=10, TRADE_USE=5 |
-| `src/lib/history/physical/CityEntity.ts` | City entity: full lifecycle (founded, contacted, size enum, population rolls, `canTradeMore()`); distinct from render-type `City` in `types.ts` |
+| `src/lib/history/physical/CityEntity.ts` | City entity: full lifecycle (founded, contacted, size enum, population rolls, `canTradeMore()`, `contactCities` set, `knownTechs` map); distinct from render-type `City` in `types.ts` |
 | `src/lib/history/physical/Region.ts` | Region entity: `RegionBiome` enum with growth multipliers, cell grouping, neighbour graph, `BIOME_TO_REGION_BIOME` mapping, `potentialNeighbours` BFS layers |
 | `src/lib/history/physical/Continent.ts` | Continent entity: groups regions, world back-reference |
-| `src/lib/history/physical/World.ts` | World entity: continent list + runtime index Maps (`mapRegions`, `mapCities`, `mapUsableCities`, etc.) |
+| `src/lib/history/physical/World.ts` | World entity: continent list + typed runtime index Maps (`mapRegions`, `mapCities`, `mapUsableCities`, `mapCountries`, `mapIllustrates`, `mapWonders`, `mapReligions`, `mapWars`, `mapAliveWars`) |
 | `src/lib/history/physical/ResourceGenerator.ts` | Generates `Resource` instances: samples weighted type, rolls `10d10+20` for `original` |
 | `src/lib/history/physical/CityGenerator.ts` | Generates `CityEntity`: sets `regionId`, inserts into `world.mapCities` |
 | `src/lib/history/physical/RegionGenerator.ts` | Generates `Region`; `assignNeighbours` (symmetric cell-geometry adjacency); `updatePotentialNeighbours` (BFS-layered distance graph for all regions) |
@@ -68,11 +68,25 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/physical/CityVisitor.ts` | Utility: iterate all/usable cities; random selection with predicate (Fisher-Yates, samples without replacement) |
 | `src/lib/history/physical/RegionVisitor.ts` | Utility: iterate all regions; `selectUpToN` / `selectOne` with predicate (randomized order) |
 | **`src/lib/history/timeline/`** | Timeline model — temporal simulation layer (Phase 4) |
-| `src/lib/history/timeline/events.ts` | Phase 5 placeholder interfaces for 12 event types (Foundation, Contact, CountryEvent, Illustrate, Wonder, Religion, Trade, Cataclysm, War, Tech, Conquer, Empire) |
+| `src/lib/history/timeline/events.ts` | Re-exports all 13 event type interfaces (Foundation, Contact, CountryEvent, Illustrate, Wonder, Religion, Trade, Cataclysm, War, Tech, Conquer, Empire, Merge) |
 | `src/lib/history/timeline/Timeline.ts` | Timeline entity: container for all simulated years, anchored by random `startOfTime` in [-3000, -1001], holds 5000 `Year` records |
-| `src/lib/history/timeline/Year.ts` | Year entity: absolute year number, `worldPopulation`, 12 typed event collection arrays (all empty until Phase 5 generators populate them) |
+| `src/lib/history/timeline/Year.ts` | Year entity: absolute year number, `worldPopulation`, 12 typed event collection arrays populated by Phase 5 generators |
 | `src/lib/history/timeline/TimelineGenerator.ts` | Generates `Timeline`: sets random `startOfTime`, creates 5000 Year objects via `yearGenerator` |
-| `src/lib/history/timeline/YearGenerator.ts` | Generates `Year` with 9 preprocessing steps: abort check, compute year, sum population, grow populations (biome multiplier), kill/retire illustrates, propagate religions, end wars, reassert war flags, recompute resources |
+| `src/lib/history/timeline/YearGenerator.ts` | Generates `Year` with 9 preprocessing steps (population growth, illustrate death, religion propagation, war expiry, resource recompute) + calls all 12 Phase 5 generators in order |
+| **`src/lib/history/timeline/` Phase 5 entities** | Each file contains an entity interface + generator singleton |
+| `src/lib/history/timeline/Foundation.ts` | Foundation event + `foundationGenerator`: founds a dormant city, adds to `mapUsableCities`/`mapUncontactedCities` |
+| `src/lib/history/timeline/Contact.ts` | Contact event + `contactGenerator`: first-contact between two cities via BFS over region adjacency; adds symmetric contact links |
+| `src/lib/history/timeline/Country.ts` | CountryEvent + `countryGenerator`: forms when all cities in a region are founded+contacted; `Spirit` enum (military/religious/industrious/neutral); merges city techs |
+| `src/lib/history/timeline/Illustrate.ts` | Illustrate event + `illustrateGenerator`: illustrious figure born in large+ cities; 6 types (religion/science/philosophy/industry/military/art) with weighted selection and variable active lifespan |
+| `src/lib/history/timeline/Religion.ts` | Religion event + `religionGenerator`: Path 1 = found new religion (requires religious illustrate in city with no religions); Path 2 = expand existing religion to neighbouring city |
+| `src/lib/history/timeline/Trade.ts` | Trade event + `tradeGenerator`: trade route between contacted cities in different regions with available resources; consumes `TRADE_USE` from each resource |
+| `src/lib/history/timeline/Wonder.ts` | Wonder event + `wonderGenerator`: wonder built in large/metropolis/megalopolis cities; can be destroyed by cataclysms |
+| `src/lib/history/timeline/Cataclysm.ts` | Cataclysm event + `cataclysmGenerator`: 9 disaster types with cascading strength (local→regional→continental→global); kills population, may destroy cities/wonders/illustrates; can end the world |
+| `src/lib/history/timeline/War.ts` | War event + `warGenerator`: conflict between neighbouring countries not in the same empire; weighted reason enum; disrupts cross-region trades |
+| `src/lib/history/timeline/Tech.ts` | Tech event + `techGenerator`: technology discovered by an illustrate; 9 tech fields; `mergeAllTechs` (union by max level) and `getNewTechs` (delta); `TRADE_TECHS` affect trade capacity |
+| `src/lib/history/timeline/Conquer.ts` | Conquer event + `conquerGenerator`: outcome of a finishing war; winner assimilates loser's tech; updates empire membership |
+| `src/lib/history/timeline/Empire.ts` | Empire event + `empireGenerator`: multi-country entity formed when a non-empire conqueror wins; tracks member countries and territorial reach |
+| `src/lib/history/timeline/Merge.ts` | Merge placeholder interface — reserved for future peaceful country merging |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
 | `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons, legend |
@@ -123,20 +137,27 @@ The `World`/`Continent`/`Region`/`CityEntity`/`Resource` class instances live **
 
 `Timeline` and `Year` (in `history/timeline/`) form the temporal simulation layer (Phase 4) that runs on top of the physical world. The `TimelineGenerator` creates a `Timeline` anchored at a random start year ([-3000, -1001]) and generates 5000 `Year` records via `YearGenerator`.
 
-Each `Year` holds 12 typed event collections (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquers, empires) — all empty arrays until Phase 5 generators populate them. The event type interfaces in `timeline/events.ts` are Phase 5 placeholders with only `{ id: string }`.
+Each `Year` holds 12 typed event collections (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquers, empires) populated by the Phase 5 generators during year generation.
 
-`YearGenerator.generate()` performs 9 preprocessing steps per year before sub-entity generation:
+`YearGenerator.generate()` performs 9 preprocessing steps per year, then calls all 12 Phase 5 generators in order:
+
+**Preprocessing (steps 1–9):**
 1. Abort if `world.endedBy` is set
 2. Compute absolute year from `timeline.startOfTime + years.length`
 3. Sum `worldPopulation` from usable cities (before growth)
 4. Grow each usable city's population using `REGION_BIOME_GROWTH` biome multipliers
-5. Kill/retire illustrates (natural death + 15% war-related) — no-op until Phase 5
-6. Propagate religions (adherence drift, member recompute) — no-op until Phase 5
-7. End expired wars, clear `atWar` flags — no-op until Phase 5
-8. Reassert `atWar` flags for active wars — no-op until Phase 5
+5. Kill/retire illustrates (natural death when `birthYear + yearsActive <= currentYear`; 15% war-related death chance if origin city's country is at war)
+6. Propagate religions (single-religion cities: adherence drifts +0.05 toward 0.9; multi-religion cities: random religion gains +0.05 if total < 0.9; recompute member counts)
+7. End expired wars (`started + lasts < currentYear`), clear `atWar` flags
+8. Reassert `atWar` flags for active wars
 9. Recompute `region.hasResources` via `updateHasResources()`
 
-The timeline classes (`Timeline`, `Year`) live **only inside the worker** alongside the physical model — they are not serialized across the `postMessage` boundary. The `timelineGenerator` and `yearGenerator` singletons follow the same pattern as the physical model generators.
+**Event generation (Phase 5, in order):**
+Foundation → Contact → Country → Illustrate → Religion → Trade → Wonder → Cataclysm → War → Tech → Conquer → Empire
+
+Each generator produces 0 or 1 event per year and may mutate world state (e.g., founding a city, starting a war, destroying a wonder).
+
+The timeline classes (`Timeline`, `Year`) and all Phase 5 entity instances live **only inside the worker** alongside the physical model — they are not serialized across the `postMessage` boundary. The generator singletons follow the same pattern as the physical model generators.
 
 ### Randomness
 

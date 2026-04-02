@@ -1,42 +1,20 @@
 /**
- * Phase 5 placeholder event interfaces.
+ * Phase 5 event type re-exports.
  *
- * Each interface represents one of the 12 event types generated per Year.
- * Phase 5 will expand these with full fields and corresponding generators.
+ * Each type is defined in its own module with a corresponding generator.
+ * This file re-exports the interfaces for convenience.
  */
 
-/** City foundation event. */
-export interface Foundation { readonly id: string }
-
-/** First-contact event between two cities. */
-export interface Contact { readonly id: string }
-
-/** Country founding event (named CountryEvent to avoid collision with types.ts Country). */
-export interface CountryEvent { readonly id: string }
-
-/** Illustrious figure born this year. */
-export interface Illustrate { readonly id: string }
-
-/** Wonder built in a city. */
-export interface Wonder { readonly id: string }
-
-/** Religion founded or expanded. */
-export interface Religion { readonly id: string }
-
-/** Trade route established between cities. */
-export interface Trade { readonly id: string }
-
-/** Cataclysm striking a region. */
-export interface Cataclysm { readonly id: string }
-
-/** War between two countries. */
-export interface War { readonly id: string }
-
-/** Technology discovered by a country. */
-export interface Tech { readonly id: string }
-
-/** Conquest of one country by another. */
-export interface Conquer { readonly id: string }
-
-/** Empire formed from conquests. */
-export interface Empire { readonly id: string }
+export type { Foundation } from './Foundation';
+export type { Contact } from './Contact';
+export type { CountryEvent } from './Country';
+export type { Illustrate } from './Illustrate';
+export type { Wonder } from './Wonder';
+export type { Religion } from './Religion';
+export type { Trade } from './Trade';
+export type { Cataclysm } from './Cataclysm';
+export type { War } from './War';
+export type { Tech } from './Tech';
+export type { Conquer } from './Conquer';
+export type { Empire } from './Empire';
+export type { Merge } from './Merge';

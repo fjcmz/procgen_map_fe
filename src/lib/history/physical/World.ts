@@ -2,6 +2,11 @@ import { IdUtil } from '../IdUtil';
 import type { Continent } from './Continent';
 import type { Region } from './Region';
 import type { CityEntity } from './CityEntity';
+import type { CountryEvent } from '../timeline/Country';
+import type { Illustrate } from '../timeline/Illustrate';
+import type { Wonder } from '../timeline/Wonder';
+import type { Religion } from '../timeline/Religion';
+import type { War } from '../timeline/War';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -17,19 +22,19 @@ export class World {
   // Geography indexes
   mapContinents: Map<string, Continent> = new Map();
   mapRegions: Map<string, Region> = new Map();
-  // Civilization indexes (populated during history simulation)
-  mapCountries: Map<string, unknown> = new Map();
+  // Civilization indexes (populated during timeline simulation)
+  mapCountries: Map<string, CountryEvent> = new Map();
   mapCities: Map<string, CityEntity> = new Map();
   mapUsableCities: Map<string, CityEntity> = new Map();
   mapUncontactedCities: Map<string, CityEntity> = new Map();
   // Cultural/event indexes (populated during timeline simulation)
-  mapIllustrates: Map<string, unknown> = new Map();
-  mapUsableIllustrates: Map<string, unknown> = new Map();
-  mapWonders: Map<string, unknown> = new Map();
-  mapUsableWonders: Map<string, unknown> = new Map();
-  mapReligions: Map<string, unknown> = new Map();
-  mapWars: Map<string, unknown> = new Map();
-  mapAliveWars: Map<string, unknown> = new Map();
+  mapIllustrates: Map<string, Illustrate> = new Map();
+  mapUsableIllustrates: Map<string, Illustrate> = new Map();
+  mapWonders: Map<string, Wonder> = new Map();
+  mapUsableWonders: Map<string, Wonder> = new Map();
+  mapReligions: Map<string, Religion> = new Map();
+  mapWars: Map<string, War> = new Map();
+  mapAliveWars: Map<string, War> = new Map();
 
   constructor(rng: () => number) {
     this.id = IdUtil.id('world', rngHex(rng)) ?? 'world_unknown';

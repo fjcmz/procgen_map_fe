@@ -13,7 +13,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Water ratio** — slider to control the percentage of water vs land (0–100%)
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
-- **History simulation** — optional multi-century timeline: countries form, go to war, conquer territory, and collapse; cities and kingdoms are derived from this simulation
+- **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
 - **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
@@ -96,12 +96,25 @@ src/
 │   │   │   ├── CityVisitor.ts       # Iterate/select cities from world maps (with predicate)
 │   │   │   ├── RegionVisitor.ts     # Iterate/select regions from world map (with predicate)
 │   │   │   └── index.ts
-│   │   ├── timeline/     # Timeline model — temporal simulation layer (Phase 4)
-│   │   │   ├── events.ts            # Phase 5 placeholder interfaces for 12 event types
+│   │   ├── timeline/     # Timeline model — temporal simulation layer (Phases 4–5)
+│   │   │   ├── events.ts            # Re-exports all 13 event type interfaces
 │   │   │   ├── Timeline.ts          # Timeline entity (5000 years, random start year)
 │   │   │   ├── Year.ts              # Year entity (population + 12 event collections)
 │   │   │   ├── TimelineGenerator.ts # Generates Timeline with 5000 Year records
-│   │   │   ├── YearGenerator.ts     # Year preprocessing (pop growth, religions, wars, resources)
+│   │   │   ├── YearGenerator.ts     # Year preprocessing + calls all Phase 5 generators
+│   │   │   ├── Foundation.ts        # City founding event + generator
+│   │   │   ├── Contact.ts           # First-contact between cities + generator
+│   │   │   ├── Country.ts           # Country formation event + generator (Spirit enum)
+│   │   │   ├── Illustrate.ts        # Illustrious figure event + generator (6 types)
+│   │   │   ├── Religion.ts          # Religion founding/expansion + generator
+│   │   │   ├── Trade.ts             # Trade route event + generator
+│   │   │   ├── Wonder.ts            # Wonder construction event + generator
+│   │   │   ├── Cataclysm.ts         # Natural disaster event + generator (9 types, 4 strengths)
+│   │   │   ├── War.ts               # War event + generator (4 reasons, trade disruption)
+│   │   │   ├── Tech.ts              # Technology discovery + generator (9 fields, merge utils)
+│   │   │   ├── Conquer.ts           # Conquest outcome + generator (tech assimilation)
+│   │   │   ├── Empire.ts            # Empire formation + generator
+│   │   │   ├── Merge.ts             # Merge placeholder (future use)
 │   │   │   └── index.ts
 │   │   ├── history.ts    # buildPhysicalWorld() + year-by-year simulation + getOwnershipAtYear
 │   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
