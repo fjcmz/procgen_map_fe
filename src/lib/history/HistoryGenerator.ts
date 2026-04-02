@@ -409,6 +409,8 @@ export class HistoryGenerator {
         name: cityEntity.name,
         isCapital: region?.cities[0]?.id === cityEntity.id,
         kingdomId,
+        foundedYear: cityEntity.foundedOn - timeline.startOfTime,
+        size: cityEntity.size,
       });
     }
 

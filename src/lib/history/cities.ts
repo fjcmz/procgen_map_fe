@@ -60,6 +60,8 @@ export function placeCities(cells: Cell[], width: number): City[] {
       name: CITY_NAMES[idx % CITY_NAMES.length],
       isCapital,
       kingdomId,
+      foundedYear: 0,
+      size: 'small' as const,
     };
   });
 

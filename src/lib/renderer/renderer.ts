@@ -292,42 +292,56 @@ function drawSnowIcon(
   }
 }
 
+const CITY_SIZE_SCALE: Record<string, number> = {
+  small: 0.8,
+  medium: 1.0,
+  large: 1.4,
+  metropolis: 1.9,
+  megalopolis: 2.5,
+};
+
 function drawCityIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   s: number,
-  isCapital: boolean
+  isCapital: boolean,
+  sizeScale: number = 1.0
 ): void {
+  const ss = s * sizeScale;
   if (isCapital) {
     // Castle silhouette
     ctx.fillStyle = '#c8a060';
     ctx.strokeStyle = '#5a3a10';
     ctx.lineWidth = 1;
-    ctx.fillRect(x - s, y - s * 0.3, s * 2, s * 1.1);
+    ctx.fillRect(x - ss, y - ss * 0.3, ss * 2, ss * 1.1);
     // Battlements
     for (let i = -1; i <= 1; i++) {
-      ctx.fillRect(x + i * s * 0.6 - s * 0.15, y - s * 0.8, s * 0.3, s * 0.5);
+      ctx.fillRect(x + i * ss * 0.6 - ss * 0.15, y - ss * 0.8, ss * 0.3, ss * 0.5);
     }
-    ctx.strokeRect(x - s, y - s * 0.3, s * 2, s * 1.1);
+    ctx.strokeRect(x - ss, y - ss * 0.3, ss * 2, ss * 1.1);
   } else {
     // Simple tower
     ctx.fillStyle = '#d4b880';
     ctx.strokeStyle = '#5a3a10';
     ctx.lineWidth = 0.8;
-    ctx.fillRect(x - s * 0.4, y - s * 0.5, s * 0.8, s * 1.2);
-    ctx.fillRect(x - s * 0.6, y - s * 0.9, s * 0.3, s * 0.5);
-    ctx.fillRect(x + s * 0.3, y - s * 0.9, s * 0.3, s * 0.5);
-    ctx.strokeRect(x - s * 0.4, y - s * 0.5, s * 0.8, s * 1.2);
+    ctx.fillRect(x - ss * 0.4, y - ss * 0.5, ss * 0.8, ss * 1.2);
+    ctx.fillRect(x - ss * 0.6, y - ss * 0.9, ss * 0.3, ss * 0.5);
+    ctx.fillRect(x + ss * 0.3, y - ss * 0.9, ss * 0.3, ss * 0.5);
+    ctx.strokeRect(x - ss * 0.4, y - ss * 0.5, ss * 0.8, ss * 1.2);
   }
 }
 
 function drawIcons(
   ctx: CanvasRenderingContext2D,
-  data: MapData
+  data: MapData,
+  selectedYear?: number
 ): void {
   const { cells, cities } = data;
-  const citySet = new Set(cities.map(c => c.cellIndex));
+  const visibleCities = selectedYear === undefined
+    ? cities
+    : cities.filter(c => c.foundedYear <= selectedYear);
+  const citySet = new Set(visibleCities.map(c => c.cellIndex));
   const iconSize = Math.max(4, Math.min(8, data.width / 150));
 
   // Biome icons (sample ~20% of cells for density control)
@@ -348,20 +362,24 @@ function drawIcons(
   }
 
   // City icons
-  for (const city of cities) {
+  for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
-    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital);
+    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[city.size] ?? 1.0);
   }
 }
 
 function drawLabels(
   ctx: CanvasRenderingContext2D,
-  data: MapData
+  data: MapData,
+  selectedYear?: number
 ): void {
   const { cells, cities } = data;
+  const visibleCities = selectedYear === undefined
+    ? cities
+    : cities.filter(c => c.foundedYear <= selectedYear);
   const fontSize = Math.max(9, Math.min(13, data.width / 100));
 
-  for (const city of cities) {
+  for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
     const fontStyle = city.isCapital ? `bold ${fontSize + 1}px Georgia, serif` : `${fontSize}px Georgia, serif`;
     ctx.font = fontStyle;
@@ -589,10 +607,10 @@ export function render(
   if (layers.roads) drawRoads(ctx, data);
 
   // Layer 7: Icons (biome + cities)
-  if (layers.icons) drawIcons(ctx, data);
+  if (layers.icons) drawIcons(ctx, data, selectedYear);
 
   // Layer 8: City labels
-  if (layers.labels) drawLabels(ctx, data);
+  if (layers.labels) drawLabels(ctx, data, selectedYear);
 
   // Layer 9: Legend
   if (layers.legend) drawLegend(ctx, data);

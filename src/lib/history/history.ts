@@ -693,6 +693,8 @@ export function generateHistory(
       name: country.name,
       isCapital: country.isAlive,
       kingdomId: finalOwner >= 0 ? finalOwner : country.id,
+      foundedYear: 0,
+      size: 'small' as const,
     };
   });
 
