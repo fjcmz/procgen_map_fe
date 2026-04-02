@@ -68,7 +68,7 @@ export default function App() {
       } else if (msg.type === 'DONE') {
         setMapData(msg.data);
         if (msg.data.history) {
-          setSelectedYear(msg.data.history.numYears);
+          setSelectedYear(0);
         }
         setGenerating(false);
         setProgress(null);
