@@ -57,7 +57,7 @@ npm run preview
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
 6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region on highest-scoring terrain cells
-7. **History** *(optional)* — if enabled, simulates N years of civilizational history: places capitals/cities on suitable terrain, BFS-assigns initial kingdoms, then runs a year-by-year event loop (wars, conquests, merges, collapses); cities and kingdom borders are derived entirely from this step
+7. **History** *(optional)* — if enabled, the **HistoryGenerator** orchestrates a full civilizational simulation: it first builds the physical world (step 6), then runs a 5000-year timeline via the **TimelineGenerator**. Each year, 12 event generators fire in order: cities are founded, make first contact, form countries, produce illustrious figures, discover technologies, build wonders, found religions, open trade routes, suffer cataclysms, wage wars, resolve conquests, and form empires. The first N years (user-configurable) are serialized into the UI's timeline format with ownership snapshots for fast scrubbing.
 8. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
 
 If history is **disabled**, steps 7–8 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
@@ -116,7 +116,8 @@ src/
 │   │   │   ├── Empire.ts            # Empire formation + generator
 │   │   │   ├── Merge.ts             # Merge placeholder (future use)
 │   │   │   └── index.ts
-│   │   ├── history.ts    # buildPhysicalWorld() + year-by-year simulation + getOwnershipAtYear
+│   │   ├── HistoryGenerator.ts # Phase 6 orchestrator: physical world + timeline → HistoryData
+│   │   ├── history.ts    # buildPhysicalWorld() + legacy simulation + getOwnershipAtYear
 │   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
 │   │   ├── cities.ts     # City placement with spacing constraints
 │   │   ├── roads.ts      # A* road pathfinding between cities
@@ -135,4 +136,5 @@ src/
 - The **Mulberry32 PRNG** ensures fully deterministic output from any seed string — including history events.
 - Canvas is rendered at native pixel density to avoid blurriness on high-DPI displays.
 - Cities and kingdoms are **only generated when history is enabled** — they are outputs of the history simulation, not independent pipeline steps.
-- The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in a side panel shows all events up to the selected year.
+- The **HistoryGenerator** (Phase 6) is the top-level orchestrator: it calls `buildPhysicalWorld` then `TimelineGenerator`, and serializes the rich simulation state into the flat `HistoryData` format the renderer and timeline UI consume.
+- The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in a side panel shows all events up to the selected year, with icons for 15 event types (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquests, empires, and legacy types).

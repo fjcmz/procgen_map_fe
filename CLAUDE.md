@@ -28,10 +28,16 @@ All heavy computation runs in `src/workers/mapgen.worker.ts` (a Web Worker). The
 
 ```
 voronoi → elevation → moisture → biomes → rivers → buildPhysicalWorld
-  └─ (if generateHistory=true) → history simulation → roads
+  └─ (if generateHistory=true) → HistoryGenerator → roads
+                                    ├─ buildPhysicalWorld (World + Continents + Regions + Resources + Cities)
+                                    ├─ TimelineGenerator (5000 years via YearGenerator)
+                                    │    └─ 12 Phase 5 generators per year:
+                                    │       Foundation → Contact → Country → Illustrate → Religion
+                                    │       → Trade → Wonder → Cataclysm → War → Tech → Conquer → Empire
+                                    └─ serialize → HistoryData (ownership snapshots + events)
 ```
 
-The terrain steps (voronoi through rivers) always run. `buildPhysicalWorld` also always runs — it annotates cells with `regionId`, and produces `RegionData[]`/`ContinentData[]` in `MapData` regardless of the history flag. The history simulation is opt-in via `GenerateRequest.generateHistory`. If history is disabled, the pipeline ends after `buildPhysicalWorld` — no kingdom simulation, roads, or timeline data is generated.
+The terrain steps (voronoi through rivers) always run. `buildPhysicalWorld` also always runs — it annotates cells with `regionId`, and produces `RegionData[]`/`ContinentData[]` in `MapData` regardless of the history flag. The history simulation is opt-in via `GenerateRequest.generateHistory`. When enabled, the **HistoryGenerator** (Phase 6) orchestrates the full pipeline: it calls `buildPhysicalWorld` to create the physical world hierarchy, then `TimelineGenerator` to run 5000 years of simulation, then serializes the result into the flat `HistoryData` format for the UI. If history is disabled, the pipeline ends after `buildPhysicalWorld` — no kingdom simulation, roads, or timeline data is generated.
 
 Each step is a pure function in `src/lib/` that takes cells and returns updated cells or derived data.
 
@@ -50,7 +56,8 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/terrain/biomes.ts` | Whittaker biome classification + `BIOME_INFO` palette |
 | `src/lib/terrain/rivers.ts` | Drainage map + flow accumulation + river tracing |
 | **`src/lib/history/`** | Civilizational simulation + physical world model |
-| `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + year-by-year simulation (expansion, wars, merges, collapses) + `getOwnershipAtYear` |
+| `src/lib/history/HistoryGenerator.ts` | **Phase 6 orchestrator**: ties physical world + timeline together; serializes rich simulation state into `HistoryData` for UI; computes ownership snapshots from region-based countries; emits `HistoryStats` |
+| `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + legacy year-by-year simulation + `getOwnershipAtYear` |
 | `src/lib/history/cities.ts` | City placement with spacing + kingdom grouping |
 | `src/lib/history/borders.ts` | BFS flood-fill kingdom borders from capitals |
 | `src/lib/history/roads.ts` | A* road pathfinding between cities |
@@ -93,7 +100,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
 | `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, history toggle + sim-years slider |
 | `src/components/Timeline.tsx` | Playback controls (play/pause, step ±1/±10), year slider, and cumulative event log side panel (rendered only when `mapData.history` exists) |
-| `src/workers/mapgen.worker.ts` | Orchestrates the full generation pipeline, posts progress events |
+| `src/workers/mapgen.worker.ts` | Orchestrates terrain pipeline + delegates to `HistoryGenerator` for history, posts progress events |
 
 Each subdirectory has an `index.ts` that re-exports its public API.
 
@@ -114,9 +121,9 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 - `history?` — `HistoryData` with `countries`, `years[]`, decade `snapshots`
 
 `HistoryData` structure:
-- `countries: Country[]` — each country has id, name, capitalCellIndex, color, isAlive
-- `years: HistoryYear[]` — per-year events (Wars, Conquests, Merges, Collapses) + sparse `ownershipDeltas`
-- `snapshots` — full `Int16Array` of cell→countryId at every 10th year (for fast scrubbing)
+- `countries: Country[]` — each country has id, name, capitalCellIndex, isAlive
+- `years: HistoryYear[]` — per-year events (15 types: Foundation, Contact, Country, Illustrate, Wonder, Religion, Trade, Cataclysm, War, Tech, Conquest, Empire, plus legacy Merge/Collapse/Expansion) + sparse `ownershipDeltas`
+- `snapshots` — full `Int16Array` of cell→countryId at every 20th year (for fast scrubbing)
 
 ### Physical World Model
 
@@ -158,6 +165,21 @@ Foundation → Contact → Country → Illustrate → Religion → Trade → Won
 Each generator produces 0 or 1 event per year and may mutate world state (e.g., founding a city, starting a war, destroying a wonder).
 
 The timeline classes (`Timeline`, `Year`) and all Phase 5 entity instances live **only inside the worker** alongside the physical model — they are not serialized across the `postMessage` boundary. The generator singletons follow the same pattern as the physical model generators.
+
+### Phase 6: HistoryGenerator (Orchestration)
+
+`HistoryGenerator` in `history/HistoryGenerator.ts` is the top-level entry point for the history pipeline. It:
+
+1. Calls `buildPhysicalWorld` to create the `World` with continents, regions, resources, and cities
+2. Calls `TimelineGenerator.generate()` to run 5000 years of simulation
+3. Builds a `CountryIndexMap` mapping internal string IDs → numeric indices for ownership arrays
+4. Serializes timeline years into `HistoryYear[]` with `HistoryEvent` objects for each of the 12 Phase 5 event types
+5. Computes cell-level ownership snapshots from the region-based country model (countries own regions; conquests transfer region ownership)
+6. Converts founded `CityEntity` objects into render-type `City[]`
+7. Generates roads via A* between founded cities
+8. Produces `HistoryStats` for optional introspection (peak population, entity counts, etc.)
+
+The worker delegates to `historyGenerator.generate()` when `generateHistory` is true. The old `generateHistory()` function in `history.ts` is preserved for backward compatibility but the worker now uses the Phase 6 orchestrator.
 
 ### Randomness
 
@@ -210,7 +232,8 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`, which builds and deploy
 - **Cell count performance**: Generation above ~10,000 cells is slow. Default is 5,000. Test UI changes at low cell counts.
 - **Base path**: Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source.
 - **Elevation normalization**: After computing FBM + island-falloff elevations, `terrain/elevation.ts` divides all values by the observed maximum so the highest cell always reaches 1.0. Without this, FBM noise in practice tops out around 0.8, and the island mask compresses it further — leaving the Whittaker mountain band (elevation > 0.8) unreachable. Do not remove this normalization step.
-- **History is the cities/kingdoms source**: Do not call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `history/history.ts` owns that responsibility. Calling both would double-place cities and corrupt kingdom state.
+- **History is the cities/kingdoms source**: Do not call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `HistoryGenerator` owns that responsibility. Calling both would double-place cities and corrupt kingdom state.
+- **HistoryGenerator is the new orchestrator**: When history is enabled, the worker calls `historyGenerator.generate()` (Phase 6), not the old `generateHistory()` from `history.ts`. The old function is preserved but not used by the worker.
 - **Ownership reconstruction**: `getOwnerAtYear` must apply deltas in strict year order. Out-of-order application produces incorrect borders. The snapshots are keyed by decade (0, 10, 20…); always start from `Math.floor(year / 10) * 10`.
 - **`cell.kingdom` vs history**: `cell.kingdom` is written once by `history/history.ts` as the year-0 state. The renderer overwrites the visual ownership at the selected year but must never mutate `cell.kingdom` — it is the baseline and is needed to reconstruct history from scratch.
 - **`buildPhysicalWorld` always runs**: Unlike the history simulation, `buildPhysicalWorld` is called for every generation (terrain-only or history). `MapData.regions` and `MapData.continents` are always populated. Do not gate region/resource rendering on `mapData.history`.

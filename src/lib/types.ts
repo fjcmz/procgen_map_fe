@@ -73,7 +73,11 @@ export interface Country {
   absorbedById?: number;
 }
 
-export type HistoryEventType = 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION';
+export type HistoryEventType =
+  | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
+  | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
+  | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
+  | 'TECH' | 'EMPIRE';
 
 export interface HistoryEvent {
   type: HistoryEventType;

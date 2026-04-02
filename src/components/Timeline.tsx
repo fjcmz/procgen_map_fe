@@ -9,11 +9,21 @@ interface TimelineProps {
 }
 
 const EVENT_ICONS: Record<string, string> = {
-  WAR: '\u2694',
+  WAR: '\u2694\uFE0F',
   CONQUEST: '\uD83C\uDFF4',
   MERGE: '\uD83E\uDD1D',
   COLLAPSE: '\uD83D\uDC80',
   EXPANSION: '\uD83D\uDCCD',
+  FOUNDATION: '\uD83C\uDFD7\uFE0F',
+  CONTACT: '\uD83D\uDCE8',
+  COUNTRY: '\uD83C\uDFDB\uFE0F',
+  ILLUSTRATE: '\u2B50',
+  WONDER: '\uD83C\uDFDB',
+  RELIGION: '\u2626\uFE0F',
+  TRADE: '\uD83D\uDCB0',
+  CATACLYSM: '\uD83C\uDF0B',
+  TECH: '\uD83D\uDD2C',
+  EMPIRE: '\uD83D\uDC51',
 };
 
 const PLAY_INTERVAL_MS = 200;
@@ -79,9 +89,12 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
     return result;
   }, [historyData.years, selectedYear]);
 
-  // Count living countries at selected year
+  // Count living countries at selected year (countries founded on or before the selected year)
   const livingCount = historyData.countries.filter(c => c.isAlive).length;
   const totalCount = historyData.countries.length;
+
+  // Count events at current year
+  const currentYearEvents = cumulativeEvents.filter(e => e.year === selectedYear).length;
 
   return (
     <>
@@ -90,7 +103,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
         <div style={styles.header}>
           <span style={styles.title}>History</span>
           <span style={styles.info}>
-            Year {selectedYear} / {maxYear} &middot; {livingCount}/{totalCount} kingdoms
+            Year {selectedYear} / {maxYear} &middot; {livingCount}/{totalCount} nations &middot; {currentYearEvents} events
           </span>
           <button
             style={styles.logToggle}
