@@ -1,7 +1,7 @@
-import type { MapData, LayerVisibility, Cell, RegionData } from '../types';
+import type { MapData, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
 import { BIOME_INFO } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
-import { getOwnershipAtYear } from '../history/history';
+import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
 import type { ResourceType } from '../history/physical/Resource';
 
@@ -560,6 +560,263 @@ function drawLegend(
   });
 }
 
+/** Draw active trade route lines between city pairs (persistent state layer). */
+function drawTradeRoutes(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  tradeRoutes: TradeRouteEntry[],
+): void {
+  if (tradeRoutes.length === 0) return;
+  ctx.save();
+  ctx.strokeStyle = '#c8a020';
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.55;
+  ctx.setLineDash([4, 6]);
+  for (const route of tradeRoutes) {
+    const c1 = cells[route.cell1];
+    const c2 = cells[route.cell2];
+    if (!c1 || !c2) continue;
+    ctx.beginPath();
+    ctx.moveTo(c1.x, c1.y);
+    ctx.lineTo(c2.x, c2.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Draw a ★ badge above cities with standing wonders. */
+function drawWonderBadges(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  wonderCells: number[],
+): void {
+  if (wonderCells.length === 0) return;
+  ctx.save();
+  ctx.font = 'bold 11px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const ci of wonderCells) {
+    const cell = cells[ci];
+    if (!cell) continue;
+    // Gold star above city
+    ctx.fillStyle = '#d4a800';
+    ctx.strokeStyle = '#7a5500';
+    ctx.lineWidth = 0.5;
+    ctx.fillText('★', cell.x, cell.y - 14);
+    ctx.strokeText('★', cell.x, cell.y - 14);
+  }
+  ctx.restore();
+}
+
+/** Draw a small ✦ beside cities with active religions. */
+function drawReligionMarkers(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  religionCells: number[],
+): void {
+  if (religionCells.length === 0) return;
+  ctx.save();
+  ctx.font = '9px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const ci of religionCells) {
+    const cell = cells[ci];
+    if (!cell) continue;
+    ctx.fillStyle = '#8040a0';
+    ctx.strokeStyle = '#400060';
+    ctx.lineWidth = 0.5;
+    ctx.fillText('✦', cell.x + 10, cell.y - 6);
+    ctx.strokeText('✦', cell.x + 10, cell.y - 6);
+  }
+  ctx.restore();
+}
+
+/** Draw type-specific icons/effects for events that occurred at the currently selected year. */
+function drawCurrentYearEvents(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  events: HistoryEvent[],
+): void {
+  if (events.length === 0) return;
+  ctx.save();
+
+  for (const ev of events) {
+    const locCell = ev.locationCellIndex !== undefined ? cells[ev.locationCellIndex] : undefined;
+    const tgtCell = ev.targetCellIndex !== undefined ? cells[ev.targetCellIndex] : undefined;
+
+    switch (ev.type) {
+      case 'FOUNDATION': {
+        if (!locCell) break;
+        // Pulsing ring around the new city
+        ctx.beginPath();
+        ctx.arc(locCell.x, locCell.y, 16, 0, Math.PI * 2);
+        ctx.strokeStyle = '#c07820';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.7;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(locCell.x, locCell.y, 22, 0, Math.PI * 2);
+        ctx.strokeStyle = '#c07820';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.35;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'CONTACT': {
+        if (!locCell || !tgtCell) break;
+        // Dotted arc between the two cities
+        ctx.beginPath();
+        ctx.moveTo(locCell.x, locCell.y);
+        ctx.lineTo(tgtCell.x, tgtCell.y);
+        ctx.strokeStyle = '#4080c0';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 5]);
+        ctx.globalAlpha = 0.65;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'COUNTRY': {
+        if (!locCell) break;
+        // Purple ring on new country capital
+        ctx.beginPath();
+        ctx.arc(locCell.x, locCell.y, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = '#6040b0';
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = 0.75;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'ILLUSTRATE': {
+        if (!locCell) break;
+        ctx.font = 'bold 14px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#a0a000';
+        ctx.globalAlpha = 0.9;
+        ctx.fillText('⭐', locCell.x, locCell.y - 20);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'RELIGION': {
+        if (!locCell) break;
+        ctx.font = 'bold 13px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#8040a0';
+        ctx.globalAlpha = 0.9;
+        ctx.fillText('✚', locCell.x - 12, locCell.y - 18);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'TRADE': {
+        if (!locCell || !tgtCell) break;
+        // Bright gold arc for new trade (more prominent than persistent routes)
+        ctx.beginPath();
+        ctx.moveTo(locCell.x, locCell.y);
+        ctx.lineTo(tgtCell.x, tgtCell.y);
+        ctx.strokeStyle = '#f0c020';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([5, 4]);
+        ctx.globalAlpha = 0.85;
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'WONDER': {
+        if (!locCell) break;
+        ctx.font = 'bold 16px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#d4a800';
+        ctx.globalAlpha = 0.95;
+        ctx.fillText('✦', locCell.x + 14, locCell.y - 18);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'CATACLYSM': {
+        if (!locCell) break;
+        // Semi-transparent danger overlay at epicenter
+        const radius = 30;
+        const grad = ctx.createRadialGradient(locCell.x, locCell.y, 4, locCell.x, locCell.y, radius);
+        grad.addColorStop(0, 'rgba(220,60,20,0.55)');
+        grad.addColorStop(1, 'rgba(200,100,0,0)');
+        ctx.beginPath();
+        ctx.arc(locCell.x, locCell.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🌋', locCell.x, locCell.y - 22);
+        break;
+      }
+      case 'WAR': {
+        if (!locCell || !tgtCell) break;
+        // Red line between the two country capitals
+        ctx.beginPath();
+        ctx.moveTo(locCell.x, locCell.y);
+        ctx.lineTo(tgtCell.x, tgtCell.y);
+        ctx.strokeStyle = '#c03020';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.6;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Swords icon at midpoint
+        const mx = (locCell.x + tgtCell.x) / 2;
+        const my = (locCell.y + tgtCell.y) / 2;
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('⚔️', mx, my);
+        break;
+      }
+      case 'TECH': {
+        if (!locCell) break;
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = 0.9;
+        ctx.fillText('⚙️', locCell.x + 14, locCell.y - 20);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'CONQUEST': {
+        if (!locCell) break;
+        // Ring on the victor's capital
+        ctx.beginPath();
+        ctx.arc(locCell.x, locCell.y, 20, 0, Math.PI * 2);
+        ctx.strokeStyle = '#803020';
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.8;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🏴', locCell.x, locCell.y - 24);
+        break;
+      }
+      case 'EMPIRE': {
+        if (!locCell) break;
+        ctx.font = '15px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = 0.95;
+        ctx.fillText('👑', locCell.x, locCell.y - 24);
+        ctx.globalAlpha = 1;
+        break;
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   data: MapData,
@@ -603,11 +860,35 @@ export function render(
     drawKingdomBorders(ctx, data.cells, ownershipAtYear);
   }
 
+  // Layer 5b: Trade routes (persistent active trades at selectedYear)
+  if (layers.tradeRoutes && data.history && selectedYear !== undefined) {
+    const tradeRoutes = getTradesAtYear(data.history, selectedYear);
+    drawTradeRoutes(ctx, data.cells, tradeRoutes);
+  }
+
   // Layer 6: Roads
   if (layers.roads) drawRoads(ctx, data);
 
   // Layer 7: Icons (biome + cities)
   if (layers.icons) drawIcons(ctx, data, selectedYear);
+
+  // Layer 7b: Wonder badges (persistent)
+  if (layers.wonderMarkers && data.history && selectedYear !== undefined) {
+    const wonderCells = getWondersAtYear(data.history, selectedYear);
+    drawWonderBadges(ctx, data.cells, wonderCells);
+  }
+
+  // Layer 7c: Religion markers (persistent)
+  if (layers.religionMarkers && data.history && selectedYear !== undefined) {
+    const religionCells = getReligionsAtYear(data.history, selectedYear);
+    drawReligionMarkers(ctx, data.cells, religionCells);
+  }
+
+  // Layer 7d: Current-year event overlays
+  if (layers.eventOverlay && data.history && selectedYear !== undefined) {
+    const yearData = data.history.years[selectedYear];
+    if (yearData) drawCurrentYearEvents(ctx, data.cells, yearData.events);
+  }
 
   // Layer 8: City labels
   if (layers.labels) drawLabels(ctx, data, selectedYear);

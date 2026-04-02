@@ -26,6 +26,24 @@ const EVENT_ICONS: Record<string, string> = {
   EMPIRE: '\uD83D\uDC51',
 };
 
+const EVENT_COLORS: Record<string, string> = {
+  WAR: '#c03020',
+  CONQUEST: '#803020',
+  MERGE: '#606060',
+  COLLAPSE: '#404040',
+  EXPANSION: '#407040',
+  FOUNDATION: '#c07820',
+  CONTACT: '#4080c0',
+  COUNTRY: '#6040b0',
+  ILLUSTRATE: '#a0a000',
+  WONDER: '#d4a800',
+  RELIGION: '#8040a0',
+  TRADE: '#20a040',
+  CATACLYSM: '#d03010',
+  TECH: '#208080',
+  EMPIRE: '#c08000',
+};
+
 const PLAY_INTERVAL_MS = 200;
 
 export function Timeline({ historyData, selectedYear, onYearChange }: TimelineProps) {
@@ -160,19 +178,25 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
             {cumulativeEvents.length === 0 ? (
               <div style={styles.noEvents}>No events yet.</div>
             ) : (
-              cumulativeEvents.map((item, i) => (
+              cumulativeEvents.map((item, i) => {
+                const color = EVENT_COLORS[item.event.type] ?? '#888888';
+                return (
                 <div
                   key={i}
                   style={{
                     ...styles.logEvent,
-                    ...(item.year === selectedYear ? styles.logEventCurrent : {}),
+                    borderLeft: `3px solid ${color}`,
+                    background: item.year === selectedYear
+                      ? `${color}22`
+                      : `${color}0d`,
                   }}
                 >
                   <span style={styles.logYear}>Y{item.year}</span>
                   <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
                   <span style={styles.logDesc}>{item.event.description}</span>
                 </div>
-              ))
+                );
+              })
             )}
             <div ref={logEndRef} />
           </div>
@@ -330,11 +354,8 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: '#2a1a00',
     lineHeight: 1.4,
-    padding: '2px 4px',
+    padding: '2px 4px 2px 6px',
     borderRadius: 3,
-  },
-  logEventCurrent: {
-    background: 'rgba(139,69,19,0.12)',
   },
   logYear: {
     flexShrink: 0,

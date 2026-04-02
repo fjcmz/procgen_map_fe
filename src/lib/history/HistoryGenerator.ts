@@ -5,7 +5,8 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry } from '../types';
+import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { generateRoads } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
@@ -76,6 +77,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `${city?.name ?? 'A city'} is founded.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -88,6 +90,8 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `${from?.name ?? '?'} makes contact with ${to?.name ?? '?'}.`,
+      locationCellIndex: from?.cellIndex,
+      targetCellIndex: to?.cellIndex,
     });
   }
 
@@ -101,6 +105,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: numIdx,
       description: `The nation of ${firstName} is established (${c.spirit}).`,
+      locationCellIndex: region?.cities[0]?.cellIndex,
     });
   }
 
@@ -112,6 +117,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `A great ${ill.type} figure is born in ${city?.name ?? '?'}.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -123,6 +129,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `A wonder is built in ${city?.name ?? '?'}.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -134,6 +141,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `A new religion is founded in ${city?.name ?? '?'}.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -146,6 +154,8 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `Trade route opened: ${c1?.name ?? '?'} \u2194 ${c2?.name ?? '?'} (${t.resource1}/${t.resource2}).`,
+      locationCellIndex: c1?.cellIndex,
+      targetCellIndex: c2?.cellIndex,
     });
   }
 
@@ -157,6 +167,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: `${cat.strength} ${cat.type} strikes ${city?.name ?? '?'} — ${cat.killed.toLocaleString()} killed.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -176,16 +187,21 @@ function serializeYearEvents(
       initiatorId: aggIdx,
       targetId: defIdx,
       description: `${aggName} declares war on ${defName} (${w.reason}).`,
+      locationCellIndex: aggRegion?.cities[0]?.cellIndex,
+      targetCellIndex: defRegion?.cities[0]?.cellIndex,
     });
   }
 
   // Techs
   for (const t of year.techs) {
+    const illustrate = world.mapIllustrates.get(t.discoverer);
+    const city = illustrate ? world.mapCities.get(illustrate.city) : undefined;
     events.push({
       type: 'TECH',
       year: absYear,
       initiatorId: -1,
       description: `${t.field} technology advances to level ${t.level}.`,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -205,6 +221,8 @@ function serializeYearEvents(
       initiatorId: cqrIdx,
       targetId: cqdIdx,
       description: `${cqrName} conquers ${cqdName}.`,
+      locationCellIndex: cqrRegion?.cities[0]?.cellIndex,
+      targetCellIndex: cqdRegion?.cities[0]?.cellIndex,
     });
   }
 
@@ -218,6 +236,7 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: countryMap.idToIndex.get(emp.foundedBy) ?? -1,
       description: `${founderName} proclaims an empire.`,
+      locationCellIndex: founderRegion?.cities[0]?.cellIndex,
     });
   }
 
@@ -302,6 +321,32 @@ function computeOwnership(
   return ownership;
 }
 
+/**
+ * Return cell indices of cities that have a standing wonder at the given absolute year.
+ */
+function computeWonderCells(world: World, absYear: number): number[] {
+  const result: number[] = [];
+  for (const wonder of world.mapWonders.values()) {
+    if (wonder.builtOn > absYear) continue;
+    if (wonder.destroyedOn !== null && wonder.destroyedOn <= absYear) continue;
+    const city = world.mapCities.get(wonder.city);
+    if (city) result.push(city.cellIndex);
+  }
+  return result;
+}
+
+/**
+ * Return cell indices of cities that have at least one active religion at the given absolute year.
+ */
+function computeReligionCells(world: World, absYear: number): number[] {
+  const result: number[] = [];
+  for (const city of world.mapUsableCities.values()) {
+    if (city.foundedOn > absYear) continue;
+    if (city.religions.size > 0) result.push(city.cellIndex);
+  }
+  return result;
+}
+
 export class HistoryGenerator {
   /**
    * Run the full generation pipeline: physical world + timeline simulation.
@@ -337,6 +382,13 @@ export class HistoryGenerator {
     // Phase 4: Serialize into HistoryData format
     const historyYears: HistoryYear[] = [];
     const snapshots: Record<number, Int16Array> = {};
+    const tradeSnapshots: Record<number, TradeRouteEntry[]> = {};
+    const wonderSnapshots: Record<number, number[]> = {};
+    const religionSnapshots: Record<number, number[]> = {};
+
+    // Active trade tracking: trade objects are mutated (ended field set) as simulation runs
+    const activeTrades = new Map<string, Trade>();
+    const activeTradeEntries = new Map<string, TradeRouteEntry>();
 
     // Compute ownership at year 0 (before any events)
     let prevOwnership: Int16Array | null = null;
@@ -344,6 +396,24 @@ export class HistoryGenerator {
     for (let i = 0; i < yearsToSerialize; i++) {
       const yearObj = timeline.years[i];
       const events = serializeYearEvents(yearObj, world, countryMap);
+
+      // Track newly-started trades this year
+      for (const trade of yearObj.trades) {
+        const c1 = world.mapCities.get(trade.city1);
+        const c2 = world.mapCities.get(trade.city2);
+        if (c1 && c2) {
+          activeTrades.set(trade.id, trade);
+          activeTradeEntries.set(trade.id, { cell1: c1.cellIndex, cell2: c2.cellIndex });
+        }
+      }
+
+      // Remove ended trades (trade.ended is set by the simulation)
+      for (const [id, trade] of activeTrades) {
+        if (trade.ended !== null && trade.ended <= yearObj.year) {
+          activeTrades.delete(id);
+          activeTradeEntries.delete(id);
+        }
+      }
 
       // Compute ownership for this year
       const ownership = computeOwnership(cells, world, yearObj, countryMap);
@@ -367,16 +437,26 @@ export class HistoryGenerator {
       // Snapshot every 20 years
       if (i % 20 === 0) {
         snapshots[i] = new Int16Array(ownership);
+        tradeSnapshots[i] = Array.from(activeTradeEntries.values());
+        wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
+        religionSnapshots[i] = computeReligionCells(world, yearObj.year);
       }
 
       prevOwnership = ownership;
     }
 
     // Always snapshot final year
+    const finalAbsYear = timeline.years[yearsToSerialize - 1]?.year ?? 0;
     if (prevOwnership) {
       snapshots[yearsToSerialize] = prevOwnership;
+      tradeSnapshots[yearsToSerialize] = Array.from(activeTradeEntries.values());
+      wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
+      religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
+      tradeSnapshots[0] = [];
+      wonderSnapshots[0] = [];
+      religionSnapshots[0] = [];
     }
 
     // Phase 5: Build Country[] for UI
@@ -452,6 +532,9 @@ export class HistoryGenerator {
       years: historyYears,
       numYears: yearsToSerialize,
       snapshots,
+      tradeSnapshots,
+      wonderSnapshots,
+      religionSnapshots,
     };
 
     return {
