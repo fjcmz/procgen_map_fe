@@ -1,4 +1,4 @@
-import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData } from '../types';
+import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry } from '../types';
 import { generateRoads } from './roads';
 import { BIOME_TO_REGION_BIOME } from './physical/Region';
 import type { World } from './physical/World';
@@ -449,6 +449,52 @@ export function getOwnershipAtYear(
   return ownership;
 }
 
+/**
+ * Return active trade route cell-index pairs at a given year, using the nearest snapshot.
+ * No delta replay needed — trade snapshots are full arrays.
+ */
+export function getTradesAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): TradeRouteEntry[] {
+  const snapshotYears = Object.keys(historyData.tradeSnapshots)
+    .map(Number)
+    .filter(y => y <= targetYear)
+    .sort((a, b) => b - a);
+  const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
+  return historyData.tradeSnapshots[baseYear] ?? [];
+}
+
+/**
+ * Return cell indices of cities with standing wonders at a given year, using the nearest snapshot.
+ */
+export function getWondersAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): number[] {
+  const snapshotYears = Object.keys(historyData.wonderSnapshots)
+    .map(Number)
+    .filter(y => y <= targetYear)
+    .sort((a, b) => b - a);
+  const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
+  return historyData.wonderSnapshots[baseYear] ?? [];
+}
+
+/**
+ * Return cell indices of cities with active religions at a given year, using the nearest snapshot.
+ */
+export function getReligionsAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): number[] {
+  const snapshotYears = Object.keys(historyData.religionSnapshots)
+    .map(Number)
+    .filter(y => y <= targetYear)
+    .sort((a, b) => b - a);
+  const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
+  return historyData.religionSnapshots[baseYear] ?? [];
+}
+
 export function generateHistory(
   cells: Cell[],
   width: number,
@@ -705,6 +751,9 @@ export function generateHistory(
     years: historyYears,
     numYears,
     snapshots,
+    tradeSnapshots: {},
+    wonderSnapshots: {},
+    religionSnapshots: {},
   };
 
   return { cities, roads, historyData, regions: regionData, continents: continentData };

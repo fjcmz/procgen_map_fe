@@ -88,6 +88,10 @@ export interface HistoryEvent {
   targetId?: number;
   description: string;
   cellsChanged?: number[];
+  /** Cell index of the primary geographic location for this event (city, epicenter, etc.) */
+  locationCellIndex?: number;
+  /** Cell index of the secondary location (e.g. target city for CONTACT/TRADE) */
+  targetCellIndex?: number;
 }
 
 export interface HistoryYear {
@@ -96,11 +100,23 @@ export interface HistoryYear {
   ownershipDelta: Map<number, number>;
 }
 
+/** A pair of cell indices representing the two endpoints of an active trade route. */
+export interface TradeRouteEntry {
+  cell1: number;
+  cell2: number;
+}
+
 export interface HistoryData {
   countries: Country[];
   years: HistoryYear[];
   numYears: number;
   snapshots: Record<number, Int16Array>;
+  /** Active trade route cell-index pairs, snapshotted every 20 years. */
+  tradeSnapshots: Record<number, TradeRouteEntry[]>;
+  /** Cell indices of cities with standing wonders, snapshotted every 20 years. */
+  wonderSnapshots: Record<number, number[]>;
+  /** Cell indices of cities with active religions, snapshotted every 20 years. */
+  religionSnapshots: Record<number, number[]>;
 }
 
 export interface MapData {
@@ -140,6 +156,14 @@ export interface LayerVisibility {
   legend: boolean;
   regions: boolean;
   resources: boolean;
+  /** Current-year event icons/effects on the map canvas. */
+  eventOverlay: boolean;
+  /** Persistent active trade route lines between city pairs. */
+  tradeRoutes: boolean;
+  /** Persistent wonder badges on city icons. */
+  wonderMarkers: boolean;
+  /** Persistent religion markers on city icons. */
+  religionMarkers: boolean;
 }
 
 export interface BiomeInfo {

@@ -19,6 +19,10 @@ const DEFAULT_LAYERS: LayerVisibility = {
   legend: true,
   regions: false,
   resources: false,
+  eventOverlay: true,
+  tradeRoutes: true,
+  wonderMarkers: true,
+  religionMarkers: true,
 };
 
 export default function App() {

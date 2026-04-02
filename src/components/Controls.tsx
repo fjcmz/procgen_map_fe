@@ -30,6 +30,10 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   legend: 'Legend',
   regions: 'Regions',
   resources: 'Resources',
+  eventOverlay: 'Events',
+  tradeRoutes: 'Trades',
+  wonderMarkers: 'Wonders',
+  religionMarkers: 'Religions',
 };
 
 export function Controls({
