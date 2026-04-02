@@ -47,6 +47,12 @@ const EVENT_COLORS: Record<string, string> = {
 
 const PLAY_INTERVAL_MS = 200;
 
+function formatPopulation(pop: number): string {
+  if (pop >= 1_000_000) return `${(pop / 1_000_000).toFixed(1)}M`;
+  if (pop >= 1_000) return `${(pop / 1_000).toFixed(1)}K`;
+  return String(pop);
+}
+
 export function Timeline({ historyData, selectedYear, onYearChange }: TimelineProps) {
   const [playing, setPlaying] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
@@ -116,6 +122,10 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
   // Count events at current year
   const currentYearEvents = cumulativeEvents.filter(e => e.year === selectedYear).length;
 
+  // Get world population at current year
+  const currentYearData = historyData.years.find(y => y.year === selectedYear);
+  const worldPopulation = currentYearData?.worldPopulation ?? 0;
+
   return (
     <>
       {/* Bottom timeline controls */}
@@ -128,7 +138,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
           <div style={styles.header} data-drag-handle>
             <span style={styles.title}>History</span>
             <span style={styles.info}>
-              Year {selectedYear} / {maxYear} &middot; {livingCount}/{totalCount} nations &middot; {currentYearEvents} events
+              Year {selectedYear} / {maxYear} &middot; Pop: {formatPopulation(worldPopulation)} &middot; {livingCount}/{totalCount} nations &middot; {currentYearEvents} events
             </span>
             <button
               style={styles.logToggle}
