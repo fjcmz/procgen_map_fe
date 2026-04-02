@@ -63,6 +63,9 @@ export class CityEntity {
   cataclysms: string[] = [];
   // Transient
   regionId: string = '';
+  contactCities: Set<CityEntity> = new Set();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- typed as Map<TechField, Tech> in timeline layer; loose here to avoid circular dependency
+  knownTechs: Map<string, any> = new Map();
 
   constructor(cellIndex: number, name: string, rng: () => number) {
     this.id = IdUtil.id('city', rngHex(rng)) ?? 'city_unknown';
