@@ -251,6 +251,7 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
     cursor: 'grab',
+    touchAction: 'none',
   },
   title: {
     fontWeight: 'bold',
@@ -337,6 +338,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '10px 12px 8px',
     borderBottom: '1px solid #d4b896',
     cursor: 'grab',
+    touchAction: 'none',
     gap: 8,
   },
   logTitle: {

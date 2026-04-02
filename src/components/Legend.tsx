@@ -58,6 +58,7 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     padding: '8px 10px 4px',
     cursor: 'grab',
+    touchAction: 'none',
   },
   title: {
     fontWeight: 'bold',
