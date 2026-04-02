@@ -59,6 +59,8 @@ export interface City {
   name: string;
   isCapital: boolean;
   kingdomId: number;
+  foundedYear: number;
+  size: 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
 }
 
 export interface Road {
