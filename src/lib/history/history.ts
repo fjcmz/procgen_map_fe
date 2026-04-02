@@ -557,7 +557,7 @@ export function generateHistory(
 
     // WARS: adjacent countries may go to war
     for (const [, [aId, bId]] of borderPairs) {
-      if (rng() > 0.08) continue;
+      if (rng() > 0.15) continue;
       const countryA = countries[aId];
       const countryB = countries[bId];
       if (!countryA?.isAlive || !countryB?.isAlive) continue;
@@ -589,7 +589,7 @@ export function generateHistory(
         }
       }
 
-      const fraction = rng() * 0.3 + 0.1;
+      const fraction = rng() * 0.4 + 0.25;
       const numToTake = Math.max(1, Math.floor(loserBorderCells.length * fraction));
       const taken = bfsContiguousCells(cells, loserBorderCells, rng, numToTake);
 
