@@ -5,6 +5,7 @@ import type { MapCanvasHandle } from './components/MapCanvas';
 import { Controls } from './components/Controls';
 import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
+import { Legend } from './components/Legend';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -138,6 +139,9 @@ export default function App() {
         generating={generating}
         progress={progress}
       />
+      {mapData && layers.legend && (
+        <Legend mapData={mapData} />
+      )}
       {mapData?.history && (
         <Timeline
           historyData={mapData.history}
