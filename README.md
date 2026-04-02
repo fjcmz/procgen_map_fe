@@ -96,6 +96,13 @@ src/
 │   │   │   ├── CityVisitor.ts       # Iterate/select cities from world maps (with predicate)
 │   │   │   ├── RegionVisitor.ts     # Iterate/select regions from world map (with predicate)
 │   │   │   └── index.ts
+│   │   ├── timeline/     # Timeline model — temporal simulation layer (Phase 4)
+│   │   │   ├── events.ts            # Phase 5 placeholder interfaces for 12 event types
+│   │   │   ├── Timeline.ts          # Timeline entity (5000 years, random start year)
+│   │   │   ├── Year.ts              # Year entity (population + 12 event collections)
+│   │   │   ├── TimelineGenerator.ts # Generates Timeline with 5000 Year records
+│   │   │   ├── YearGenerator.ts     # Year preprocessing (pop growth, religions, wars, resources)
+│   │   │   └── index.ts
 │   │   ├── history.ts    # buildPhysicalWorld() + year-by-year simulation + getOwnershipAtYear
 │   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
 │   │   ├── cities.ts     # City placement with spacing constraints

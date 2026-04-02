@@ -67,6 +67,12 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/physical/WorldGenerator.ts` | Generates `World` |
 | `src/lib/history/physical/CityVisitor.ts` | Utility: iterate all/usable cities; random selection with predicate (Fisher-Yates, samples without replacement) |
 | `src/lib/history/physical/RegionVisitor.ts` | Utility: iterate all regions; `selectUpToN` / `selectOne` with predicate (randomized order) |
+| **`src/lib/history/timeline/`** | Timeline model — temporal simulation layer (Phase 4) |
+| `src/lib/history/timeline/events.ts` | Phase 5 placeholder interfaces for 12 event types (Foundation, Contact, CountryEvent, Illustrate, Wonder, Religion, Trade, Cataclysm, War, Tech, Conquer, Empire) |
+| `src/lib/history/timeline/Timeline.ts` | Timeline entity: container for all simulated years, anchored by random `startOfTime` in [-3000, -1001], holds 5000 `Year` records |
+| `src/lib/history/timeline/Year.ts` | Year entity: absolute year number, `worldPopulation`, 12 typed event collection arrays (all empty until Phase 5 generators populate them) |
+| `src/lib/history/timeline/TimelineGenerator.ts` | Generates `Timeline`: sets random `startOfTime`, creates 5000 Year objects via `yearGenerator` |
+| `src/lib/history/timeline/YearGenerator.ts` | Generates `Year` with 9 preprocessing steps: abort check, compute year, sum population, grow populations (biome multiplier), kill/retire illustrates, propagate religions, end wars, reassert war flags, recompute resources |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
 | `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons, legend |
@@ -112,6 +118,25 @@ The generator singletons (`worldGenerator`, `continentGenerator`, `regionGenerat
 The `World`/`Continent`/`Region`/`CityEntity`/`Resource` class instances live **only inside the worker** — they use `Map`/`Set` which are not structured-clone safe and cannot cross the `postMessage` boundary. The worker serializes them into plain `RegionData[]` and `ContinentData[]` arrays for `MapData`.
 
 `CityEntity` (in `physical/CityEntity.ts`) is the rich simulation entity tracking full lifecycle state. It is distinct from the lightweight render-type `City` in `types.ts`, which is used by the renderer for icon/label drawing.
+
+### Timeline Model
+
+`Timeline` and `Year` (in `history/timeline/`) form the temporal simulation layer (Phase 4) that runs on top of the physical world. The `TimelineGenerator` creates a `Timeline` anchored at a random start year ([-3000, -1001]) and generates 5000 `Year` records via `YearGenerator`.
+
+Each `Year` holds 12 typed event collections (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquers, empires) — all empty arrays until Phase 5 generators populate them. The event type interfaces in `timeline/events.ts` are Phase 5 placeholders with only `{ id: string }`.
+
+`YearGenerator.generate()` performs 9 preprocessing steps per year before sub-entity generation:
+1. Abort if `world.endedBy` is set
+2. Compute absolute year from `timeline.startOfTime + years.length`
+3. Sum `worldPopulation` from usable cities (before growth)
+4. Grow each usable city's population using `REGION_BIOME_GROWTH` biome multipliers
+5. Kill/retire illustrates (natural death + 15% war-related) — no-op until Phase 5
+6. Propagate religions (adherence drift, member recompute) — no-op until Phase 5
+7. End expired wars, clear `atWar` flags — no-op until Phase 5
+8. Reassert `atWar` flags for active wars — no-op until Phase 5
+9. Recompute `region.hasResources` via `updateHasResources()`
+
+The timeline classes (`Timeline`, `Year`) live **only inside the worker** alongside the physical model — they are not serialized across the `postMessage` boundary. The `timelineGenerator` and `yearGenerator` singletons follow the same pattern as the physical model generators.
 
 ### Randomness
 

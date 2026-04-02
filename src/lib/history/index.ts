@@ -6,3 +6,4 @@ export { IdUtil } from './IdUtil';
 export type { ReferenceDescriptor } from './HistoryRoot';
 export { HistoryRoot } from './HistoryRoot';
 export * from './physical';
+export * from './timeline';
