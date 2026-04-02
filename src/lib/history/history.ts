@@ -1,5 +1,10 @@
-import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData } from '../types';
+import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData } from '../types';
 import { generateRoads } from './roads';
+import { World } from './physical/World';
+import { Continent } from './physical/Continent';
+import { Region, BIOME_TO_REGION_BIOME } from './physical/Region';
+import { Resource, pickResourceType } from './physical/Resource';
+import { CityEntity } from './physical/CityEntity';
 
 const MOUNTAIN_THRESHOLD = 0.72;
 
@@ -66,6 +71,240 @@ function bfsTerritory(
   }
 }
 
+const PHYSICAL_CITY_NAMES = [
+  'Ironhold', 'Ashenvale', 'Stormgate', 'Rivenmoor', 'Coldhaven',
+  'Embercrest', 'Thornwall', 'Silverpeak', 'Duskwood', 'Brightwater',
+  'Frostmark', 'Grimstone', 'Oakhaven', 'Shadowmere', 'Goldmere',
+  'Irondale', 'Wolfspire', 'Aldenmoor', 'Sunwatch', 'Bleakhaven',
+  'Coppergate', 'Nightfall', 'Dawnrock', 'Stonehearth', 'Harrowfen',
+  'Saltmere', 'Ravenwall', 'Duskreach', 'Brightford', 'Coldstone',
+  'Ambervale', 'Thorngate', 'Ironwater', 'Ashmark', 'Stormvale',
+  'Goldspire', 'Silvermoor', 'Frostwood', 'Grimhaven', 'Oakdale',
+];
+
+let _physicalCityNameIdx = 0;
+
+function nextPhysicalCityName(): string {
+  return PHYSICAL_CITY_NAMES[_physicalCityNameIdx++ % PHYSICAL_CITY_NAMES.length];
+}
+
+function scoreCellForCity(cell: Cell): number {
+  if (cell.isWater || cell.elevation > 0.75) return -Infinity;
+  let score = 0;
+  if (cell.isCoast) score += 3;
+  if (cell.riverFlow > 5) score += 2;
+  if (cell.riverFlow > 15) score += 2;
+  score -= cell.elevation * 4;
+  score += cell.moisture * 1.5;
+  return score;
+}
+
+/**
+ * Builds the physical world hierarchy (World → Continents → Regions → Cities/Resources)
+ * from the terrain cells. Returns the World object plus serializable rendering data.
+ */
+export function buildPhysicalWorld(
+  cells: Cell[],
+  width: number,
+  rng: () => number
+): { world: World; regionData: RegionData[]; continentData: ContinentData[] } {
+  _physicalCityNameIdx = 0;
+  const numCells = cells.length;
+  const world = new World(rng);
+
+  // --- Step 1: Find continents via BFS flood-fill on connected land cells ---
+  const cellContinent = new Int16Array(numCells).fill(-1);
+  const continentCellGroups: number[][] = [];
+
+  for (let i = 0; i < numCells; i++) {
+    if (cells[i].isWater || cellContinent[i] !== -1) continue;
+    const group: number[] = [];
+    const queue = [i];
+    cellContinent[i] = continentCellGroups.length;
+    let head = 0;
+    while (head < queue.length) {
+      const idx = queue[head++];
+      group.push(idx);
+      for (const ni of cells[idx].neighbors) {
+        if (!cells[ni].isWater && cellContinent[ni] === -1) {
+          cellContinent[ni] = continentCellGroups.length;
+          queue.push(ni);
+        }
+      }
+    }
+    continentCellGroups.push(group);
+  }
+
+  // Filter to meaningful continents (>= 10 cells)
+  const validContinentGroups = continentCellGroups.filter(g => g.length >= 10);
+
+  // --- Step 2: For each continent, cluster cells into regions ---
+  const regionData: RegionData[] = [];
+  const continentData: ContinentData[] = [];
+
+  for (const continentCells of validContinentGroups) {
+    const continent = new Continent(rng);
+
+    // Target ~30 cells per region, minimum 1
+    const targetRegionCount = Math.max(1, Math.floor(continentCells.length / 30));
+    const minSeedSpacing2 = (width * 0.06) ** 2;
+
+    // Pick region seeds with minimum spacing
+    const seeds: number[] = [];
+    // Shuffle continentCells order using rng for determinism
+    const shuffled = [...continentCells].sort(() => rng() - 0.5);
+    for (const idx of shuffled) {
+      if (seeds.length >= targetRegionCount) break;
+      const cell = cells[idx];
+      const tooClose = seeds.some(s => {
+        const sc = cells[s];
+        return (sc.x - cell.x) ** 2 + (sc.y - cell.y) ** 2 < minSeedSpacing2;
+      });
+      if (!tooClose) seeds.push(idx);
+    }
+    // Fallback: if no seeds found (very small continent), use first cell
+    if (seeds.length === 0 && continentCells.length > 0) {
+      seeds.push(continentCells[0]);
+    }
+
+    // BFS multi-source fill: assign each land cell to nearest seed (by BFS order)
+    const cellRegionSeed = new Map<number, number>(); // cellIdx → seedIdx
+    const bfsQueue: number[] = [];
+    for (let si = 0; si < seeds.length; si++) {
+      cellRegionSeed.set(seeds[si], si);
+      bfsQueue.push(seeds[si]);
+    }
+    let bfsHead = 0;
+    while (bfsHead < bfsQueue.length) {
+      const idx = bfsQueue[bfsHead++];
+      const owner = cellRegionSeed.get(idx)!;
+      for (const ni of cells[idx].neighbors) {
+        if (!cells[ni].isWater && !cellRegionSeed.has(ni) && continentCells.includes(ni)) {
+          cellRegionSeed.set(ni, owner);
+          bfsQueue.push(ni);
+        }
+      }
+    }
+
+    // Group cells by seed → Region
+    const seedToRegion = new Map<number, Region>();
+    for (let si = 0; si < seeds.length; si++) {
+      // Determine dominant biome for this region
+      const biomeCounts = new Map<string, number>();
+      for (const [cellIdx, seedIdx] of cellRegionSeed) {
+        if (seedIdx !== si) continue;
+        const b = cells[cellIdx].biome;
+        biomeCounts.set(b, (biomeCounts.get(b) ?? 0) + 1);
+      }
+      let dominantBiome = 'GRASSLAND';
+      let maxCount = 0;
+      for (const [b, count] of biomeCounts) {
+        if (count > maxCount) { maxCount = count; dominantBiome = b; }
+      }
+      const regionBiome = BIOME_TO_REGION_BIOME[dominantBiome as keyof typeof BIOME_TO_REGION_BIOME] ?? 'temperate';
+      const region = new Region(regionBiome, rng);
+      region.continentId = continent.id;
+      seedToRegion.set(si, region);
+    }
+
+    // Assign cells to regions and annotate cell.regionId
+    for (const [cellIdx, seedIdx] of cellRegionSeed) {
+      const region = seedToRegion.get(seedIdx);
+      if (!region) continue;
+      region.cellIndices.push(cellIdx);
+      cells[cellIdx].regionId = region.id;
+    }
+
+    // Build region neighbour relationships
+    for (const [cellIdx, seedIdx] of cellRegionSeed) {
+      const region = seedToRegion.get(seedIdx)!;
+      for (const ni of cells[cellIdx].neighbors) {
+        const nSeed = cellRegionSeed.get(ni);
+        if (nSeed !== undefined && nSeed !== seedIdx) {
+          const nRegion = seedToRegion.get(nSeed)!;
+          region.neighbours.add(nRegion.id);
+        }
+      }
+    }
+    for (const region of seedToRegion.values()) {
+      region.neighbourRegions = Array.from(region.neighbours)
+        .map(id => {
+          for (const r of seedToRegion.values()) {
+            if (r.id === id) return r;
+          }
+          return null;
+        })
+        .filter((r): r is Region => r !== null);
+    }
+
+    // --- Step 3: Place resources in each region ---
+    for (const region of seedToRegion.values()) {
+      const count = Math.floor(rng() * 10) + 1;
+      for (let i = 0; i < count; i++) {
+        const type = pickResourceType(rng);
+        region.resources.push(new Resource(type, rng));
+      }
+      region.updateHasResources();
+    }
+
+    // --- Step 4: Place cities in each region ---
+    const globalMinCityDist2 = (width * 0.04) ** 2;
+    const globalPlacedCityCells: number[] = [];
+
+    for (const region of seedToRegion.values()) {
+      const landCells = region.cellIndices
+        .filter(ci => !cells[ci].isWater && cells[ci].elevation < 0.75)
+        .sort((a, b) => scoreCellForCity(cells[b]) - scoreCellForCity(cells[a]));
+
+      if (landCells.length === 0) continue;
+
+      const cityCount = Math.floor(rng() * 5) + 1;
+      let placed = 0;
+
+      for (const ci of landCells) {
+        if (placed >= cityCount) break;
+        const cell = cells[ci];
+        const tooClose = globalPlacedCityCells.some(gi => {
+          const gc = cells[gi];
+          return (gc.x - cell.x) ** 2 + (gc.y - cell.y) ** 2 < globalMinCityDist2;
+        });
+        if (tooClose) continue;
+
+        const cityEntity = new CityEntity(ci, nextPhysicalCityName(), rng);
+        cityEntity.regionId = region.id;
+        region.cities.push(cityEntity);
+        globalPlacedCityCells.push(ci);
+        placed++;
+      }
+    }
+
+    // Attach regions to continent
+    for (const region of seedToRegion.values()) {
+      continent.regions.push(region);
+    }
+
+    // Build rendering data
+    const continentRegionIds: string[] = [];
+    for (const region of seedToRegion.values()) {
+      // Primary resource = first resource (deterministic)
+      const primaryResourceType = region.resources[0]?.type;
+      regionData.push({
+        id: region.id,
+        cellIndices: region.cellIndices,
+        biome: region.biome,
+        continentId: continent.id,
+        primaryResourceType,
+      });
+      continentRegionIds.push(region.id);
+    }
+    continentData.push({ id: continent.id, regionIds: continentRegionIds });
+
+    world.addContinent(continent);
+  }
+
+  return { world, regionData, continentData };
+}
+
 /**
  * Reconstruct the full cell-ownership array at a given year from snapshots + deltas.
  * Returns an Int16Array where value >= 0 is a countryId, -1 is unclaimed, -2 is impassable.
@@ -98,8 +337,11 @@ export function generateHistory(
   width: number,
   rng: () => number,
   numYears: number
-): { cities: City[]; roads: Road[]; historyData: HistoryData } {
+): { cities: City[]; roads: Road[]; historyData: HistoryData; regions: RegionData[]; continents: ContinentData[] } {
   const numCells = cells.length;
+
+  // --- Phase 0: Build physical world (continents, regions, resources, cities) ---
+  const { regionData, continentData } = buildPhysicalWorld(cells, width, rng);
 
   // --- Phase 1: Place initial country capitals ---
   const landCells = cells
@@ -355,5 +597,5 @@ export function generateHistory(
     snapshots,
   };
 
-  return { cities, roads, historyData };
+  return { cities, roads, historyData, regions: regionData, continents: continentData };
 }

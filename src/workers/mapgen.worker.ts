@@ -1,6 +1,6 @@
-import type { GenerateRequest, WorkerMessage } from '../lib/types';
+import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '../lib/types';
 import { createNoiseSamplers, seededPRNG, buildCellGraph, assignElevation, assignMoisture, assignBiomes, generateRivers } from '../lib/terrain';
-import { generateHistory } from '../lib/history';
+import { generateHistory, buildPhysicalWorld } from '../lib/history';
 
 function post(msg: WorkerMessage): void {
   self.postMessage(msg);
@@ -29,6 +29,8 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     let cities: ReturnType<typeof generateHistory>['cities'] = [];
     let roads: ReturnType<typeof generateHistory>['roads'] = [];
     let history: ReturnType<typeof generateHistory>['historyData'] | undefined;
+    let regions: RegionData[] = [];
+    let continents: ContinentData[] = [];
 
     if (doHistory) {
       post({ type: 'PROGRESS', step: 'Simulating history…', pct: 65 });
@@ -37,13 +39,21 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
+      regions = result.regions;
+      continents = result.continents;
+    } else {
+      post({ type: 'PROGRESS', step: 'Building world…', pct: 65 });
+      const rng = seededPRNG(seed + '_world');
+      const result = buildPhysicalWorld(cells, width, rng);
+      regions = result.regionData;
+      continents = result.continentData;
     }
 
     post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
 
     post({
       type: 'DONE',
-      data: { cells, rivers, cities, roads, width, height, history },
+      data: { cells, rivers, cities, roads, width, height, history, regions, continents },
     });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });

@@ -28,6 +28,8 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   icons: 'Icons',
   labels: 'Labels',
   legend: 'Legend',
+  regions: 'Regions',
+  resources: 'Resources',
 };
 
 export function Controls({
