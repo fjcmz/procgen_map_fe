@@ -1,10 +1,12 @@
 import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData } from '../types';
 import { generateRoads } from './roads';
-import { World } from './physical/World';
-import { Continent } from './physical/Continent';
-import { Region, BIOME_TO_REGION_BIOME } from './physical/Region';
-import { Resource, pickResourceType } from './physical/Resource';
-import { CityEntity } from './physical/CityEntity';
+import { BIOME_TO_REGION_BIOME } from './physical/Region';
+import type { World } from './physical/World';
+import { worldGenerator } from './physical/WorldGenerator';
+import { continentGenerator } from './physical/ContinentGenerator';
+import { regionGenerator } from './physical/RegionGenerator';
+import { resourceGenerator } from './physical/ResourceGenerator';
+import { cityGenerator } from './physical/CityGenerator';
 
 const MOUNTAIN_THRESHOLD = 0.72;
 
@@ -229,7 +231,7 @@ export function buildPhysicalWorld(
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[] } {
   _physicalCityNameIdx = 0;
   const numCells = cells.length;
-  const world = new World(rng);
+  const world = worldGenerator.generate(rng);
 
   // --- Step 1: Find continents via BFS flood-fill on connected land cells ---
   const cellContinent = new Int16Array(numCells).fill(-1);
@@ -262,7 +264,7 @@ export function buildPhysicalWorld(
   const continentData: ContinentData[] = [];
 
   for (const continentCells of validContinentGroups) {
-    const continent = new Continent(rng);
+    const continent = continentGenerator.generate(rng, world);
 
     // Target ~30 cells per region, minimum 1
     const targetRegionCount = Math.max(1, Math.floor(continentCells.length / 30));
@@ -306,7 +308,7 @@ export function buildPhysicalWorld(
     }
 
     // Group cells by seed → Region
-    const seedToRegion = new Map<number, Region>();
+    const seedToRegion = new Map<number, ReturnType<typeof regionGenerator.generate>>();
     for (let si = 0; si < seeds.length; si++) {
       // Determine dominant biome for this region
       const biomeCounts = new Map<string, number>();
@@ -321,7 +323,7 @@ export function buildPhysicalWorld(
         if (count > maxCount) { maxCount = count; dominantBiome = b; }
       }
       const regionBiome = BIOME_TO_REGION_BIOME[dominantBiome as keyof typeof BIOME_TO_REGION_BIOME] ?? 'temperate';
-      const region = new Region(regionBiome, rng);
+      const region = regionGenerator.generate(regionBiome, rng, world);
       region.continentId = continent.id;
       seedToRegion.set(si, region);
     }
@@ -334,34 +336,31 @@ export function buildPhysicalWorld(
       cells[cellIdx].regionId = region.id;
     }
 
-    // Build region neighbour relationships
+    // Build region neighbour relationships from cell borders
+    const regionNeighbourMap = new Map<number, Set<number>>(); // seedIdx → Set<seedIdx>
+    for (let si = 0; si < seeds.length; si++) regionNeighbourMap.set(si, new Set());
     for (const [cellIdx, seedIdx] of cellRegionSeed) {
-      const region = seedToRegion.get(seedIdx)!;
       for (const ni of cells[cellIdx].neighbors) {
         const nSeed = cellRegionSeed.get(ni);
         if (nSeed !== undefined && nSeed !== seedIdx) {
-          const nRegion = seedToRegion.get(nSeed)!;
-          region.neighbours.add(nRegion.id);
+          regionNeighbourMap.get(seedIdx)!.add(nSeed);
         }
       }
     }
-    for (const region of seedToRegion.values()) {
-      region.neighbourRegions = Array.from(region.neighbours)
-        .map(id => {
-          for (const r of seedToRegion.values()) {
-            if (r.id === id) return r;
-          }
-          return null;
-        })
-        .filter((r): r is Region => r !== null);
+    for (const [si, neighbourSeeds] of regionNeighbourMap) {
+      const region = seedToRegion.get(si)!;
+      const neighbours = Array.from(neighbourSeeds)
+        .map(ns => seedToRegion.get(ns))
+        .filter((r): r is NonNullable<typeof r> => r !== undefined);
+      regionGenerator.assignNeighbours(region, neighbours);
     }
+    regionGenerator.updatePotentialNeighbours(world);
 
     // --- Step 3: Place resources in each region ---
     for (const region of seedToRegion.values()) {
       const count = Math.floor(rng() * 10) + 1;
       for (let i = 0; i < count; i++) {
-        const type = pickResourceType(rng);
-        region.resources.push(new Resource(type, rng));
+        region.resources.push(resourceGenerator.generate(rng));
       }
       region.updateHasResources();
     }
@@ -389,8 +388,7 @@ export function buildPhysicalWorld(
         });
         if (tooClose) continue;
 
-        const cityEntity = new CityEntity(ci, nextPhysicalCityName(), rng);
-        cityEntity.regionId = region.id;
+        const cityEntity = cityGenerator.generate(ci, nextPhysicalCityName(), rng, region, world);
         region.cities.push(cityEntity);
         globalPlacedCityCells.push(ci);
         placed++;

@@ -82,12 +82,19 @@ src/
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
 │   │   └── index.ts
 │   ├── history/          # Civilizational simulation
-│   │   ├── physical/     # Phase 2: Physical model data classes
-│   │   │   ├── Resource.ts    # Resource entity (17 types, weights, TRADE_MIN/USE)
-│   │   │   ├── CityEntity.ts  # Rich city entity (lifecycle, size, population)
-│   │   │   ├── Region.ts      # Region entity (biome, cells, neighbours, resources)
-│   │   │   ├── Continent.ts   # Continent entity (groups regions)
-│   │   │   ├── World.ts       # World entity (all runtime index maps)
+│   │   ├── physical/     # Physical model — data classes (Phase 2) + generators/visitors (Phase 3)
+│   │   │   ├── Resource.ts          # Resource entity (17 types, weights, TRADE_MIN/USE)
+│   │   │   ├── CityEntity.ts        # Rich city entity (lifecycle, size, population)
+│   │   │   ├── Region.ts            # Region entity (biome, cells, neighbour graph, potentialNeighbours)
+│   │   │   ├── Continent.ts         # Continent entity (groups regions)
+│   │   │   ├── World.ts             # World entity (all runtime index maps)
+│   │   │   ├── ResourceGenerator.ts # Generates Resource instances (weighted type + dice roll)
+│   │   │   ├── CityGenerator.ts     # Generates CityEntity, inserts into world.mapCities
+│   │   │   ├── RegionGenerator.ts   # Generates Region; assignNeighbours + updatePotentialNeighbours
+│   │   │   ├── ContinentGenerator.ts# Generates Continent, inserts into world.mapContinents
+│   │   │   ├── WorldGenerator.ts    # Generates World
+│   │   │   ├── CityVisitor.ts       # Iterate/select cities from world maps (with predicate)
+│   │   │   ├── RegionVisitor.ts     # Iterate/select regions from world map (with predicate)
 │   │   │   └── index.ts
 │   │   ├── history.ts    # buildPhysicalWorld() + year-by-year simulation + getOwnershipAtYear
 │   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
