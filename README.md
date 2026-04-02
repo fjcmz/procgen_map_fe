@@ -16,9 +16,10 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **History simulation** — optional multi-century timeline: countries form, go to war, conquer territory, and collapse; cities and kingdoms are derived from this simulation
 - **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
+- **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
 - **Timeline scrubber** — interactive year slider to replay how kingdoms rose and fell
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
-- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, and the biome legend
+- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, region borders, and resource icons
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
 
 ## Tech Stack
@@ -54,10 +55,11 @@ npm run preview
 3. **Moisture** — separate FBM noise layer with coastal humidity boost
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
-6. **History** *(optional)* — if enabled, simulates N years of civilizational history: places capitals/cities on suitable terrain, BFS-assigns initial kingdoms, then runs a year-by-year event loop (wars, conquests, merges, collapses); cities and kingdom borders are derived entirely from this step
-7. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
+6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region on highest-scoring terrain cells
+7. **History** *(optional)* — if enabled, simulates N years of civilizational history: places capitals/cities on suitable terrain, BFS-assigns initial kingdoms, then runs a year-by-year event loop (wars, conquests, merges, collapses); cities and kingdom borders are derived entirely from this step
+8. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
 
-If history is **disabled**, steps 6–7 are skipped and the map shows terrain only (no cities, roads, or kingdoms).
+If history is **disabled**, steps 7–8 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
 
 ## Project Structure
 
@@ -79,7 +81,14 @@ src/
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
 │   │   └── index.ts
 │   ├── history/          # Civilizational simulation
-│   │   ├── history.ts    # Year-by-year simulation + getOwnershipAtYear
+│   │   ├── physical/     # Phase 2: Physical model data classes
+│   │   │   ├── Resource.ts    # Resource entity (17 types, weights, TRADE_MIN/USE)
+│   │   │   ├── CityEntity.ts  # Rich city entity (lifecycle, size, population)
+│   │   │   ├── Region.ts      # Region entity (biome, cells, neighbours, resources)
+│   │   │   ├── Continent.ts   # Continent entity (groups regions)
+│   │   │   ├── World.ts       # World entity (all runtime index maps)
+│   │   │   └── index.ts
+│   │   ├── history.ts    # buildPhysicalWorld() + year-by-year simulation + getOwnershipAtYear
 │   │   ├── borders.ts    # BFS flood-fill kingdom borders from capitals
 │   │   ├── cities.ts     # City placement with spacing constraints
 │   │   ├── roads.ts      # A* road pathfinding between cities

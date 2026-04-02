@@ -4,9 +4,11 @@ This file provides context and guidelines for AI assistants working on this code
 
 ## Project Overview
 
-Procedural fantasy map generator built with React, TypeScript, and Vite. Generates Voronoi-based terrain maps with biomes and rivers (always), and optionally a full civilizational history (countries, wars, conquests, city placement, kingdom borders, roads) — all deterministic from a seed string.
+Procedural fantasy map generator built with React, TypeScript, and Vite. Generates Voronoi-based terrain maps with biomes and rivers (always), partitions the terrain into geographic continents and regions (always), and optionally runs a full civilizational history (countries, wars, conquests, city placement, kingdom borders, roads) — all deterministic from a seed string.
 
-**Key design principle**: Cities and kingdoms are outputs of the history simulation, not independent pipeline steps. When history is disabled, the map shows terrain only.
+**Key design principles**:
+- The physical world (continents, regions, resources) is always built from terrain — it runs even without history.
+- Cities and kingdoms are outputs of the history simulation, not independent pipeline steps. When history is disabled, the map shows terrain and geographic structure only.
 
 ## Commands
 
@@ -25,11 +27,11 @@ There is no test suite. Verify correctness by running `npm run build` (catches t
 All heavy computation runs in `src/workers/mapgen.worker.ts` (a Web Worker). The pipeline is strictly sequential:
 
 ```
-voronoi → elevation → moisture → biomes → rivers
-  └─ (if generateHistory=true) → history → roads
+voronoi → elevation → moisture → biomes → rivers → buildPhysicalWorld
+  └─ (if generateHistory=true) → history simulation → roads
 ```
 
-The terrain steps (voronoi through rivers) always run. The history step is opt-in via `GenerateRequest.generateHistory`. If history is disabled, the pipeline ends after rivers — no cities, roads, or kingdom borders are generated.
+The terrain steps (voronoi through rivers) always run. `buildPhysicalWorld` also always runs — it annotates cells with `regionId`, and produces `RegionData[]`/`ContinentData[]` in `MapData` regardless of the history flag. The history simulation is opt-in via `GenerateRequest.generateHistory`. If history is disabled, the pipeline ends after `buildPhysicalWorld` — no kingdom simulation, roads, or timeline data is generated.
 
 Each step is a pure function in `src/lib/` that takes cells and returns updated cells or derived data.
 
@@ -47,11 +49,17 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/terrain/moisture.ts` | FBM moisture assignment |
 | `src/lib/terrain/biomes.ts` | Whittaker biome classification + `BIOME_INFO` palette |
 | `src/lib/terrain/rivers.ts` | Drainage map + flow accumulation + river tracing |
-| **`src/lib/history/`** | Civilizational simulation |
+| **`src/lib/history/`** | Civilizational simulation + physical world model |
+| `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + year-by-year simulation (expansion, wars, merges, collapses) + `getOwnershipAtYear` |
 | `src/lib/history/cities.ts` | City placement with spacing + kingdom grouping |
 | `src/lib/history/borders.ts` | BFS flood-fill kingdom borders from capitals |
 | `src/lib/history/roads.ts` | A* road pathfinding between cities |
-| `src/lib/history/history.ts` | Year-by-year simulation (expansion, wars, merges, collapses) + `getOwnershipAtYear` |
+| **`src/lib/history/physical/`** | Phase 2: Physical model data classes |
+| `src/lib/history/physical/Resource.ts` | Resource entity: weighted type enum (17 types across strategic/agricultural/luxury), TRADE_MIN=10, TRADE_USE=5 |
+| `src/lib/history/physical/CityEntity.ts` | City entity: full lifecycle (founded, contacted, size enum, population rolls, `canTradeMore()`); distinct from render-type `City` in `types.ts` |
+| `src/lib/history/physical/Region.ts` | Region entity: `RegionBiome` enum with growth multipliers, cell grouping, neighbour graph, `BIOME_TO_REGION_BIOME` mapping |
+| `src/lib/history/physical/Continent.ts` | Continent entity: groups regions, world back-reference |
+| `src/lib/history/physical/World.ts` | World entity: continent list + runtime index Maps (`mapRegions`, `mapCities`, `mapUsableCities`, etc.) |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
 | `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons, legend |
@@ -69,10 +77,12 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 - `elevation`, `moisture` → set by `terrain/elevation.ts` / `terrain/moisture.ts`
 - `biome` → set by `terrain/biomes.ts`
 - `river`, `flow` → set by `terrain/rivers.ts`
+- `regionId` → set by `history/history.ts` (`buildPhysicalWorld`), always present after generation
 - `kingdom` → set by `history/history.ts` (year-0 BFS, updated by renderer at selected year)
 
 `MapData` (returned from worker) carries:
-- `cells` — always present
+- `cells` — always present; each cell has `regionId?` after generation
+- `regions?`, `continents?` — always present (built even without history); serializable `RegionData[]`/`ContinentData[]` for rendering geographic structure
 - `cities?`, `roads?` — only present when history was generated
 - `history?` — `HistoryData` with `countries`, `years[]`, decade `snapshots`
 
@@ -80,6 +90,19 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 - `countries: Country[]` — each country has id, name, capitalCellIndex, color, isAlive
 - `years: HistoryYear[]` — per-year events (Wars, Conquests, Merges, Collapses) + sparse `ownershipDeltas`
 - `snapshots` — full `Int16Array` of cell→countryId at every 10th year (for fast scrubbing)
+
+### Physical World Model
+
+`buildPhysicalWorld(cells, width, rng)` in `history/history.ts` always runs before the optional history simulation:
+
+1. **Continents**: BFS flood-fill finds connected land cells; groups ≥ 10 cells form a `Continent`
+2. **Regions**: each continent is subdivided into ~30-cell clusters via multi-source BFS seeding; each gets a `RegionBiome` derived from its dominant Voronoi biome
+3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (17 types: strategic/agricultural/luxury)
+4. **Cities**: 1–5 `CityEntity` objects per region, placed on highest-scoring terrain cells
+
+The `World`/`Continent`/`Region`/`CityEntity`/`Resource` class instances live **only inside the worker** — they use `Map`/`Set` which are not structured-clone safe and cannot cross the `postMessage` boundary. The worker serializes them into plain `RegionData[]` and `ContinentData[]` arrays for `MapData`.
+
+`CityEntity` (in `physical/CityEntity.ts`) is the rich simulation entity tracking full lifecycle state. It is distinct from the lightweight render-type `City` in `types.ts`, which is used by the renderer for icon/label drawing.
 
 ### Randomness
 
@@ -132,3 +155,5 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`, which builds and deploy
 - **History is the cities/kingdoms source**: Do not call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `history/history.ts` owns that responsibility. Calling both would double-place cities and corrupt kingdom state.
 - **Ownership reconstruction**: `getOwnerAtYear` must apply deltas in strict year order. Out-of-order application produces incorrect borders. The snapshots are keyed by decade (0, 10, 20…); always start from `Math.floor(year / 10) * 10`.
 - **`cell.kingdom` vs history**: `cell.kingdom` is written once by `history/history.ts` as the year-0 state. The renderer overwrites the visual ownership at the selected year but must never mutate `cell.kingdom` — it is the baseline and is needed to reconstruct history from scratch.
+- **`buildPhysicalWorld` always runs**: Unlike the history simulation, `buildPhysicalWorld` is called for every generation (terrain-only or history). `MapData.regions` and `MapData.continents` are always populated. Do not gate region/resource rendering on `mapData.history`.
+- **Don't postMessage class instances**: `World`, `Region`, `Continent` use `Map` and `Set` which are not structured-clone safe. Only the plain `RegionData[]`/`ContinentData[]` arrays cross the worker boundary. Keep the class instances inside the worker.
