@@ -100,6 +100,125 @@ function scoreCellForCity(cell: Cell): number {
 }
 
 /**
+ * BFS through a set of eligible cells starting from a random seed.
+ * Returns a geographically contiguous subset of up to maxCount cells.
+ */
+function bfsContiguousCells(
+  cells: Cell[],
+  eligible: number[],
+  rng: () => number,
+  maxCount: number
+): number[] {
+  if (eligible.length === 0) return [];
+  const eligibleSet = new Set<number>(eligible);
+  const seed = eligible[Math.floor(rng() * eligible.length)];
+  const visited = new Set<number>([seed]);
+  const queue: number[] = [seed];
+  const result: number[] = [];
+  let head = 0;
+  while (head < queue.length && result.length < maxCount) {
+    const current = queue[head++];
+    result.push(current);
+    for (const ni of cells[current].neighbors) {
+      if (!visited.has(ni) && eligibleSet.has(ni)) {
+        visited.add(ni);
+        queue.push(ni);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Grow a country's territory by claiming up to numToClaim unclaimed (-1) cells,
+ * BFS-expanding from a single randomly chosen frontier cell rather than scanning
+ * all cells in index order.
+ */
+function bfsExpand(
+  cells: Cell[],
+  ownership: Int16Array,
+  ownershipDelta: Map<number, number>,
+  countryId: number,
+  numToClaim: number,
+  rng: () => number
+): number {
+  const numCells = cells.length;
+  const frontier: number[] = [];
+  for (let i = 0; i < numCells; i++) {
+    if (ownership[i] !== countryId) continue;
+    for (const ni of cells[i].neighbors) {
+      if (ownership[ni] === -1) { frontier.push(i); break; }
+    }
+  }
+  if (frontier.length === 0) return 0;
+
+  const seed = frontier[Math.floor(rng() * frontier.length)];
+  const visitedOwned = new Set<number>([seed]);
+  const queue: number[] = [seed];
+  let claimed = 0;
+  let head = 0;
+
+  while (head < queue.length && claimed < numToClaim) {
+    const current = queue[head++];
+    for (const ni of cells[current].neighbors) {
+      if (claimed >= numToClaim) break;
+      if (ownership[ni] === -1) {
+        ownership[ni] = countryId;
+        ownershipDelta.set(ni, countryId);
+        claimed++;
+      } else if (ownership[ni] === countryId && !visitedOwned.has(ni)) {
+        visitedOwned.add(ni);
+        queue.push(ni);
+      }
+    }
+  }
+  return claimed;
+}
+
+/**
+ * Eliminate isolated cells — cells with zero same-owner land neighbors —
+ * by reassigning them to the majority neighboring owner.
+ * Runs up to maxPasses times; stops early when no changes occur.
+ */
+function normalizeBorders(
+  cells: Cell[],
+  ownership: Int16Array,
+  ownershipDelta: Map<number, number>,
+  maxPasses = 3
+): void {
+  const numCells = cells.length;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let changed = false;
+    for (let i = 0; i < numCells; i++) {
+      const owner = ownership[i];
+      if (owner < 0) continue;
+      const neighborOwnerCount = new Map<number, number>();
+      let sameOwnerCount = 0;
+      for (const ni of cells[i].neighbors) {
+        if (cells[ni].isWater || ownership[ni] === -2) continue;
+        const no = ownership[ni];
+        if (no === owner) {
+          sameOwnerCount++;
+        } else if (no >= 0) {
+          neighborOwnerCount.set(no, (neighborOwnerCount.get(no) ?? 0) + 1);
+        }
+        // no === -1 (unclaimed): counts as land for isolation detection
+        // but doesn't vote for majority reassignment
+      }
+      if (sameOwnerCount > 0 || neighborOwnerCount.size === 0) continue;
+      let majorityOwner = -1, maxCount = 0;
+      for (const [id, count] of neighborOwnerCount) {
+        if (count > maxCount) { maxCount = count; majorityOwner = id; }
+      }
+      ownership[i] = majorityOwner;
+      ownershipDelta.set(i, majorityOwner);
+      changed = true;
+    }
+    if (!changed) break;
+  }
+}
+
+/**
  * Builds the physical world hierarchy (World → Continents → Regions → Cities/Resources)
  * from the terrain cells. Returns the World object plus serializable rendering data.
  */
@@ -424,20 +543,9 @@ export function generateHistory(
     for (const country of aliveCountries) {
       if (rng() > 0.4) continue;
       const numToClaim = Math.floor(rng() * 3) + 1;
-      let claimed = 0;
-      outer: for (let i = 0; i < numCells && claimed < numToClaim; i++) {
-        if (ownership[i] !== country.id) continue;
-        for (const ni of cells[i].neighbors) {
-          if (ownership[ni] === -1 && claimed < numToClaim) {
-            ownership[ni] = country.id;
-            ownershipDelta.set(ni, country.id);
-            cellCounts.set(country.id, (cellCounts.get(country.id) ?? 0) + 1);
-            claimed++;
-            if (claimed >= numToClaim) break outer;
-          }
-        }
-      }
+      const claimed = bfsExpand(cells, ownership, ownershipDelta, country.id, numToClaim, rng);
       if (claimed > 0) {
+        cellCounts.set(country.id, (cellCounts.get(country.id) ?? 0) + claimed);
         events.push({
           type: 'EXPANSION',
           year,
@@ -483,7 +591,7 @@ export function generateHistory(
 
       const fraction = rng() * 0.3 + 0.1;
       const numToTake = Math.max(1, Math.floor(loserBorderCells.length * fraction));
-      const taken = loserBorderCells.slice(0, numToTake);
+      const taken = bfsContiguousCells(cells, loserBorderCells, rng, numToTake);
 
       for (const ci of taken) {
         ownership[ci] = winnerId;
@@ -559,6 +667,8 @@ export function generateHistory(
         });
       }
     }
+
+    normalizeBorders(cells, ownership, ownershipDelta);
 
     historyYears.push({ year, events, ownershipDelta });
 
