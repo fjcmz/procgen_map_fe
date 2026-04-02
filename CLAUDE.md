@@ -54,12 +54,19 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/cities.ts` | City placement with spacing + kingdom grouping |
 | `src/lib/history/borders.ts` | BFS flood-fill kingdom borders from capitals |
 | `src/lib/history/roads.ts` | A* road pathfinding between cities |
-| **`src/lib/history/physical/`** | Phase 2: Physical model data classes |
+| **`src/lib/history/physical/`** | Physical model — data classes (Phase 2) + generators/visitors (Phase 3) |
 | `src/lib/history/physical/Resource.ts` | Resource entity: weighted type enum (17 types across strategic/agricultural/luxury), TRADE_MIN=10, TRADE_USE=5 |
 | `src/lib/history/physical/CityEntity.ts` | City entity: full lifecycle (founded, contacted, size enum, population rolls, `canTradeMore()`); distinct from render-type `City` in `types.ts` |
-| `src/lib/history/physical/Region.ts` | Region entity: `RegionBiome` enum with growth multipliers, cell grouping, neighbour graph, `BIOME_TO_REGION_BIOME` mapping |
+| `src/lib/history/physical/Region.ts` | Region entity: `RegionBiome` enum with growth multipliers, cell grouping, neighbour graph, `BIOME_TO_REGION_BIOME` mapping, `potentialNeighbours` BFS layers |
 | `src/lib/history/physical/Continent.ts` | Continent entity: groups regions, world back-reference |
 | `src/lib/history/physical/World.ts` | World entity: continent list + runtime index Maps (`mapRegions`, `mapCities`, `mapUsableCities`, etc.) |
+| `src/lib/history/physical/ResourceGenerator.ts` | Generates `Resource` instances: samples weighted type, rolls `10d10+20` for `original` |
+| `src/lib/history/physical/CityGenerator.ts` | Generates `CityEntity`: sets `regionId`, inserts into `world.mapCities` |
+| `src/lib/history/physical/RegionGenerator.ts` | Generates `Region`; `assignNeighbours` (symmetric cell-geometry adjacency); `updatePotentialNeighbours` (BFS-layered distance graph for all regions) |
+| `src/lib/history/physical/ContinentGenerator.ts` | Generates `Continent`: sets `worldId`, inserts into `world.mapContinents` |
+| `src/lib/history/physical/WorldGenerator.ts` | Generates `World` |
+| `src/lib/history/physical/CityVisitor.ts` | Utility: iterate all/usable cities; random selection with predicate (Fisher-Yates, samples without replacement) |
+| `src/lib/history/physical/RegionVisitor.ts` | Utility: iterate all regions; `selectUpToN` / `selectOne` with predicate (randomized order) |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
 | `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons, legend |
@@ -93,12 +100,14 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 
 ### Physical World Model
 
-`buildPhysicalWorld(cells, width, rng)` in `history/history.ts` always runs before the optional history simulation:
+`buildPhysicalWorld(cells, width, rng)` in `history/history.ts` always runs before the optional history simulation. It uses the Phase 3 generator classes internally:
 
-1. **Continents**: BFS flood-fill finds connected land cells; groups ≥ 10 cells form a `Continent`
-2. **Regions**: each continent is subdivided into ~30-cell clusters via multi-source BFS seeding; each gets a `RegionBiome` derived from its dominant Voronoi biome
-3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (17 types: strategic/agricultural/luxury)
-4. **Cities**: 1–5 `CityEntity` objects per region, placed on highest-scoring terrain cells
+1. **Continents**: BFS flood-fill finds connected land cells; groups ≥ 10 cells form a `Continent` (via `continentGenerator`)
+2. **Regions**: each continent is subdivided into ~30-cell clusters via multi-source BFS seeding; each gets a `RegionBiome` derived from its dominant Voronoi biome (via `regionGenerator`); geographic adjacency is wired with `regionGenerator.assignNeighbours`; `regionGenerator.updatePotentialNeighbours` computes BFS-layered `potentialNeighbours` (distance graph) for all regions after all continents are built
+3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (17 types: strategic/agricultural/luxury) via `resourceGenerator`
+4. **Cities**: 1–5 `CityEntity` objects per region, placed on highest-scoring terrain cells, via `cityGenerator` (which also inserts into `world.mapCities`)
+
+The generator singletons (`worldGenerator`, `continentGenerator`, `regionGenerator`, `resourceGenerator`, `cityGenerator`) encapsulate object creation and map-insertion. The visitor singletons (`cityVisitor`, `regionVisitor`) provide iteration and predicate-based selection over the world's runtime index maps — used by Phase 4+ timeline simulation.
 
 The `World`/`Continent`/`Region`/`CityEntity`/`Resource` class instances live **only inside the worker** — they use `Map`/`Set` which are not structured-clone safe and cannot cross the `postMessage` boundary. The worker serializes them into plain `RegionData[]` and `ContinentData[]` arrays for `MapData`.
 
