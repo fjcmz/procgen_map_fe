@@ -41,6 +41,7 @@ export class Region {
   cellIndices: number[] = [];
   // Transient
   continentId: string = '';
+  neighboursCount: number = 0;
   isCountry: boolean = false;
   countryId: string | null = null;
   hasResources: boolean = false;

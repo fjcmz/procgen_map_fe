@@ -36,14 +36,8 @@ export class World {
   }
 
   addContinent(continent: Continent): void {
-    continent.worldId = this.id;
     this.continents.push(continent);
-    this.mapContinents.set(continent.id, continent);
-    for (const region of continent.regions) {
-      this.mapRegions.set(region.id, region);
-      for (const city of region.cities) {
-        this.mapCities.set(city.id, city);
-      }
-    }
+    // worldId and mapContinents are set by ContinentGenerator.
+    // mapRegions is set by RegionGenerator. mapCities is set by CityGenerator.
   }
 }
