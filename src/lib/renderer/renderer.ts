@@ -1,7 +1,9 @@
-import type { MapData, LayerVisibility, Cell } from '../types';
+import type { MapData, LayerVisibility, Cell, RegionData } from '../types';
 import { BIOME_INFO } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear } from '../history/history';
+import { getResourceCategory } from '../history/physical/Resource';
+import type { ResourceType } from '../history/physical/Resource';
 
 // Kingdom colors (semi-transparent fills and border strokes)
 const KINGDOM_COLORS = [
@@ -377,6 +379,129 @@ function drawLabels(
   }
 }
 
+function drawRegionBorders(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[]
+): void {
+  ctx.strokeStyle = 'rgba(100,80,50,0.35)';
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([]);
+
+  const drawnPairs = new Set<string>();
+
+  for (const cell of cells) {
+    if (cell.isWater || !cell.regionId) continue;
+    for (const ni of cell.neighbors) {
+      const neighbor = cells[ni];
+      if (neighbor.isWater) continue;
+      if (!neighbor.regionId || neighbor.regionId === cell.regionId) continue;
+      const key = cell.index < ni ? `${cell.index}-${ni}` : `${ni}-${cell.index}`;
+      if (drawnPairs.has(key)) continue;
+      drawnPairs.add(key);
+
+      const sharedVerts = cell.vertices.filter(v =>
+        neighbor.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
+      );
+      if (sharedVerts.length < 2) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
+      ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  // Pickaxe: two rects forming a cross
+  ctx.fillStyle = '#555';
+  ctx.strokeStyle = '#333';
+  ctx.lineWidth = 0.5;
+  // Vertical bar
+  ctx.fillRect(x - s * 0.15, y - s * 0.6, s * 0.3, s * 1.2);
+  // Horizontal bar
+  ctx.fillRect(x - s * 0.6, y - s * 0.15, s * 1.2, s * 0.3);
+  ctx.strokeRect(x - s * 0.6, y - s * 0.6, s * 1.2, s * 1.2);
+}
+
+function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  // Wheat stalk: vertical stem with diagonal seeds
+  ctx.strokeStyle = '#b8860b';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + s);
+  ctx.lineTo(x, y - s);
+  ctx.stroke();
+  // Grains branching out
+  const offsets = [-0.7, -0.35, 0, 0.35, 0.7];
+  for (const dy of offsets) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + dy * s);
+    ctx.lineTo(x - s * 0.45, y + dy * s - s * 0.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y + dy * s);
+    ctx.lineTo(x + s * 0.45, y + dy * s - s * 0.2);
+    ctx.stroke();
+  }
+}
+
+function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  // 6-pointed sparkle (lines radiating from center)
+  ctx.strokeStyle = '#d4a017';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(x + Math.cos(angle) * s * 0.3, y + Math.sin(angle) * s * 0.3);
+    ctx.lineTo(x + Math.cos(angle) * s, y + Math.sin(angle) * s);
+    ctx.stroke();
+  }
+  // Center dot
+  ctx.fillStyle = '#d4a017';
+  ctx.beginPath();
+  ctx.arc(x, y, s * 0.25, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawResources(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  regions: RegionData[]
+): void {
+  const iconSize = 5;
+
+  for (const region of regions) {
+    if (!region.primaryResourceType || region.cellIndices.length === 0) continue;
+
+    // Find center cell: cell nearest the median x/y of the region
+    let sumX = 0, sumY = 0;
+    for (const ci of region.cellIndices) {
+      sumX += cells[ci].x;
+      sumY += cells[ci].y;
+    }
+    const mx = sumX / region.cellIndices.length;
+    const my = sumY / region.cellIndices.length;
+
+    let bestDist = Infinity;
+    let centerCell = cells[region.cellIndices[0]];
+    for (const ci of region.cellIndices) {
+      const c = cells[ci];
+      const d = (c.x - mx) ** 2 + (c.y - my) ** 2;
+      if (d < bestDist) { bestDist = d; centerCell = c; }
+    }
+
+    if (centerCell.isWater) continue;
+
+    const category = getResourceCategory(region.primaryResourceType as ResourceType);
+    switch (category) {
+      case 'strategic':    drawStrategicIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
+      case 'agricultural': drawAgriculturalIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
+      case 'luxury':       drawLuxuryIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
+    }
+  }
+}
+
 function drawLegend(
   ctx: CanvasRenderingContext2D,
   data: MapData
@@ -442,8 +567,14 @@ export function render(
   // Layer 3: Noisy coastlines
   drawNoisyCoastlines(ctx, data.cells);
 
-  // Layer 4: Rivers
+  // Layer 4: Region borders (before rivers so rivers draw on top)
+  if (layers.regions) drawRegionBorders(ctx, data.cells);
+
+  // Layer 4b: Rivers
   if (layers.rivers) drawRivers(ctx, data);
+
+  // Layer 4c: Resource icons
+  if (layers.resources) drawResources(ctx, data.cells, data.regions ?? []);
 
   // Layer 5: Kingdom borders
   if (layers.borders) {

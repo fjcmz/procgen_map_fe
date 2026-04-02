@@ -18,6 +18,21 @@ export type BiomeType =
   | 'MARSH'
   | 'ICE';
 
+export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
+
+export interface RegionData {
+  id: string;
+  cellIndices: number[];
+  biome: RegionBiome;
+  continentId: string;
+  primaryResourceType?: string;
+}
+
+export interface ContinentData {
+  id: string;
+  regionIds: string[];
+}
+
 export interface Cell {
   index: number;
   x: number;
@@ -31,6 +46,7 @@ export interface Cell {
   isCoast: boolean;
   riverFlow: number;
   kingdom: number | null;
+  regionId?: string;
 }
 
 export interface River {
@@ -89,6 +105,8 @@ export interface MapData {
   width: number;
   height: number;
   history?: HistoryData;
+  regions?: RegionData[];
+  continents?: ContinentData[];
 }
 
 export interface GenerateRequest {
@@ -114,6 +132,8 @@ export interface LayerVisibility {
   icons: boolean;
   labels: boolean;
   legend: boolean;
+  regions: boolean;
+  resources: boolean;
 }
 
 export interface BiomeInfo {
