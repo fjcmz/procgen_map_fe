@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '../lib/types';
-import { createNoiseSamplers, seededPRNG, buildCellGraph, assignElevation, assignMoisture, assignBiomes, generateRivers } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, assignMoisture, assignBiomes, generateRivers } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 
@@ -15,7 +15,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     const { cells } = buildCellGraph(seed, numCells, width, height);
 
     post({ type: 'PROGRESS', step: 'Shaping terrain\u2026', pct: 20 });
-    const noise = createNoiseSamplers(seed);
+    const noise = createNoiseSamplers3D(seed);
     assignElevation(cells, width, height, noise, waterRatio);
 
     post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 35 });

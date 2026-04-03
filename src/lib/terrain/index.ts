@@ -1,5 +1,5 @@
-export { seededPRNG, createNoiseSamplers, fbm } from './noise';
-export type { NoiseSampler } from './noise';
+export { seededPRNG, createNoiseSamplers, createNoiseSamplers3D, fbm, fbmCylindrical } from './noise';
+export type { NoiseSampler, NoiseSampler3D } from './noise';
 export { buildCellGraph } from './voronoi';
 export type { CellGraph } from './voronoi';
 export { assignElevation } from './elevation';

@@ -279,7 +279,9 @@ export function buildPhysicalWorld(
       const cell = cells[idx];
       const tooClose = seeds.some(s => {
         const sc = cells[s];
-        return (sc.x - cell.x) ** 2 + (sc.y - cell.y) ** 2 < minSeedSpacing2;
+        const dx = Math.abs(sc.x - cell.x);
+        const wrappedDx = Math.min(dx, width - dx);
+        return wrappedDx ** 2 + (sc.y - cell.y) ** 2 < minSeedSpacing2;
       });
       if (!tooClose) seeds.push(idx);
     }
