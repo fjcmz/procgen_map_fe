@@ -35,7 +35,7 @@ export default function App() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [generateHistory, setGenerateHistory] = useState(false);
-  const [numSimYears, setNumSimYears] = useState(200);
+  const [numSimYears, setNumSimYears] = useState(5000);
   const [selectedYear, setSelectedYear] = useState(0);
 
   const workerRef = useRef<Worker | null>(null);
