@@ -432,6 +432,7 @@ export class HistoryGenerator {
         year: i,
         events,
         ownershipDelta: delta,
+        worldPopulation: yearObj.worldPopulation,
       });
 
       // Snapshot every 20 years

@@ -714,7 +714,7 @@ export function generateHistory(
 
     normalizeBorders(cells, ownership, ownershipDelta);
 
-    historyYears.push({ year, events, ownershipDelta });
+    historyYears.push({ year, events, ownershipDelta, worldPopulation: 0 });
 
     if (year % 20 === 0) {
       snapshots[year] = new Int16Array(ownership);

@@ -98,6 +98,7 @@ export interface HistoryYear {
   year: number;
   events: HistoryEvent[];
   ownershipDelta: Map<number, number>;
+  worldPopulation: number;
 }
 
 /** A pair of cell indices representing the two endpoints of an active trade route. */
