@@ -38,7 +38,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
       const rng = seededPRNG(seed + '_history');
 
       post({ type: 'PROGRESS', step: 'Simulating history\u2026', pct: 72 });
-      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 200);
+      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000);
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;

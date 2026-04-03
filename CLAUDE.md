@@ -198,7 +198,7 @@ All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`. 
 | `waterRatio` | `number` | Fraction of cells that are water (0–1, default 0.4) |
 | `width` / `height` | `number` | Canvas dimensions |
 | `generateHistory` | `boolean` | Whether to run the history simulation (default false) |
-| `numSimYears` | `number` | Years to simulate (50–500, default 200); only used when `generateHistory` is true |
+| `numSimYears` | `number` | Years to simulate (50–5000, default 5000); only used when `generateHistory` is true |
 
 `waterRatio` is implemented by ranking all cells by elevation and marking the lowest `waterRatio * N` as water. This guarantees the exact ratio regardless of the terrain shape, unlike a fixed elevation threshold.
 
@@ -217,7 +217,7 @@ All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`. 
 
 - **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`).
 - **Legend** (`Legend.tsx`): a draggable React overlay component. Toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `App.tsx`. Defaults to bottom-left position.
-- **History settings**: "Generate History" checkbox + "Sim years" slider (50–500) appear in the Controls panel. When history is off, the roads/borders/icons/labels layer toggles are hidden (they have no effect without history data).
+- **History settings**: "Generate History" checkbox + "Sim years" slider (50–5000) appear in the Controls panel. When history is off, the roads/borders/icons/labels layer toggles are hidden (they have no effect without history data).
 - **Timeline panel** (`Timeline.tsx`): rendered only when `mapData.history` exists. Two independent draggable panels:
   - **Bottom controls**: draggable panel (centered at bottom). Year slider (0 to `numYears`), play/pause auto-advance (200ms per year), step buttons (±1, ±10 years). Timeline starts at year 0 after generation. Play restarts from 0 if already at the end. Dragging the slider or pressing step buttons pauses auto-play.
   - **Event log side panel** (defaults to top-right): draggable and collapsible (▴/▾ button in header). Toggleable via "Show/Hide Log" button in the timeline controls. Shows a cumulative list of all events from year 0 to the selected year, with year labels and event-type icons. Current-year events are highlighted. Auto-scrolls to the latest events as the year advances.

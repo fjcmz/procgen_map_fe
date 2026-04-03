@@ -127,7 +127,7 @@ export function Controls({
                 style={styles.slider}
                 type="range"
                 min={50}
-                max={500}
+                max={5000}
                 step={50}
                 value={numSimYears}
                 onChange={(e: ChangeEvent<HTMLInputElement>) =>
