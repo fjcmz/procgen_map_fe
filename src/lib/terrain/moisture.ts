@@ -1,18 +1,16 @@
 import type { Cell } from '../types';
-import type { NoiseSampler } from './noise';
-import { fbm } from './noise';
+import type { NoiseSampler3D } from './noise';
+import { fbmCylindrical } from './noise';
 
 export function assignMoisture(
   cells: Cell[],
   width: number,
   height: number,
-  noise: NoiseSampler
+  noise: NoiseSampler3D
 ): void {
   for (const cell of cells) {
-    const nx = (cell.x / width) * 2 - 1;
-    const ny = (cell.y / height) * 2 - 1;
-
-    let m = fbm(noise.moisture, nx * 1.2 + 10, ny * 1.2 + 10, 3);
+    // Offset cell position to decorrelate moisture from elevation noise
+    let m = fbmCylindrical(noise.moisture, cell.x + width * 0.3, cell.y + height * 0.3, width, height, 3);
 
     // Coastal cells are wetter
     if (cell.isCoast) {

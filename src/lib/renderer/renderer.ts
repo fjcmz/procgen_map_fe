@@ -787,70 +787,89 @@ export function render(
   initNoisyEdges(seed);
 
   const { width, height } = data;
-  ctx.clearRect(0, 0, width, height);
 
-  // Parchment background
-  ctx.fillStyle = '#f5e9c8';
-  ctx.fillRect(0, 0, width, height);
+  // Pre-compute ownership once (shared across all draw copies)
+  const ownershipAtYear =
+    layers.borders && data.history && selectedYear !== undefined
+      ? getOwnershipAtYear(data.history, selectedYear)
+      : undefined;
+  const tradeRoutes =
+    layers.tradeRoutes && data.history && selectedYear !== undefined
+      ? getTradesAtYear(data.history, selectedYear)
+      : undefined;
+  const wonderCells =
+    layers.wonderMarkers && data.history && selectedYear !== undefined
+      ? getWondersAtYear(data.history, selectedYear)
+      : undefined;
+  const religionCells =
+    layers.religionMarkers && data.history && selectedYear !== undefined
+      ? getReligionsAtYear(data.history, selectedYear)
+      : undefined;
 
-  // Layer 1: Biome fill
-  drawBiomeFill(ctx, data.cells);
+  // Draw the map at three horizontal offsets for seamless east-west wrapping.
+  // The canvas clip region (set by the caller's transform) hides invisible copies.
+  const offsets = [-width, 0, width];
+  for (const ox of offsets) {
+    ctx.save();
+    ctx.translate(ox, 0);
 
-  // Layer 2: Water depth shading
-  drawWaterDepth(ctx, data.cells, width, height);
+    // Parchment background
+    ctx.fillStyle = '#f5e9c8';
+    ctx.fillRect(0, 0, width, height);
 
-  // Layer 3: Noisy coastlines
-  drawNoisyCoastlines(ctx, data.cells);
+    // Layer 1: Biome fill
+    drawBiomeFill(ctx, data.cells);
 
-  // Layer 4: Region borders (before rivers so rivers draw on top)
-  if (layers.regions) drawRegionBorders(ctx, data.cells);
+    // Layer 2: Water depth shading
+    drawWaterDepth(ctx, data.cells, width, height);
 
-  // Layer 4b: Rivers
-  if (layers.rivers) drawRivers(ctx, data);
+    // Layer 3: Noisy coastlines
+    drawNoisyCoastlines(ctx, data.cells);
 
-  // Layer 4c: Resource icons
-  if (layers.resources) drawResources(ctx, data.cells, data.regions ?? []);
+    // Layer 4: Region borders (before rivers so rivers draw on top)
+    if (layers.regions) drawRegionBorders(ctx, data.cells);
 
-  // Layer 5: Kingdom borders
-  if (layers.borders) {
-    const ownershipAtYear =
-      data.history && selectedYear !== undefined
-        ? getOwnershipAtYear(data.history, selectedYear)
-        : undefined;
-    drawKingdomBorders(ctx, data.cells, ownershipAtYear);
+    // Layer 4b: Rivers
+    if (layers.rivers) drawRivers(ctx, data);
+
+    // Layer 4c: Resource icons
+    if (layers.resources) drawResources(ctx, data.cells, data.regions ?? []);
+
+    // Layer 5: Kingdom borders
+    if (layers.borders) {
+      drawKingdomBorders(ctx, data.cells, ownershipAtYear);
+    }
+
+    // Layer 5b: Trade routes
+    if (tradeRoutes) {
+      drawTradeRoutes(ctx, data.cells, tradeRoutes);
+    }
+
+    // Layer 6: Roads
+    if (layers.roads) drawRoads(ctx, data);
+
+    // Layer 7: Icons (biome + cities)
+    if (layers.icons) drawIcons(ctx, data, selectedYear);
+
+    // Layer 7b: Wonder badges
+    if (wonderCells) {
+      drawWonderBadges(ctx, data.cells, wonderCells);
+    }
+
+    // Layer 7c: Religion markers
+    if (religionCells) {
+      drawReligionMarkers(ctx, data.cells, religionCells);
+    }
+
+    // Layer 7d: Current-year event overlays
+    if (layers.eventOverlay && data.history && selectedYear !== undefined) {
+      const yearData = data.history.years[selectedYear];
+      if (yearData) drawCurrentYearEvents(ctx, data.cells, yearData.events);
+    }
+
+    // Layer 8: City labels
+    if (layers.labels) drawLabels(ctx, data, selectedYear);
+
+    ctx.restore();
   }
-
-  // Layer 5b: Trade routes (persistent active trades at selectedYear)
-  if (layers.tradeRoutes && data.history && selectedYear !== undefined) {
-    const tradeRoutes = getTradesAtYear(data.history, selectedYear);
-    drawTradeRoutes(ctx, data.cells, tradeRoutes);
-  }
-
-  // Layer 6: Roads
-  if (layers.roads) drawRoads(ctx, data);
-
-  // Layer 7: Icons (biome + cities)
-  if (layers.icons) drawIcons(ctx, data, selectedYear);
-
-  // Layer 7b: Wonder badges (persistent)
-  if (layers.wonderMarkers && data.history && selectedYear !== undefined) {
-    const wonderCells = getWondersAtYear(data.history, selectedYear);
-    drawWonderBadges(ctx, data.cells, wonderCells);
-  }
-
-  // Layer 7c: Religion markers (persistent)
-  if (layers.religionMarkers && data.history && selectedYear !== undefined) {
-    const religionCells = getReligionsAtYear(data.history, selectedYear);
-    drawReligionMarkers(ctx, data.cells, religionCells);
-  }
-
-  // Layer 7d: Current-year event overlays
-  if (layers.eventOverlay && data.history && selectedYear !== undefined) {
-    const yearData = data.history.years[selectedYear];
-    if (yearData) drawCurrentYearEvents(ctx, data.cells, yearData.events);
-  }
-
-  // Layer 8: City labels
-  if (layers.labels) drawLabels(ctx, data, selectedYear);
-
 }

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import type { MapData, LayerVisibility } from '../lib/types';
 import { render } from '../lib/renderer';
 
@@ -21,19 +21,40 @@ export interface MapCanvasHandle {
   reset: () => void;
 }
 
-function zoomAround(prev: Transform, cx: number, cy: number, factor: number): Transform {
-  const newScale = Math.min(10, Math.max(0.1, prev.scale * factor));
-  const contentX = (cx - prev.x) / prev.scale;
-  const contentY = (cy - prev.y) / prev.scale;
-  return { scale: newScale, x: cx - contentX * newScale, y: cy - contentY * newScale };
-}
-
 function getTouchDist(t1: Touch, t2: Touch) {
   return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
 }
 
 function getTouchMid(t1: Touch, t2: Touch) {
   return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
+}
+
+/** Compute the minimum scale that fits the map vertically in the viewport. */
+function minScaleFor(mapHeight: number): number {
+  return window.innerHeight / mapHeight;
+}
+
+/** Wrap horizontal pan so the map repeats seamlessly, and clamp vertical pan. */
+function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): Transform {
+  const vh = window.innerHeight;
+  const scaledW = mapWidth * t.scale;
+  const scaledH = mapHeight * t.scale;
+
+  // Wrap x into (-scaledW, 0] range so the map always covers the viewport
+  let x = t.x % scaledW;
+  if (x > 0) x -= scaledW;
+
+  // Clamp y: keep map filling the viewport vertically
+  let y = t.y;
+  if (scaledH <= vh) {
+    // Map is shorter than viewport — center it
+    y = (vh - scaledH) / 2;
+  } else {
+    // Map is taller than viewport — don't show beyond top or bottom
+    y = Math.min(0, Math.max(vh - scaledH, y));
+  }
+
+  return { scale: t.scale, x, y };
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
@@ -48,6 +69,26 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
   const lastTouchDist = useRef(0);
   const lastTouchMid = useRef({ x: 0, y: 0 });
 
+  const constrain = useCallback((t: Transform): Transform => {
+    if (!mapData) return t;
+    return constrainTransform(t, mapData.width, mapData.height);
+  }, [mapData]);
+
+  const zoomAround = useCallback((prev: Transform, cx: number, cy: number, factor: number): Transform => {
+    const minS = mapData ? minScaleFor(mapData.height) : 0.1;
+    const newScale = Math.min(10, Math.max(minS, prev.scale * factor));
+    const contentX = (cx - prev.x) / prev.scale;
+    const contentY = (cy - prev.y) / prev.scale;
+    return constrain({ scale: newScale, x: cx - contentX * newScale, y: cy - contentY * newScale });
+  }, [mapData, constrain]);
+
+  // Reset to fit-to-screen when new mapData arrives
+  useEffect(() => {
+    if (!mapData) return;
+    const fitScale = minScaleFor(mapData.height);
+    setTransform(constrainTransform({ scale: fitScale, x: 0, y: 0 }, mapData.width, mapData.height));
+  }, [mapData]);
+
   useImperativeHandle(ref, () => ({
     zoomIn() {
       setTransform(prev => zoomAround(prev, window.innerWidth / 2, window.innerHeight / 2, 1.5));
@@ -56,17 +97,17 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       setTransform(prev => zoomAround(prev, window.innerWidth / 2, window.innerHeight / 2, 1 / 1.5));
     },
     reset() {
-      setTransform({ x: 0, y: 0, scale: 1 });
+      if (!mapData) return;
+      const fitScale = minScaleFor(mapData.height);
+      setTransform(constrainTransform({ scale: fitScale, x: 0, y: 0 }, mapData.width, mapData.height));
     },
-  }));
+  }), [mapData, zoomAround]);
 
   // Re-render at full canvas resolution using ctx transform whenever anything changes.
-  // This avoids CSS-transform pixelation: the canvas always draws at native pixel density.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !mapData) return;
 
-    // Canvas covers the viewport; sizing it here clears any stale pixels.
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
@@ -77,14 +118,12 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillStyle = '#2a1a0a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Apply zoom/pan so the renderer draws in map-coordinate space,
-    // which lands correctly at whatever zoom level we're at.
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
     render(ctx, mapData, layers, seed, selectedYear);
     ctx.resetTransform();
   }, [mapData, layers, seed, transform, selectedYear]);
 
-  // Wheel zoom centered on cursor — uses RAF to coalesce rapid scroll events
+  // Wheel zoom centered on cursor
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -104,7 +143,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       canvas.removeEventListener('wheel', handleWheel);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, []);
+  }, [zoomAround]);
 
   // Touch: pinch-to-zoom + single-finger pan
   useEffect(() => {
@@ -127,10 +166,13 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         const newDist = getTouchDist(e.touches[0], e.touches[1]);
         const newMid = getTouchMid(e.touches[0], e.touches[1]);
         const distFactor = newDist / lastTouchDist.current;
-        // zoomAround the old midpoint, then shift by the pan delta
         setTransform(prev => {
           const zoomed = zoomAround(prev, lastTouchMid.current.x, lastTouchMid.current.y, distFactor);
-          return { ...zoomed, x: zoomed.x + (newMid.x - lastTouchMid.current.x), y: zoomed.y + (newMid.y - lastTouchMid.current.y) };
+          return constrain({
+            ...zoomed,
+            x: zoomed.x + (newMid.x - lastTouchMid.current.x),
+            y: zoomed.y + (newMid.y - lastTouchMid.current.y),
+          });
         });
         lastTouchDist.current = newDist;
         lastTouchMid.current = newMid;
@@ -138,7 +180,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         const dx = e.touches[0].clientX - lastTouchMid.current.x;
         const dy = e.touches[0].clientY - lastTouchMid.current.y;
         lastTouchMid.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
-        setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+        setTransform(prev => constrain({ ...prev, x: prev.x + dx, y: prev.y + dy }));
       }
     };
 
@@ -149,7 +191,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       canvas.removeEventListener('touchstart', handleTouchStart);
       canvas.removeEventListener('touchmove', handleTouchMove);
     };
-  }, []);
+  }, [zoomAround, constrain]);
 
   // Middle mouse button pan
   useEffect(() => {
@@ -169,7 +211,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       const dx = e.clientX - lastMouse.current.x;
       const dy = e.clientY - lastMouse.current.y;
       lastMouse.current = { x: e.clientX, y: e.clientY };
-      setTransform(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
+      setTransform(prev => constrain({ ...prev, x: prev.x + dx, y: prev.y + dy }));
     };
 
     const handleMouseUp = (e: MouseEvent) => {
@@ -187,7 +229,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, []);
+  }, [constrain]);
 
   return (
     <canvas
