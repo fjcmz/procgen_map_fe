@@ -1,7 +1,7 @@
 import { Year } from './Year';
 import type { Timeline } from './Timeline';
 import type { World } from '../physical/World';
-import { REGION_BIOME_GROWTH } from '../physical/Region';
+import { REGION_BIOME_GROWTH, REGION_BIOME_CAPACITY } from '../physical/Region';
 import { foundationGenerator } from './Foundation';
 import { contactGenerator } from './Contact';
 import { countryGenerator } from './Country';
@@ -40,18 +40,20 @@ export class YearGenerator {
     }
     year.worldPopulation = worldPop;
 
-    // Step 4: Increase populations using biome growth multiplier + growth-tech multiplier
+    // Step 4: Logistic growth with biome carrying capacity
     for (const city of world.mapUsableCities.values()) {
       const region = world.mapRegions.get(city.regionId);
       if (region) {
-        const growthRate = REGION_BIOME_GROWTH[region.biome];
-        // Growth tech multiplier: if city has 'growth' tech, multiply by (1 + level/10)
-        let techMultiplier = 1;
+        const growthRate = REGION_BIOME_GROWTH[region.biome] / 100;
+        // Carrying capacity: base from biome, scaled up by growth tech
+        let capacity = REGION_BIOME_CAPACITY[region.biome];
         const growthTech = city.knownTechs.get('growth');
-        if (growthTech) techMultiplier = 1 + growthTech.level / 10;
-        // growthRate values (0.3-1.5) are percentage-point annual growth rates
-        city.currentPopulation = Math.floor(
-          city.currentPopulation * (1 + (growthRate / 100) * techMultiplier)
+        if (growthTech) capacity *= (1 + growthTech.level * 0.15);
+        // Logistic growth: rate decelerates as population approaches capacity
+        const logisticFactor = 1 - city.currentPopulation / capacity;
+        city.currentPopulation = Math.max(
+          city.currentPopulation,
+          Math.floor(city.currentPopulation * (1 + growthRate * logisticFactor))
         );
       }
     }
