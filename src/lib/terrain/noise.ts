@@ -56,16 +56,27 @@ export interface NoiseSampler3D {
   elevation: NoiseFunction3D;
   moisture: NoiseFunction3D;
   continent: NoiseFunction3D;
+  /** Domain warping noise — distorts continent coordinates for irregular shapes */
+  warpX: NoiseFunction3D;
+  warpY: NoiseFunction3D;
+  /** Low-frequency ocean basin noise — carves channels between continents */
+  oceanBasin: NoiseFunction3D;
 }
 
 export function createNoiseSamplers3D(seed: string): NoiseSampler3D {
   const rng1 = seededPRNG(seed + '_elev');
   const rng2 = seededPRNG(seed + '_moist');
   const rng3 = seededPRNG(seed + '_continent');
+  const rng4 = seededPRNG(seed + '_warpX');
+  const rng5 = seededPRNG(seed + '_warpY');
+  const rng6 = seededPRNG(seed + '_oceanBasin');
   return {
     elevation: createNoise3D(rng1),
     moisture: createNoise3D(rng2),
     continent: createNoise3D(rng3),
+    warpX: createNoise3D(rng4),
+    warpY: createNoise3D(rng5),
+    oceanBasin: createNoise3D(rng6),
   };
 }
 
