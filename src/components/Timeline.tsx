@@ -62,7 +62,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
-  const maxYear = historyData.numYears;
+  const maxYear = historyData.numYears - 1;
 
   // Auto-play logic
   useEffect(() => {
