@@ -2,112 +2,233 @@ import type { Cell } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical, seededPRNG } from './noise';
 
-interface ContinentSeed {
-  /** x position in [0, width) — wraps cylindrically */
-  x: number;
-  /** y position in [0, height) */
-  y: number;
-  /** base radius as fraction of map width */
-  radius: number;
-  /** elongation factor (1 = circular, >1 = stretched) */
-  stretch: number;
-  /** rotation angle for the stretch ellipse */
-  angle: number;
+// ---------------------------------------------------------------------------
+// Tectonic plate simulation
+// ---------------------------------------------------------------------------
+
+interface TectonicPlate {
+  id: number;
+  seedCell: number;
+  isContinental: boolean;
+  /** Drift direction (unit vector in wrapped x/y space) */
+  driftX: number;
+  driftY: number;
+  /** Base elevation for this plate */
+  baseElev: number;
 }
 
 /**
- * Cylindrical distance between two points, wrapping in x.
- * Returns the shortest distance considering east-west wrap.
+ * Assign every cell to its nearest plate via multi-source BFS on the cell
+ * adjacency graph. This produces irregular plate shapes that follow the
+ * Voronoi mesh topology — no circles or ellipses.
  */
-function cylDist(
-  x1: number, y1: number,
-  x2: number, y2: number,
-  width: number
-): number {
-  let dx = Math.abs(x1 - x2);
-  if (dx > width / 2) dx = width - dx;
-  const dy = y1 - y2;
-  return Math.sqrt(dx * dx + dy * dy);
-}
+function assignPlates(
+  cells: Cell[],
+  numPlates: number,
+  rng: () => number
+): { plateOf: Int32Array; plates: TectonicPlate[] } {
+  const n = cells.length;
+  const plateOf = new Int32Array(n).fill(-1);
 
-/**
- * Elliptical distance from a continent seed, accounting for stretch and rotation.
- * Returns a normalized distance where 1.0 = at the seed's radius boundary.
- */
-function ellipticalDist(
-  x: number, y: number,
-  seed: ContinentSeed,
-  width: number
-): number {
-  // Get wrapped dx
-  let dx = x - seed.x;
-  if (dx > width / 2) dx -= width;
-  if (dx < -width / 2) dx += width;
-  const dy = y - seed.y;
+  // Pick plate seed cells spread out via farthest-point sampling
+  const seedIndices: number[] = [];
+  // First seed: random
+  seedIndices.push(Math.floor(rng() * n));
+  plateOf[seedIndices[0]] = 0;
 
-  // Rotate into ellipse-local coordinates
-  const cos = Math.cos(seed.angle);
-  const sin = Math.sin(seed.angle);
-  const lx = dx * cos + dy * sin;
-  const ly = -dx * sin + dy * cos;
-
-  // Apply stretch: major axis = radius * stretch, minor axis = radius
-  const rx = seed.radius * seed.stretch;
-  const ry = seed.radius;
-
-  return Math.sqrt((lx / rx) ** 2 + (ly / ry) ** 2);
-}
-
-/**
- * Place continent seeds with minimum spacing to ensure separation.
- * Uses Poisson-disk-like rejection sampling.
- */
-function placeContinentSeeds(
-  rng: () => number,
-  width: number,
-  height: number,
-  count: number,
-  minSpacing: number
-): ContinentSeed[] {
-  const seeds: ContinentSeed[] = [];
-  const maxAttempts = 200;
-
-  for (let i = 0; i < count; i++) {
-    let best: ContinentSeed | null = null;
-    let bestMinDist = -1;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const x = rng() * width;
-      // Keep continents away from extreme poles (leave room for polar caps)
-      const y = 0.08 * height + rng() * 0.84 * height;
-      const radius = width * (0.08 + rng() * 0.10); // 8-18% of width
-      const stretch = 1.0 + rng() * 0.8; // 1.0 to 1.8 elongation
-      const angle = rng() * Math.PI; // random orientation
-
-      const candidate: ContinentSeed = { x, y, radius, stretch, angle };
-
-      // Check minimum distance to all existing seeds
-      let minDist = Infinity;
-      for (const existing of seeds) {
-        const d = cylDist(x, y, existing.x, existing.y, width);
-        minDist = Math.min(minDist, d);
+  // Subsequent seeds: pick the cell farthest (by BFS hops) from all existing seeds
+  // Approximate with random candidates + max-min distance
+  const hopDist = new Int32Array(n).fill(0x7fffffff);
+  for (let s = 0; s < numPlates; s++) {
+    if (s > 0) {
+      // Pick from candidates the one with max min-distance to existing seeds
+      let bestCell = -1;
+      let bestDist = -1;
+      const numCandidates = Math.min(n, 80);
+      for (let c = 0; c < numCandidates; c++) {
+        const ci = Math.floor(rng() * n);
+        if (hopDist[ci] > bestDist && plateOf[ci] === -1) {
+          bestDist = hopDist[ci];
+          bestCell = ci;
+        }
       }
+      if (bestCell === -1) break;
+      seedIndices.push(bestCell);
+      plateOf[bestCell] = s;
+    }
 
-      // Accept if far enough from others, or keep the best candidate
-      if (seeds.length === 0 || minDist > minSpacing) {
-        best = candidate;
-        break;
+    // BFS from this seed to update hop distances
+    const queue: number[] = [seedIndices[s]];
+    const visited = new Uint8Array(n);
+    visited[seedIndices[s]] = 1;
+    const dist = new Int32Array(n).fill(0x7fffffff);
+    dist[seedIndices[s]] = 0;
+    let qi = 0;
+    while (qi < queue.length) {
+      const ci = queue[qi++];
+      for (const ni of cells[ci].neighbors) {
+        if (!visited[ni]) {
+          visited[ni] = 1;
+          dist[ni] = dist[ci] + 1;
+          queue.push(ni);
+        }
       }
-      if (minDist > bestMinDist) {
-        bestMinDist = minDist;
-        best = candidate;
+    }
+    // Update global min-distance
+    for (let i = 0; i < n; i++) {
+      if (dist[i] < hopDist[i]) hopDist[i] = dist[i];
+    }
+  }
+
+  // Multi-source BFS from all seeds simultaneously to assign plates
+  // Randomize expansion order slightly for more organic boundaries
+  const queue: number[] = [];
+  const order = new Float64Array(n);
+  for (const si of seedIndices) {
+    queue.push(si);
+    order[si] = rng() * 0.5; // small random priority
+  }
+
+  // Simple BFS (not priority queue, but shuffle neighbors for irregularity)
+  let qi = 0;
+  while (qi < queue.length) {
+    const ci = queue[qi++];
+    const neighbors = cells[ci].neighbors;
+    // Shuffle neighbors for organic boundaries
+    for (let i = neighbors.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const tmp = neighbors[i];
+      neighbors[i] = neighbors[j];
+      neighbors[j] = tmp;
+    }
+    for (const ni of neighbors) {
+      if (plateOf[ni] === -1) {
+        plateOf[ni] = plateOf[ci];
+        queue.push(ni);
+      }
+    }
+  }
+
+  // Build plate objects
+  const continentalRatio = 0.35 + rng() * 0.15; // 35-50% of plates are continental
+  const plates: TectonicPlate[] = [];
+  for (let i = 0; i < numPlates; i++) {
+    const isContinental = rng() < continentalRatio;
+    const angle = rng() * Math.PI * 2;
+    const speed = 0.3 + rng() * 0.7;
+    plates.push({
+      id: i,
+      seedCell: seedIndices[i],
+      isContinental,
+      driftX: Math.cos(angle) * speed,
+      driftY: Math.sin(angle) * speed,
+      baseElev: isContinental ? 0.45 + rng() * 0.15 : 0.05 + rng() * 0.1,
+    });
+  }
+
+  return { plateOf, plates };
+}
+
+/**
+ * Detect plate boundaries and compute boundary stress for each cell.
+ * Returns per-cell values:
+ *   boundaryStress: 0 (interior) to 1+ (strong boundary)
+ *   isConvergent: true if plates are pushing together at this boundary
+ */
+function computeBoundaryEffects(
+  cells: Cell[],
+  plateOf: Int32Array,
+  plates: TectonicPlate[],
+  width: number
+): { stress: Float64Array; convergent: Float64Array } {
+  const n = cells.length;
+  const stress = new Float64Array(n);
+  const convergent = new Float64Array(n); // 1 = convergent, -1 = divergent, 0 = interior
+
+  for (let i = 0; i < n; i++) {
+    const myPlate = plateOf[i];
+    let maxStress = 0;
+    let conv = 0;
+
+    for (const ni of cells[i].neighbors) {
+      const otherPlate = plateOf[ni];
+      if (otherPlate !== myPlate) {
+        // This is a boundary cell
+        maxStress = 1.0;
+
+        // Compute relative drift at boundary
+        const p1 = plates[myPlate];
+        const p2 = plates[otherPlate];
+
+        // Direction from cell to neighbor (wrapped in x)
+        let dx = cells[ni].x - cells[i].x;
+        if (dx > width / 2) dx -= width;
+        if (dx < -width / 2) dx += width;
+        const dy = cells[ni].y - cells[i].y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const nx = dx / dist;
+        const ny = dy / dist;
+
+        // Relative velocity projected onto boundary normal
+        const relVx = p1.driftX - p2.driftX;
+        const relVy = p1.driftY - p2.driftY;
+        const dot = relVx * nx + relVy * ny;
+
+        // Positive dot = convergent (plates pushing together)
+        // Negative dot = divergent (plates pulling apart)
+        conv = dot > 0 ? 1 : -1;
       }
     }
 
-    if (best) seeds.push(best);
+    stress[i] = maxStress;
+    convergent[i] = conv;
   }
-  return seeds;
+
+  // Spread boundary stress to nearby cells (2-ring diffusion)
+  for (let pass = 0; pass < 3; pass++) {
+    const prev = new Float64Array(stress);
+    for (let i = 0; i < n; i++) {
+      if (prev[i] > 0) continue; // don't overwrite actual boundary cells
+      let sum = 0;
+      let count = 0;
+      for (const ni of cells[i].neighbors) {
+        if (prev[ni] > 0) {
+          sum += prev[ni];
+          count++;
+        }
+      }
+      if (count > 0) {
+        stress[i] = (sum / count) * 0.5; // decay with distance
+      }
+    }
+  }
+
+  return { stress, convergent };
 }
+
+// ---------------------------------------------------------------------------
+// Simple thermal erosion — smooths unrealistically steep slopes
+// ---------------------------------------------------------------------------
+
+function thermalErosion(cells: Cell[], iterations: number, talusAngle: number): void {
+  for (let iter = 0; iter < iterations; iter++) {
+    for (const cell of cells) {
+      if (cell.isWater) continue;
+      for (const ni of cell.neighbors) {
+        const diff = cell.elevation - cells[ni].elevation;
+        if (diff > talusAngle) {
+          const transfer = diff * 0.3;
+          cell.elevation -= transfer;
+          cells[ni].elevation += transfer;
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main elevation assignment
+// ---------------------------------------------------------------------------
 
 export function assignElevation(
   cells: Cell[],
@@ -117,97 +238,91 @@ export function assignElevation(
   waterRatio: number,
   seed: string
 ): void {
-  const rng = seededPRNG(seed + '_continents');
+  const rng = seededPRNG(seed + '_tectonics');
+  const n = cells.length;
 
-  // --- Step 1: Place continent seeds ---
-  const numContinents = 4 + Math.floor(rng() * 4); // 4-7 continents
-  const minSpacing = width * 0.18; // ensure ocean gaps between continents
-  const seeds = placeContinentSeeds(rng, width, height, numContinents, minSpacing);
+  // --- Step 1: Generate tectonic plates ---
+  const numPlates = 8 + Math.floor(rng() * 8); // 8–15 plates
+  const { plateOf, plates } = assignPlates(cells, numPlates, rng);
 
-  // Also place 1-2 smaller island chains
-  const numIslandChains = 1 + Math.floor(rng() * 2);
-  for (let i = 0; i < numIslandChains; i++) {
-    const x = rng() * width;
-    const y = 0.15 * height + rng() * 0.7 * height;
-    seeds.push({
-      x, y,
-      radius: width * (0.03 + rng() * 0.04), // small
-      stretch: 1.0 + rng() * 1.2,
-      angle: rng() * Math.PI,
-    });
-  }
+  // --- Step 2: Compute plate boundary effects ---
+  const { stress, convergent } = computeBoundaryEffects(
+    cells, plateOf, plates, width
+  );
 
-  for (const cell of cells) {
-    // --- Layer 1: Continent influence ---
-    // Sum influence from all continent seeds with smooth falloff
-    let continentInfluence = 0;
-    for (const s of seeds) {
-      const d = ellipticalDist(cell.x, cell.y, s, width);
-      if (d < 2.0) {
-        // Smooth cubic falloff: 1 at center, 0 at d=1, negative beyond
-        // Using smoothstep-like curve for natural coastlines
-        const t = Math.max(0, 1 - d);
-        const influence = t * t * (3 - 2 * t); // smoothstep
-        continentInfluence = Math.max(continentInfluence, influence);
+  // --- Step 3: Assign elevation per cell ---
+  for (let i = 0; i < n; i++) {
+    const cell = cells[i];
+    const plate = plates[plateOf[i]];
+
+    // Base elevation from plate type
+    let elev = plate.baseElev;
+
+    // --- Plate boundary effects ---
+    if (stress[i] > 0.01) {
+      if (convergent[i] > 0) {
+        // Convergent boundary: mountain building
+        if (plate.isContinental) {
+          // Continental collision → tall mountains (Himalayas)
+          elev += stress[i] * 0.4;
+        } else {
+          // Oceanic subduction → volcanic arc, island chains
+          elev += stress[i] * 0.25;
+        }
+      } else if (convergent[i] < 0) {
+        // Divergent boundary: rift valleys on land, mid-ocean ridges at sea
+        if (plate.isContinental) {
+          elev -= stress[i] * 0.15; // rift valley
+        } else {
+          elev += stress[i] * 0.08; // mid-ocean ridge (slight rise)
+        }
       }
     }
 
-    // --- Layer 2: Noise-based coastline shaping ---
-    // Domain-warped noise adds organic irregularity to continent edges
-    const warpX = fbmCylindrical(noise.warpX, cell.x, cell.y, width, height, 2, 1.0);
-    const warpY = fbmCylindrical(noise.warpY, cell.x, cell.y, width, height, 2, 1.0);
-    const warpedCellX = cell.x + (warpX - 0.5) * width * 0.12;
-    const warpedCellY = cell.y + (warpY - 0.5) * height * 0.12;
+    // --- Noise-based terrain variation within plates ---
+    // Domain warp for organic shapes
+    const wx = fbmCylindrical(noise.warpX, cell.x, cell.y, width, height, 2, 1.5);
+    const wy = fbmCylindrical(noise.warpY, cell.x, cell.y, width, height, 2, 1.5);
+    const wX = cell.x + (wx - 0.5) * width * 0.08;
+    const wY = cell.y + (wy - 0.5) * height * 0.08;
 
-    // Continent noise at warped position — adds peninsulas, bays, fjords
-    const coastNoise = fbmCylindrical(
-      noise.continent, warpedCellX, warpedCellY, width, height, 4, 2.0
+    // Large-scale variation (continental shelves, basins within plates)
+    const largeFeat = fbmCylindrical(noise.continent, wX, wY, width, height, 3, 1.0);
+    elev += (largeFeat - 0.5) * 0.2;
+
+    // Fine detail (hills, valleys)
+    const detail = fbmCylindrical(noise.elevation, cell.x, cell.y, width, height, 5, 3.0);
+    elev += (detail - 0.5) * 0.12;
+
+    // --- Coastal irregularity ---
+    // Additional warped noise specifically to break up coastlines
+    const coastWarp = fbmCylindrical(
+      noise.oceanBasin, wX, wY, width, height, 4, 2.5
     );
-
-    // Blend noise into continent shape: noise pushes coastlines in/out
-    // Strong effect near coastlines (influence ~0.3-0.7), weak at centers/deep ocean
-    const coastEffect = (coastNoise - 0.5) * 0.45;
-    let elev = continentInfluence + coastEffect;
-
-    // --- Layer 3: Terrain detail (mountains, valleys) ---
-    const detail = fbmCylindrical(
-      noise.elevation, cell.x, cell.y, width, height, 5, 2.0
-    );
-    // Mountains tend toward continent interiors (higher influence = more mountainous)
-    const mountainBoost = Math.pow(Math.max(0, continentInfluence - 0.5), 1.5) * 0.4;
-    elev += detail * 0.25 + mountainBoost * detail;
-
-    // --- Layer 4: Mid-ocean ridges and scattered islands ---
-    const oceanNoise = fbmCylindrical(
-      noise.oceanBasin, cell.x, cell.y, width, height, 3, 3.0
-    );
-    // Only boost in deep ocean areas (low continent influence)
-    if (continentInfluence < 0.15) {
-      // Rare sharp peaks create volcanic islands
-      const islandChance = Math.pow(Math.max(0, oceanNoise - 0.72), 2.0) * 3.0;
-      elev = Math.max(elev, islandChance);
+    // Strongest effect near the land/ocean boundary (elev ~0.3-0.5)
+    const edgeness = 1.0 - Math.abs(elev - 0.4) * 4.0;
+    if (edgeness > 0) {
+      elev += (coastWarp - 0.5) * 0.25 * edgeness;
     }
 
-    // --- Layer 5: Polar ice caps ---
-    const ny = (cell.y / height) * 2 - 1; // -1 (top) to 1 (bottom)
+    // --- Polar ice caps ---
+    const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
 
     if (polarDist > 0.82) {
-      // Polar continent noise — independent shape per pole
       const polarOffset = ny > 0 ? 0.0 : width * 0.5;
       const polarNoise = fbmCylindrical(
         noise.continent, cell.x + polarOffset, cell.y, width, height, 3, 1.5
       );
       const polarBlend = Math.min(1, (polarDist - 0.82) / 0.12);
-      const polarLand = (polarNoise - 0.3) * 1.5 * polarBlend;
+      const polarLand = (polarNoise - 0.25) * 1.2 * polarBlend;
       elev = Math.max(elev, polarLand);
     }
 
-    elev = Math.max(0, Math.min(1, elev));
-    cell.elevation = elev;
+    cell.elevation = Math.max(0, Math.min(1, elev));
   }
 
-  // Normalize so the highest cell reaches 1.0 (required for mountain biomes)
+  // --- Step 4: Normalize elevation ---
   let maxElev = 0;
   for (const cell of cells) {
     if (cell.elevation > maxElev) maxElev = cell.elevation;
@@ -218,15 +333,19 @@ export function assignElevation(
     }
   }
 
-  // Mark the lowest-elevation cells as water to hit the desired ratio exactly.
+  // --- Step 5: Mark water cells by elevation rank ---
   const targetWaterCount = Math.round(waterRatio * cells.length);
   const byElevation = [...cells].sort((a, b) => a.elevation - b.elevation);
   byElevation.forEach((cell, i) => {
     cell.isWater = i < targetWaterCount;
   });
 
-  // Mark coast cells
+  // --- Step 6: Thermal erosion (smooth unrealistic cliffs) ---
+  thermalErosion(cells, 3, 0.05);
+
+  // --- Step 7: Mark coast cells ---
   for (const cell of cells) {
+    cell.isCoast = false; // reset after erosion may have shifted things
     if (!cell.isWater) {
       for (const ni of cell.neighbors) {
         if (cells[ni].isWater) {
