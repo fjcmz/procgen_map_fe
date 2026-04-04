@@ -16,7 +16,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
 
     post({ type: 'PROGRESS', step: 'Shaping terrain\u2026', pct: 20 });
     const noise = createNoiseSamplers3D(seed);
-    assignElevation(cells, width, height, noise, waterRatio);
+    assignElevation(cells, width, height, noise, waterRatio, seed);
 
     post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 35 });
     assignMoisture(cells, width, height, noise);
