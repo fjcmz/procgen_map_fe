@@ -15,6 +15,16 @@ export const REGION_BIOME_GROWTH: Record<RegionBiome, number> = {
   tundra: 0.3,
 };
 
+/** Carrying capacity per city for logistic growth, by region biome. */
+export const REGION_BIOME_CAPACITY: Record<RegionBiome, number> = {
+  temperate: 50_000,
+  arid:      20_000,
+  tropical:  15_000,
+  swamp:      8_000,
+  desert:     5_000,
+  tundra:     5_000,
+};
+
 export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
   SNOW: 'tundra',   ICE: 'tundra',    TUNDRA: 'tundra',
   BARE: 'arid',     SCORCHED: 'arid', SHRUBLAND: 'arid', TEMPERATE_DESERT: 'arid',
