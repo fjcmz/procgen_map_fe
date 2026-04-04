@@ -27,15 +27,40 @@ async function main() {
     await page.goto('http://127.0.0.1:5199', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1000);
 
-    // Enable history generation and generate the map
-    console.log('Enabling history and generating map...');
+    // Configure generation parameters
+    console.log('Setting up generation parameters...');
 
-    // Check "Generate History" checkbox
-    const historyCheckbox = page.locator('input[type="checkbox"]').filter({ hasText: '' }).nth(0);
-    // Find the checkbox next to "Generate History" text
+    // Set seed to "map_xxxxl"
+    const seedInput = page.locator('input[type="text"][placeholder="e.g. fantasy"]');
+    await seedInput.fill('map_xxxxl');
+    await page.waitForTimeout(200);
+
+    // Set cells to 100k
+    await page.locator('button', { hasText: '100k' }).click();
+    await page.waitForTimeout(200);
+
+    // Set water ratio to 65%
+    await page.evaluate(() => {
+      const sliders = document.querySelectorAll('input[type="range"]');
+      for (const s of sliders) {
+        const max = parseInt(s.getAttribute('max') || '0');
+        if (max === 100) {
+          const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          nativeInputValueSetter?.call(s, 65);
+          s.dispatchEvent(new Event('input', { bubbles: true }));
+          s.dispatchEvent(new Event('change', { bubbles: true }));
+          break;
+        }
+      }
+    });
+    await page.waitForTimeout(200);
+
+    // Enable history generation
     const historyLabel = page.locator('label', { hasText: 'Generate History' });
     await historyLabel.locator('input[type="checkbox"]').check();
     await page.waitForTimeout(500);
+
+    console.log('Generating map with seed="map_xxxxl", 100k cells, 65% water...');
 
     // Click "Generate Map" button
     await page.locator('button', { hasText: 'Generate Map' }).click();
@@ -52,7 +77,7 @@ async function main() {
         }
         return false;
       },
-      { timeout: 300000 }
+      { timeout: 600000 }
     );
     await page.waitForTimeout(2000);
     console.log('Map generated!');
