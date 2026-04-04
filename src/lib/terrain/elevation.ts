@@ -10,15 +10,24 @@ export function assignElevation(
   waterRatio: number
 ): void {
   for (const cell of cells) {
-    let elev = fbmCylindrical(noise.elevation, cell.x, cell.y, width, height, 4);
+    // Layer 1: Low-frequency continent mask — creates large continental blobs
+    const continentRaw = fbmCylindrical(
+      noise.continent, cell.x, cell.y, width, height, 2, 0.5
+    );
+    const continentMask = Math.pow(continentRaw, 1.2) * 1.6 - 0.3;
 
-    // North-south falloff: poles become water, equator stays habitable.
-    // No east-west falloff since the map wraps cylindrically.
-    const ny = (cell.y / height) * 2 - 1; // -1 at top, +1 at bottom
-    const falloff = Math.pow(Math.abs(ny), 1.5);
-    elev = elev * (1 - falloff) - falloff * 0.3;
+    // Layer 2: High-frequency terrain detail (mountains, valleys, coastlines)
+    const detail = fbmCylindrical(noise.elevation, cell.x, cell.y, width, height, 4);
+
+    // Combine: continent mask dominates for clear land/ocean separation
+    let elev = continentMask * 0.7 + detail * 0.3;
+
+    // Gentle polar falloff: allows polar land but tends toward ocean at poles
+    const ny = (cell.y / height) * 2 - 1;
+    const polarDist = Math.abs(ny);
+    elev = elev - Math.pow(polarDist, 2.5) * 0.6;
+
     elev = Math.max(0, Math.min(1, elev));
-
     cell.elevation = elev;
   }
 

@@ -55,14 +55,17 @@ export function fbm(
 export interface NoiseSampler3D {
   elevation: NoiseFunction3D;
   moisture: NoiseFunction3D;
+  continent: NoiseFunction3D;
 }
 
 export function createNoiseSamplers3D(seed: string): NoiseSampler3D {
   const rng1 = seededPRNG(seed + '_elev');
   const rng2 = seededPRNG(seed + '_moist');
+  const rng3 = seededPRNG(seed + '_continent');
   return {
     elevation: createNoise3D(rng1),
     moisture: createNoise3D(rng2),
+    continent: createNoise3D(rng3),
   };
 }
 
@@ -77,7 +80,8 @@ export function fbmCylindrical(
   y: number,
   width: number,
   height: number,
-  octaves = 4
+  octaves = 4,
+  baseFreq = 1
 ): number {
   const theta = (2 * Math.PI * x) / width;
   // R chosen so the circumference in noise-space ≈ 1.5 (matching the old 2D scale)
@@ -88,7 +92,7 @@ export function fbmCylindrical(
 
   let value = 0;
   let amplitude = 0.5;
-  let frequency = 1;
+  let frequency = baseFreq;
   let max = 0;
   for (let i = 0; i < octaves; i++) {
     value += noise(cx * frequency, ny * frequency, cz * frequency) * amplitude;

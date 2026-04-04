@@ -28,8 +28,22 @@ function moistBand(m: number): number {
   return 3;
 }
 
-export function assignBiomes(cells: Cell[]): void {
+export function assignBiomes(cells: Cell[], height: number): void {
   for (const cell of cells) {
+    const ny = (cell.y / height) * 2 - 1;
+    const polarDist = Math.abs(ny);
+
+    // Polar ice caps on water
+    if (cell.isWater && polarDist > 0.85) {
+      cell.biome = 'ICE';
+      continue;
+    }
+    // Permafrost zone on land
+    if (!cell.isWater && polarDist > 0.9) {
+      cell.biome = 'TUNDRA';
+      continue;
+    }
+
     if (cell.isWater) {
       if (cell.elevation < 0.1) {
         cell.biome = 'OCEAN';
