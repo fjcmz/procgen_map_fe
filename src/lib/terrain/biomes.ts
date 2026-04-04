@@ -34,12 +34,16 @@ export function assignBiomes(cells: Cell[], height: number): void {
     const polarDist = Math.abs(ny);
 
     // Polar ice caps on water
-    if (cell.isWater && polarDist > 0.85) {
+    if (cell.isWater && polarDist > 0.82) {
       cell.biome = 'ICE';
       continue;
     }
-    // Permafrost zone on land
-    if (!cell.isWater && polarDist > 0.9) {
+    // Polar land: snow and tundra
+    if (!cell.isWater && polarDist > 0.88) {
+      cell.biome = 'SNOW';
+      continue;
+    }
+    if (!cell.isWater && polarDist > 0.8) {
       cell.biome = 'TUNDRA';
       continue;
     }
