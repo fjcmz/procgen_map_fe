@@ -25,6 +25,7 @@ const EVENT_ICONS: Record<string, string> = {
   CATACLYSM: '\uD83C\uDF0B',
   TECH: '\uD83D\uDD2C',
   EMPIRE: '\uD83D\uDC51',
+  POPULATION: '\uD83D\uDC65',
 };
 
 const EVENT_COLORS: Record<string, string> = {
@@ -43,6 +44,7 @@ const EVENT_COLORS: Record<string, string> = {
   CATACLYSM: '#d03010',
   TECH: '#208080',
   EMPIRE: '#c08000',
+  POPULATION: '#5a7a5a',
 };
 
 const PLAY_INTERVAL_MS = 200;
@@ -103,7 +105,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
     }
   }, [selectedYear, maxYear, onYearChange]);
 
-  // Collect all events up to selectedYear
+  // Collect all events up to selectedYear, with a population summary at the end of each year
   const cumulativeEvents = useMemo(() => {
     const result: { year: number; event: HistoryEvent }[] = [];
     for (const yearData of historyData.years) {
@@ -111,6 +113,15 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
       for (const ev of yearData.events) {
         result.push({ year: yearData.year, event: ev });
       }
+      result.push({
+        year: yearData.year,
+        event: {
+          type: 'POPULATION' as HistoryEvent['type'],
+          year: yearData.year,
+          initiatorId: -1,
+          description: `World population: ${formatPopulation(yearData.worldPopulation)}`,
+        },
+      });
     }
     return result;
   }, [historyData.years, selectedYear]);
