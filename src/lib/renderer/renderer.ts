@@ -1,18 +1,29 @@
-import type { MapData, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
+import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
 import { BIOME_INFO } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
 import type { ResourceType } from '../history/physical/Resource';
 
-// Kingdom colors (semi-transparent fills and border strokes)
-const KINGDOM_COLORS = [
+// Kingdom colors for terrain view (subtle fills)
+const KINGDOM_COLORS_TERRAIN = [
   { fill: 'rgba(220,80,80,0.12)',  stroke: '#c04040' },
   { fill: 'rgba(80,120,220,0.12)', stroke: '#3060b0' },
   { fill: 'rgba(80,190,80,0.12)',  stroke: '#308030' },
   { fill: 'rgba(220,160,40,0.12)', stroke: '#a07020' },
   { fill: 'rgba(160,80,200,0.12)', stroke: '#804090' },
 ];
+
+// Kingdom colors for political view (stronger fills)
+const KINGDOM_COLORS_POLITICAL = [
+  { fill: 'rgba(220,80,80,0.35)',  stroke: '#c04040' },
+  { fill: 'rgba(80,120,220,0.35)', stroke: '#3060b0' },
+  { fill: 'rgba(80,190,80,0.35)',  stroke: '#308030' },
+  { fill: 'rgba(220,160,40,0.35)', stroke: '#a07020' },
+  { fill: 'rgba(160,80,200,0.35)', stroke: '#804090' },
+];
+
+type KingdomColor = { fill: string; stroke: string };
 
 function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
   const verts = cell.vertices;
@@ -127,7 +138,8 @@ function drawRivers(
 function drawKingdomBorders(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
-  ownershipOverride?: Int16Array
+  ownershipOverride?: Int16Array,
+  colors: KingdomColor[] = KINGDOM_COLORS_TERRAIN
 ): void {
   const getOwner = (cell: Cell): number | null => {
     if (ownershipOverride) {
@@ -142,7 +154,7 @@ function drawKingdomBorders(
     if (cell.isWater || cell.vertices.length < 2) continue;
     const owner = getOwner(cell);
     if (owner === null) continue;
-    const kc = KINGDOM_COLORS[owner % KINGDOM_COLORS.length];
+    const kc = colors[owner % colors.length];
     ctx.fillStyle = kc.fill;
     cellPath(ctx, cell);
     ctx.fill();
@@ -171,7 +183,7 @@ function drawKingdomBorders(
       if (sharedVerts.length < 2) continue;
 
       const kc = cellOwner !== null
-        ? KINGDOM_COLORS[cellOwner % KINGDOM_COLORS.length]
+        ? colors[cellOwner % colors.length]
         : { stroke: '#888' };
       ctx.strokeStyle = kc.stroke;
       ctx.beginPath();
@@ -782,7 +794,8 @@ export function render(
   data: MapData,
   layers: LayerVisibility,
   seed: string,
-  selectedYear?: number
+  selectedYear?: number,
+  mapView: MapView = 'terrain'
 ): void {
   initNoisyEdges(seed);
 
@@ -826,6 +839,16 @@ export function render(
     // Layer 3: Noisy coastlines
     drawNoisyCoastlines(ctx, data.cells);
 
+    // Political view: mute terrain with parchment overlay on land cells
+    if (mapView === 'political') {
+      ctx.fillStyle = 'rgba(245, 233, 200, 0.55)';
+      for (const cell of data.cells) {
+        if (cell.isWater || cell.vertices.length < 2) continue;
+        cellPath(ctx, cell);
+        ctx.fill();
+      }
+    }
+
     // Layer 4: Region borders (before rivers so rivers draw on top)
     if (layers.regions) drawRegionBorders(ctx, data.cells);
 
@@ -837,7 +860,10 @@ export function render(
 
     // Layer 5: Kingdom borders
     if (layers.borders) {
-      drawKingdomBorders(ctx, data.cells, ownershipAtYear);
+      const kingdomColors = mapView === 'political'
+        ? KINGDOM_COLORS_POLITICAL
+        : KINGDOM_COLORS_TERRAIN;
+      drawKingdomBorders(ctx, data.cells, ownershipAtYear, kingdomColors);
     }
 
     // Layer 5b: Trade routes

@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent } from 'react';
-import type { LayerVisibility } from '../lib/types';
+import type { MapView, LayerVisibility } from '../lib/types';
 
 interface ControlsProps {
   seed: string;
@@ -8,6 +8,8 @@ interface ControlsProps {
   onNumCellsChange: (n: number) => void;
   waterRatio: number;
   onWaterRatioChange: (r: number) => void;
+  mapView: MapView;
+  onMapViewChange: (view: MapView) => void;
   layers: LayerVisibility;
   onLayerToggle: (key: keyof LayerVisibility) => void;
   generateHistory: boolean;
@@ -43,6 +45,8 @@ export function Controls({
   onNumCellsChange,
   waterRatio,
   onWaterRatioChange,
+  mapView,
+  onMapViewChange,
   layers,
   onLayerToggle,
   generateHistory,
@@ -137,6 +141,30 @@ export function Controls({
               />
             </label>
           )}
+
+          <div style={styles.label}>
+            Map View
+            <div style={styles.viewToggleRow}>
+              <button
+                style={{
+                  ...styles.viewBtn,
+                  ...(mapView === 'terrain' ? styles.viewBtnActive : {}),
+                }}
+                onClick={() => onMapViewChange('terrain')}
+              >
+                Terrain
+              </button>
+              <button
+                style={{
+                  ...styles.viewBtn,
+                  ...(mapView === 'political' ? styles.viewBtnActive : {}),
+                }}
+                onClick={() => onMapViewChange('political')}
+              >
+                Political
+              </button>
+            </div>
+          </div>
 
           <div style={styles.label}>
             Layers
@@ -260,6 +288,27 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
   },
   cellBtnActive: {
+    background: '#c0902a',
+    color: '#fff',
+    border: '1px solid #a07020',
+    fontWeight: 'bold',
+  },
+  viewToggleRow: {
+    display: 'flex',
+    gap: 0,
+  },
+  viewBtn: {
+    flex: 1,
+    padding: '5px 0',
+    border: '1px solid #c0a070',
+    background: '#fffef5',
+    fontFamily: 'Georgia, serif',
+    fontSize: 11,
+    color: '#5a3a10',
+    cursor: 'pointer',
+    fontWeight: 'normal',
+  },
+  viewBtnActive: {
     background: '#c0902a',
     color: '#fff',
     border: '1px solid #a07020',

@@ -148,6 +148,8 @@ export type WorkerMessage =
   | { type: 'DONE'; data: MapData }
   | { type: 'ERROR'; message: string };
 
+export type MapView = 'terrain' | 'political';
+
 export interface LayerVisibility {
   rivers: boolean;
   roads: boolean;
