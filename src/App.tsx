@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { MapData, LayerVisibility, WorkerMessage } from './lib/types';
+import type { MapData, MapView, LayerVisibility, WorkerMessage } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle } from './components/MapCanvas';
 import { Controls } from './components/Controls';
@@ -30,6 +30,7 @@ export default function App() {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numCells, setNumCells] = useState(DEFAULT_CELLS);
   const [waterRatio, setWaterRatio] = useState(DEFAULT_WATER_RATIO);
+  const [mapView, setMapView] = useState<MapView>('terrain');
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -116,6 +117,7 @@ export default function App() {
         layers={layers}
         seed={seed}
         selectedYear={mapData?.history ? selectedYear : undefined}
+        mapView={mapView}
       />
       <ZoomControls
         onZoomIn={() => mapCanvasRef.current?.zoomIn()}
@@ -129,6 +131,8 @@ export default function App() {
         onNumCellsChange={setNumCells}
         waterRatio={waterRatio}
         onWaterRatioChange={setWaterRatio}
+        mapView={mapView}
+        onMapViewChange={setMapView}
         layers={layers}
         onLayerToggle={handleLayerToggle}
         generateHistory={generateHistory}
