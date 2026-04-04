@@ -167,6 +167,8 @@ export interface LayerVisibility {
   wonderMarkers: boolean;
   /** Persistent religion markers on city icons. */
   religionMarkers: boolean;
+  /** Small overview minimap in the corner. */
+  minimap: boolean;
 }
 
 export interface BiomeInfo {

@@ -1,11 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import type { MapData, MapView, LayerVisibility, WorkerMessage } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
-import type { MapCanvasHandle } from './components/MapCanvas';
+import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { Controls } from './components/Controls';
 import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
+import { Minimap } from './components/Minimap';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -24,6 +25,7 @@ const DEFAULT_LAYERS: LayerVisibility = {
   tradeRoutes: true,
   wonderMarkers: true,
   religionMarkers: true,
+  minimap: true,
 };
 
 export default function App() {
@@ -38,6 +40,7 @@ export default function App() {
   const [generateHistory, setGenerateHistory] = useState(false);
   const [numSimYears, setNumSimYears] = useState(5000);
   const [selectedYear, setSelectedYear] = useState(0);
+  const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -118,6 +121,7 @@ export default function App() {
         seed={seed}
         selectedYear={mapData?.history ? selectedYear : undefined}
         mapView={mapView}
+        onTransformChange={setViewTransform}
       />
       <ZoomControls
         onZoomIn={() => mapCanvasRef.current?.zoomIn()}
@@ -145,6 +149,17 @@ export default function App() {
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />
+      )}
+      {mapData && layers.minimap && (
+        <Minimap
+          mapData={mapData}
+          layers={layers}
+          seed={seed}
+          selectedYear={mapData?.history ? selectedYear : undefined}
+          mapView={mapView}
+          viewTransform={viewTransform}
+          onNavigate={(mapX, mapY) => mapCanvasRef.current?.navigateTo(mapX, mapY)}
+        />
       )}
       {mapData?.history && (
         <Timeline
