@@ -8,9 +8,10 @@ interface MapCanvasProps {
   seed: string;
   selectedYear?: number;
   mapView?: MapView;
+  onTransformChange?: (transform: Transform) => void;
 }
 
-interface Transform {
+export interface Transform {
   x: number;
   y: number;
   scale: number;
@@ -20,6 +21,7 @@ export interface MapCanvasHandle {
   zoomIn: () => void;
   zoomOut: () => void;
   reset: () => void;
+  navigateTo: (mapX: number, mapY: number) => void;
 }
 
 function getTouchDist(t1: Touch, t2: Touch) {
@@ -59,7 +61,7 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain' }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', onTransformChange }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,7 +104,24 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       const fitScale = minScaleFor(mapData.height);
       setTransform(constrainTransform({ scale: fitScale, x: 0, y: 0 }, mapData.width, mapData.height));
     },
+    navigateTo(mapX: number, mapY: number) {
+      setTransform(prev => {
+        if (!mapData) return prev;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        return constrainTransform(
+          { scale: prev.scale, x: vw / 2 - mapX * prev.scale, y: vh / 2 - mapY * prev.scale },
+          mapData.width,
+          mapData.height,
+        );
+      });
+    },
   }), [mapData, zoomAround]);
+
+  // Notify parent of transform changes (for minimap viewport indicator)
+  useEffect(() => {
+    onTransformChange?.(transform);
+  }, [transform, onTransformChange]);
 
   // Re-render at full canvas resolution using ctx transform whenever anything changes.
   useEffect(() => {

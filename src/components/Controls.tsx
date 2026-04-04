@@ -36,6 +36,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   tradeRoutes: 'Trades',
   wonderMarkers: 'Wonders',
   religionMarkers: 'Religions',
+  minimap: 'Minimap',
 };
 
 export function Controls({
