@@ -11,17 +11,22 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Seed-based generation** — reproducible maps from any seed string
 - **Configurable detail** — cell count from 500 to 100,000 for fast previews or high-detail renders
 - **Water ratio** — slider to control the percentage of water vs land (0–100%)
+- **Tectonic plates** — 8–15 tectonic plates with continental/oceanic classification, convergent boundaries create mountain ranges and volcanic arcs, divergent boundaries form rift valleys and mid-ocean ridges
+- **Polar ice caps** — automatic polar landmass generation at high latitudes using dedicated FBM noise
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
+- **Realistic moisture** — rain shadow effect behind mountain ranges (prevailing wind simulation) + continentality gradient (BFS distance-from-ocean decay) produce Earth-like dry interiors and desert belts
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
 - **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
 - **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
-- **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider
-- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with current-year highlighting and auto-scroll; collapsible to header-only
-- **Draggable UI panels** — the biome legend, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
+- **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider; header shows year, world population, living/total nations, and event count
+- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with year labels, event-type icons, yearly population entries, and current-year highlighting; collapsible to header-only
+- **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
+- **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
+- **Draggable UI panels** — the biome legend, minimap, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
-- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, region borders, and resource icons
+- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, and resource icons
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
 
 ## Tech Stack
@@ -53,8 +58,8 @@ npm run preview
 ## Generation Pipeline
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
-2. **Elevation** — multi-octave FBM noise with radial island falloff; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
-3. **Moisture** — separate FBM noise layer with coastal humidity boost
+2. **Elevation** — tectonic plate simulation (8–15 plates with convergent/divergent boundary effects) + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
+3. **Moisture** — FBM noise base + latitude-based Hadley cell adjustment + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation)
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
 6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region on highest-scoring terrain cells
@@ -72,6 +77,7 @@ src/
 │   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
 │   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
+│   ├── Minimap.tsx       # Draggable minimap with viewport indicator and click-to-navigate
 │   ├── Timeline.tsx      # Draggable playback controls + draggable/collapsible event log side panel
 │   └── ZoomControls.tsx
 ├── lib/                  # Core generation modules

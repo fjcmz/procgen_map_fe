@@ -37,7 +37,7 @@ voronoi → elevation → moisture → biomes → rivers → buildPhysicalWorld
                                     └─ serialize → HistoryData (ownership snapshots + events)
 ```
 
-The terrain steps (voronoi through rivers) always run. `buildPhysicalWorld` also always runs — it annotates cells with `regionId`, and produces `RegionData[]`/`ContinentData[]` in `MapData` regardless of the history flag. The history simulation is opt-in via `GenerateRequest.generateHistory`. When enabled, the **HistoryGenerator** (Phase 6) orchestrates the full pipeline: it calls `buildPhysicalWorld` to create the physical world hierarchy, then `TimelineGenerator` to run 5000 years of simulation, then serializes the result into the flat `HistoryData` format for the UI. If history is disabled, the pipeline ends after `buildPhysicalWorld` — no kingdom simulation, roads, or timeline data is generated.
+The terrain steps (voronoi through rivers) always run. Elevation uses tectonic plate simulation (8–15 plates with convergent/divergent boundary effects, polar ice caps, thermal erosion). Moisture applies three layers: base FBM + latitude-based Hadley cell adjustment + coastal boost, then continentality gradient (BFS distance-from-ocean decay for dry interiors), then rain shadow (upwind mountain barrier march using prevailing wind simulation). `buildPhysicalWorld` also always runs — it annotates cells with `regionId`, and produces `RegionData[]`/`ContinentData[]` in `MapData` regardless of the history flag. The history simulation is opt-in via `GenerateRequest.generateHistory`. When enabled, the **HistoryGenerator** (Phase 6) orchestrates the full pipeline: it calls `buildPhysicalWorld` to create the physical world hierarchy, then `TimelineGenerator` to run 5000 years of simulation, then serializes the result into the flat `HistoryData` format for the UI. If history is disabled, the pipeline ends after `buildPhysicalWorld` — no kingdom simulation, roads, or timeline data is generated.
 
 Each step is a pure function in `src/lib/` that takes cells and returns updated cells or derived data.
 
@@ -51,8 +51,8 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | **`src/lib/terrain/`** | Physical map generation |
 | `src/lib/terrain/noise.ts` | Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers |
 | `src/lib/terrain/voronoi.ts` | Cell generation via D3-Delaunay + Lloyd relaxation |
-| `src/lib/terrain/elevation.ts` | FBM elevation + island falloff + water ratio marking |
-| `src/lib/terrain/moisture.ts` | FBM moisture assignment |
+| `src/lib/terrain/elevation.ts` | Tectonic plate simulation (8–15 plates, convergent/divergent boundaries) + FBM elevation + polar ice caps + thermal erosion + water ratio marking |
+| `src/lib/terrain/moisture.ts` | FBM moisture + latitude (Hadley cells) + coastal boost → continentality gradient (BFS distance-from-ocean) → rain shadow (upwind mountain barrier march) |
 | `src/lib/terrain/biomes.ts` | Whittaker biome classification + `BIOME_INFO` palette |
 | `src/lib/terrain/rivers.ts` | Drainage map + flow accumulation + river tracing |
 | **`src/lib/history/`** | Civilizational simulation + physical world model |
@@ -100,8 +100,9 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/components/Draggable.tsx` | Reusable drag-to-reposition wrapper using Pointer Events; drag handles identified by `data-drag-handle` attribute; viewport clamping keeps panels visible; `touch-action: none` on handles for mobile; `baseTransform` prop for combining CSS transforms |
 | `src/components/Legend.tsx` | Draggable biome legend React component (replaces the old canvas-drawn legend); visibility controlled by `layers.legend` |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
-| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, layer toggles, history toggle + sim-years slider |
-| `src/components/Timeline.tsx` | Two independent draggable panels: (1) bottom timeline controls (play/pause, step ±1/±10, year slider), (2) right-side event log (collapsible via ▴/▾ toggle). Rendered only when `mapData.history` exists |
+| `src/components/Minimap.tsx` | Draggable minimap overlay: offscreen canvas cache, viewport indicator rectangle, click-to-navigate; visibility controlled by `layers.minimap` |
+| `src/components/Controls.tsx` | Seed input, cell count, water ratio slider, terrain/political view toggle, layer toggles, history toggle + sim-years slider |
+| `src/components/Timeline.tsx` | Two independent draggable panels: (1) bottom timeline controls (play/pause, step ±1/±10, year slider, population/nation stats), (2) right-side event log (collapsible via ▴/▾ toggle, yearly population entries). Rendered only when `mapData.history` exists |
 | `src/workers/mapgen.worker.ts` | Orchestrates terrain pipeline + delegates to `HistoryGenerator` for history, posts progress events |
 
 Each subdirectory has an `index.ts` that re-exports its public API.
@@ -212,15 +213,18 @@ All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`. 
 - The biome legend is a React overlay component (`Legend.tsx`), not drawn on the canvas; it is controlled by `layers.legend` (part of `LayerVisibility`) and rendered in `App.tsx`
 - When `historyData` is present, kingdom borders/fills use `getOwnerAtYear(history, selectedYear, cellIndex)` instead of `cell.kingdom`; city/road/border layers are hidden entirely when no history data exists
 - `getOwnerAtYear` finds the nearest decade snapshot ≤ target year, then replays `ownershipDeltas` forward to the exact year
+- **Political view** applies a parchment overlay (`rgba(245, 233, 200, 0.55)`) on land cells and uses bolder kingdom fills (0.35 alpha via `KINGDOM_COLORS_POLITICAL`) vs terrain view's subtle fills (0.12 alpha via `KINGDOM_COLORS_TERRAIN`)
 
 ### UI Panels
 
-- **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`).
+- **Controls panel** (`Controls.tsx`): has a collapse toggle (▴/▾) in the title row; when collapsed it shows only the title bar, hiding all generation parameters. Collapse state is local to the component (`useState`). Includes a terrain/political view toggle (two buttons) that sets `mapView` state.
 - **Legend** (`Legend.tsx`): a draggable React overlay component. Toggled via the "Legend" checkbox in the Layers section of the Controls panel — this sets `layers.legend` which is checked in `App.tsx`. Defaults to bottom-left position.
+- **Minimap** (`Minimap.tsx`): a draggable React overlay that renders a scaled-down version of the full map using an offscreen canvas cache. Shows a white semi-transparent viewport indicator rectangle. Click to navigate the main viewport. Toggled via `layers.minimap` checkbox in the Layers section. Defaults to bottom-left position.
+- **Terrain/Political view**: `mapView: 'terrain' | 'political'` state in `App.tsx`. Terrain view shows full biome detail. Political view adds a semi-transparent parchment overlay on land and uses bolder kingdom fill colors (0.35 alpha vs 0.12 in terrain mode).
 - **History settings**: "Generate History" checkbox + "Sim years" slider (50–5000) appear in the Controls panel. When history is off, the roads/borders/icons/labels layer toggles are hidden (they have no effect without history data).
 - **Timeline panel** (`Timeline.tsx`): rendered only when `mapData.history` exists. Two independent draggable panels:
-  - **Bottom controls**: draggable panel (centered at bottom). Year slider (0 to `numYears`), play/pause auto-advance (200ms per year), step buttons (±1, ±10 years). Timeline starts at year 0 after generation. Play restarts from 0 if already at the end. Dragging the slider or pressing step buttons pauses auto-play.
-  - **Event log side panel** (defaults to top-right): draggable and collapsible (▴/▾ button in header). Toggleable via "Show/Hide Log" button in the timeline controls. Shows a cumulative list of all events from year 0 to the selected year, with year labels and event-type icons. Current-year events are highlighted. Auto-scrolls to the latest events as the year advances.
+  - **Bottom controls**: draggable panel (centered at bottom). Year slider (0 to `numYears`), play/pause auto-advance (200ms per year), step buttons (±1, ±10 years). Header shows year, world population (formatted as K/M), living/total nations count, and event count. Timeline starts at year 0 after generation. Play restarts from 0 if already at the end. Dragging the slider or pressing step buttons pauses auto-play.
+  - **Event log side panel** (defaults to top-right): draggable and collapsible (▴/▾ button in header). Toggleable via "Show/Hide Log" button in the timeline controls. Shows a cumulative list of all events from year 0 to the selected year, with year labels, event-type icons, and yearly population entries. Current-year events are highlighted. Auto-scrolls to the latest events as the year advances.
   - Year changes update `selectedYear` state in `App.tsx`, which triggers a re-render of the canvas.
 - **Draggable behavior** (`Draggable.tsx`): all draggable panels use `data-drag-handle` attributes on their title bars. Drag uses Pointer Events API (works on desktop and mobile). Panels are clamped so at least 40px remains visible within the viewport. Drag handles set `touch-action: none` to prevent browser scroll/pan interference on mobile. Re-clamps on window resize/orientation change.
 
