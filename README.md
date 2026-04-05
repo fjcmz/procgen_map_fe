@@ -14,7 +14,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Tectonic plates** — 8–15 tectonic plates with continental/oceanic classification, convergent boundaries create mountain ranges and volcanic arcs, divergent boundaries form rift valleys and mid-ocean ridges
 - **Polar ice caps** — automatic polar landmass generation at high latitudes using dedicated FBM noise
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
-- **Realistic moisture** — rain shadow effect behind mountain ranges (prevailing wind simulation) + continentality gradient (BFS distance-from-ocean decay) produce Earth-like dry interiors and desert belts
+- **Realistic moisture** — three-layer moisture model: latitude-based Hadley cell circulation (damped cosine curve producing equatorial wet zones and subtropical desert belts) + continentality gradient (BFS distance-from-ocean decay for dry interiors) + rain shadow behind mountain ranges (prevailing wind simulation); produces Earth-like desert bands, rainforest concentration, and continental aridity
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
 - **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
 - **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
@@ -59,7 +59,7 @@ npm run preview
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
 2. **Elevation** — tectonic plate simulation (8–15 plates with convergent/divergent boundary effects) + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
-3. **Moisture** — FBM noise base + latitude-based Hadley cell adjustment + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation)
+3. **Moisture** — FBM noise base + smooth Hadley cell latitude curve (damped cosine modeling three atmospheric circulation cells per hemisphere) + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation)
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
 6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region on highest-scoring terrain cells
@@ -86,7 +86,7 @@ src/
 │   │   ├── noise.ts      # Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers
 │   │   ├── voronoi.ts    # Cell generation via D3-Delaunay + Lloyd relaxation
 │   │   ├── elevation.ts  # FBM elevation + island falloff + water ratio marking
-│   │   ├── moisture.ts   # FBM moisture assignment
+│   │   ├── moisture.ts   # FBM moisture + Hadley cell latitude curve + continentality + rain shadow
 │   │   ├── biomes.ts     # Whittaker biome classification + color palette
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
 │   │   └── index.ts

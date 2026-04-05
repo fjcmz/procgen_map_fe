@@ -5,12 +5,18 @@ import { fbmCylindrical } from './noise';
 // --- Rain shadow constants ---
 const MAX_HOPS = 30;              // how far upwind to march through the neighbor graph
 const MOUNTAIN_THRESHOLD = 0.55;  // elevation above which terrain blocks moisture
-const SHADOW_STRENGTH = 0.45;     // maximum moisture reduction from rain shadow
-const ELEVATION_SCALE = 1.5;      // amplifies barrier effect
+const SHADOW_STRENGTH = 0.40;     // maximum moisture reduction from rain shadow
+const ELEVATION_SCALE = 1.8;      // amplifies barrier effect (sharper from tall mountains)
 
 // --- Continentality constants ---
-const CONTINENTALITY_STRENGTH = 0.45;  // max moisture reduction for most inland cells
-const CONTINENTALITY_MIDPOINT = 0.35;  // normalized distance at which decay reaches 50%
+const CONTINENTALITY_STRENGTH = 0.40;  // max moisture reduction for most inland cells
+const CONTINENTALITY_MIDPOINT = 0.40;  // normalized distance at which decay reaches 50%
+
+// --- Latitude / Hadley cell constants ---
+const LAT_AMPLITUDE = 0.28;       // base amplitude of latitude moisture curve
+const LAT_POLAR_DAMPING = 0.5;    // how much amplitude decreases toward poles
+const LAT_FREQUENCY = 3.0;        // cosine cycles across latitude range (3 Hadley cells)
+const LAT_BIAS = -0.02;           // slight global drying bias
 
 /**
  * Returns the prevailing wind direction vector at a given normalized latitude.
@@ -182,29 +188,18 @@ export function assignMoisture(
   for (const cell of cells) {
     let m = fbmCylindrical(noise.moisture, cell.x + width * 0.3, cell.y + height * 0.3, width, height, 3);
 
-    // Latitude-based moisture adjustment (mimics Hadley cells / global circulation)
+    // Latitude-based moisture adjustment (smooth Hadley cell model)
+    // Damped cosine produces: wet equator (+0.26), dry subtropics (-0.25),
+    // moderate midlatitudes (+0.17), dry poles (-0.16) with smooth transitions
     const ny = (cell.y / height) * 2 - 1; // -1 (top) to 1 (bottom)
     const absLat = Math.abs(ny);
-
-    let latMod = 0;
-    if (absLat < 0.15) {
-      latMod = 0.15; // tropical wet boost
-    } else if (absLat < 0.2) {
-      latMod = 0.15 * (1 - (absLat - 0.15) / 0.05); // transition
-    } else if (absLat < 0.4) {
-      latMod = -0.12; // subtropical dry
-    } else if (absLat < 0.5) {
-      latMod = -0.12 * (1 - (absLat - 0.4) / 0.1); // transition
-    } else if (absLat < 0.7) {
-      latMod = 0.05; // midlatitude moderate
-    } else {
-      latMod = -0.05; // polar dry
-    }
+    const damping = LAT_AMPLITUDE * (1.0 - LAT_POLAR_DAMPING * absLat);
+    const latMod = damping * Math.cos(absLat * Math.PI * LAT_FREQUENCY) + LAT_BIAS;
     m += latMod;
 
-    // Coastal cells are wetter
+    // Coastal cells are wetter (compensates for stronger subtropical penalty)
     if (cell.isCoast) {
-      m = Math.min(1, m + 0.2);
+      m = Math.min(1, m + 0.25);
     }
 
     cell.moisture = Math.max(0, Math.min(1, m));
