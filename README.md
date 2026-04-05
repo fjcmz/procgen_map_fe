@@ -11,7 +11,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Seed-based generation** — reproducible maps from any seed string
 - **Configurable detail** — cell count from 500 to 100,000 for fast previews or high-detail renders
 - **Water ratio** — slider to control the percentage of water vs land (0–100%)
-- **Tectonic plates** — 8–15 tectonic plates with continental/oceanic classification, convergent boundaries create mountain ranges and volcanic arcs, divergent boundaries form rift valleys and mid-ocean ridges
+- **Tectonic plates** — 11–17 tectonic plates with controlled continental/oceanic split (3–5 large continental plates, 8–12 oceanic); continental plates grow larger via weighted expansion and cluster together to form realistic continent-sized landmasses; convergent boundaries create mountain ranges and volcanic arcs, divergent boundaries form rift valleys and mid-ocean ridges
 - **Polar ice caps** — automatic polar landmass generation at high latitudes using dedicated FBM noise
 - **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
 - **Realistic moisture** — three-layer moisture model: latitude-based Hadley cell circulation (damped cosine curve producing equatorial wet zones and subtropical desert belts) + continentality gradient (BFS distance-from-ocean decay for dry interiors) + rain shadow behind mountain ranges (prevailing wind simulation); produces Earth-like desert bands, rainforest concentration, and continental aridity
@@ -58,7 +58,7 @@ npm run preview
 ## Generation Pipeline
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
-2. **Elevation** — tectonic plate simulation (8–15 plates with convergent/divergent boundary effects) + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
+2. **Elevation** — tectonic plate simulation with controlled continental/oceanic split (3–5 large continental plates clustered for continent-sized landmasses, 8–12 oceanic plates spread evenly); size-biased growth gives continental plates ~3× more cells; continental seam elevation boost merges adjacent continental plates; convergent/divergent boundary effects + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
 3. **Moisture** — FBM noise base + smooth Hadley cell latitude curve (damped cosine modeling three atmospheric circulation cells per hemisphere) + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation)
 4. **Biomes** — Whittaker diagram classification into 18 terrain types
 5. **Rivers** — water flow accumulation determines river paths and widths
@@ -85,7 +85,7 @@ src/
 │   ├── terrain/          # Physical map generation
 │   │   ├── noise.ts      # Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers
 │   │   ├── voronoi.ts    # Cell generation via D3-Delaunay + Lloyd relaxation
-│   │   ├── elevation.ts  # FBM elevation + island falloff + water ratio marking
+│   │   ├── elevation.ts  # Tectonic plates (continental clustering + size-biased growth + seam boost) + FBM elevation + water ratio marking
 │   │   ├── moisture.ts   # FBM moisture + Hadley cell latitude curve + continentality + rain shadow
 │   │   ├── biomes.ts     # Whittaker biome classification + color palette
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
