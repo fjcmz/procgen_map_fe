@@ -8,6 +8,10 @@ const MOUNTAIN_THRESHOLD = 0.55;  // elevation above which terrain blocks moistu
 const SHADOW_STRENGTH = 0.45;     // maximum moisture reduction from rain shadow
 const ELEVATION_SCALE = 1.5;      // amplifies barrier effect
 
+// --- Continentality constants ---
+const CONTINENTALITY_STRENGTH = 0.45;  // max moisture reduction for most inland cells
+const CONTINENTALITY_MIDPOINT = 0.35;  // normalized distance at which decay reaches 50%
+
 /**
  * Returns the prevailing wind direction vector at a given normalized latitude.
  * Models Earth-like atmospheric circulation:
@@ -50,6 +54,49 @@ function getWindDirection(ny: number): { dx: number; dy: number } {
   // Normalize to unit vector
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
   return { dx: dx / len, dy: dy / len };
+}
+
+/**
+ * Multi-source BFS from all water cells to compute normalized distance-from-ocean
+ * for every cell. Returns a Float32Array where 0 = water/coast, 1 = most inland.
+ */
+function computeDistanceFromOcean(cells: Cell[]): Float32Array {
+  const n = cells.length;
+  const dist = new Float32Array(n).fill(-1);
+  const queue: number[] = [];
+
+  // Seed BFS from all water cells (distance = 0)
+  for (let i = 0; i < n; i++) {
+    if (cells[i].isWater) {
+      dist[i] = 0;
+      queue.push(i);
+    }
+  }
+
+  // BFS expansion through neighbor graph
+  let qi = 0;
+  let maxDist = 0;
+  while (qi < queue.length) {
+    const ci = queue[qi++];
+    for (const ni of cells[ci].neighbors) {
+      if (dist[ni] < 0) {
+        dist[ni] = dist[ci] + 1;
+        if (dist[ni] > maxDist) maxDist = dist[ni];
+        queue.push(ni);
+      }
+    }
+  }
+
+  // Normalize to 0–1 range
+  if (maxDist > 0) {
+    for (let i = 0; i < n; i++) {
+      if (dist[i] > 0) {
+        dist[i] = dist[i] / maxDist;
+      }
+    }
+  }
+
+  return dist;
 }
 
 /**
@@ -161,6 +208,16 @@ export function assignMoisture(
     }
 
     cell.moisture = Math.max(0, Math.min(1, m));
+  }
+
+  // Pass 1b: Continentality — reduce moisture based on distance from ocean
+  const distFromOcean = computeDistanceFromOcean(cells);
+  for (let i = 0; i < cells.length; i++) {
+    if (!cells[i].isWater && distFromOcean[i] > 0) {
+      const d = distFromOcean[i];
+      const decay = CONTINENTALITY_STRENGTH * (d / (d + CONTINENTALITY_MIDPOINT));
+      cells[i].moisture = Math.max(0, cells[i].moisture - decay);
+    }
   }
 
   // Pass 2: Rain shadow — reduce moisture behind mountain ranges
