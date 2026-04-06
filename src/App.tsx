@@ -26,6 +26,7 @@ const DEFAULT_LAYERS: LayerVisibility = {
   wonderMarkers: true,
   religionMarkers: true,
   minimap: true,
+  hillshading: true,
 };
 
 export default function App() {

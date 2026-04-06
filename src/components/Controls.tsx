@@ -37,6 +37,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   wonderMarkers: 'Wonders',
   religionMarkers: 'Religions',
   minimap: 'Minimap',
+  hillshading: 'Relief',
 };
 
 export function Controls({

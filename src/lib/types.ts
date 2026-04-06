@@ -16,7 +16,8 @@ export type BiomeType =
   | 'TROPICAL_SEASONAL_FOREST'
   | 'SUBTROPICAL_DESERT'
   | 'MARSH'
-  | 'ICE';
+  | 'ICE'
+  | 'ALPINE_MEADOW';
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
 
@@ -169,6 +170,8 @@ export interface LayerVisibility {
   religionMarkers: boolean;
   /** Small overview minimap in the corner. */
   minimap: boolean;
+  /** Shaded relief (hillshading) on land terrain. */
+  hillshading: boolean;
 }
 
 export interface BiomeInfo {
