@@ -62,7 +62,12 @@ function drawWaterDepth(
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
     const depth = Math.max(0, 1 - cell.elevation / 0.4); // 0=shallow, 1=deep
-    const alpha = depth * 0.3;
+
+    // Spatial hash dither to break horizontal banding
+    const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+    const dither = (hash - Math.floor(hash)) * 0.06 - 0.03;
+
+    const alpha = Math.max(0, Math.min(0.3, depth * 0.3 + dither));
     ctx.fillStyle = `rgba(20,50,100,${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
     ctx.fill();

@@ -457,12 +457,15 @@ export function assignElevation(
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
 
-    if (polarDist > 0.82) {
-      const polarOffset = ny > 0 ? 0.0 : width * 0.5;
+    if (polarDist > 0.72) {
+      // Reduced southern offset for more symmetric poles
+      const polarOffset = ny > 0 ? 0.0 : width * 0.17;
       const polarNoise = fbmCylindrical(
-        noise.continent, cell.x + polarOffset, cell.y, width, height, 3, 1.5
+        noise.continent, cell.x + polarOffset, cell.y, width, height, 4, 2.0
       );
-      const polarBlend = Math.min(1, (polarDist - 0.82) / 0.12);
+      // Smoothstep blend over wider range [0.72, 0.94] to avoid banding
+      const t = Math.min(1, Math.max(0, (polarDist - 0.72) / 0.22));
+      const polarBlend = t * t * (3 - 2 * t);
       const polarLand = (polarNoise - 0.25) * 1.2 * polarBlend;
       elev = Math.max(elev, polarLand);
     }
