@@ -33,40 +33,52 @@ function moistBand(m: number): number {
   return 3;
 }
 
+// --- Temperature-based polar thresholds ---
+// These replace the old polarDist-based thresholds. Lower temperature = colder.
+// Continental interiors at high latitudes will cross these thresholds sooner
+// (their temperature is pushed colder), while maritime coasts stay milder.
+const ICE_TEMP_THRESHOLD = 0.15;
+const SNOW_TEMP_THRESHOLD = 0.10;
+const TUNDRA_TEMP_THRESHOLD = 0.20;
+
+// How much temperature shifts effective moisture for Whittaker lookup
+const TEMP_MOISTURE_SHIFT = 0.05;
+
 export function assignBiomes(cells: Cell[], width: number, height: number, noise: NoiseSampler3D): void {
   for (const cell of cells) {
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
+    const temp = cell.temperature;
 
-    // Polar ice caps on water — noise-dithered threshold for organic ice edge
-    if (cell.isWater && polarDist > 0.75) {
+    // Polar ice caps on water — temperature-based with noise dithering
+    if (cell.isWater && temp < ICE_TEMP_THRESHOLD) {
       const iceNoise = fbmCylindrical(
         noise.continent, cell.x * 1.3, cell.y * 1.3, width, height, 3, 2.0
       );
-      const iceThreshold = 0.75 + iceNoise * 0.14;
-      if (polarDist > iceThreshold) {
+      const iceThreshold = ICE_TEMP_THRESHOLD - iceNoise * 0.06;
+      if (temp < iceThreshold) {
         cell.biome = 'ICE';
         continue;
       }
     }
-    // Polar land: snow — noise-dithered threshold
-    if (!cell.isWater && polarDist > 0.80) {
+    // Polar land: snow — temperature-based with noise dithering
+    if (!cell.isWater && temp < SNOW_TEMP_THRESHOLD) {
       const snowNoise = fbmCylindrical(
         noise.elevation, cell.x * 1.5, cell.y * 1.5, width, height, 3, 2.0
       );
-      const snowThreshold = 0.80 + snowNoise * 0.12;
-      if (polarDist > snowThreshold) {
+      const snowThreshold = SNOW_TEMP_THRESHOLD - snowNoise * 0.05;
+      if (temp < snowThreshold) {
         cell.biome = 'SNOW';
         continue;
       }
     }
-    // Polar land: tundra — noise-dithered threshold
-    if (!cell.isWater && polarDist > 0.72) {
+    // Polar land: tundra — temperature-based with noise dithering
+    if (!cell.isWater && temp < TUNDRA_TEMP_THRESHOLD) {
       const tundraNoise = fbmCylindrical(
         noise.elevation, cell.x * 1.2, cell.y * 1.2, width, height, 3, 1.8
       );
-      const tundraThreshold = 0.72 + tundraNoise * 0.12;
-      if (polarDist > tundraThreshold) {
+      const tundraThreshold = TUNDRA_TEMP_THRESHOLD - tundraNoise * 0.05;
+      if (temp < tundraThreshold) {
         cell.biome = 'TUNDRA';
         continue;
       }
@@ -84,7 +96,17 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
       cell.biome = 'BEACH';
       continue;
     }
-    cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(cell.moisture)];
+
+    // Temperature-driven moisture nudge: hot continental cells lose effective
+    // moisture (deserts expand inland), cool maritime cells gain it (forests
+    // persist on coasts). The baseline temperature is pure latitude (1-polarDist).
+    const baselineTemp = 1.0 - polarDist;
+    const tempDelta = temp - baselineTemp;
+    const effMoisture = Math.max(0, Math.min(1,
+      cell.moisture + TEMP_MOISTURE_SHIFT * tempDelta
+    ));
+
+    cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(effMoisture)];
   }
 }
 

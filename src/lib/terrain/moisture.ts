@@ -24,7 +24,7 @@ const LAT_BIAS = -0.02;           // slight global drying bias
  *   Polar easterlies → westerlies → trade winds → equatorial doldrums
  * ny: -1 = north pole, 0 = equator, +1 = south pole
  */
-function getWindDirection(ny: number): { dx: number; dy: number } {
+export function getWindDirection(ny: number): { dx: number; dy: number } {
   const absLat = Math.abs(ny);
   let dx: number;
   let dy: number;
@@ -183,7 +183,7 @@ export function assignMoisture(
   width: number,
   height: number,
   noise: NoiseSampler3D
-): void {
+): Float32Array {
   // Pass 1: Base moisture from noise + latitude + coastal boost (unchanged)
   for (const cell of cells) {
     let m = fbmCylindrical(noise.moisture, cell.x + width * 0.3, cell.y + height * 0.3, width, height, 3);
@@ -222,4 +222,6 @@ export function assignMoisture(
       cells[i].moisture = Math.max(0, cells[i].moisture - shadow[i]);
     }
   }
+
+  return distFromOcean;
 }

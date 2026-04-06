@@ -42,6 +42,7 @@ export interface Cell {
   neighbors: number[];
   elevation: number;
   moisture: number;
+  temperature: number;
   biome: BiomeType;
   isWater: boolean;
   isCoast: boolean;
