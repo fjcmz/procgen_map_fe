@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 
@@ -30,8 +30,18 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 48 });
     assignBiomes(cells, width, height, noise);
 
-    post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 55 });
-    const rivers = generateRivers(cells);
+    post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
+    generateRivers(cells); // initial pass — computes riverFlow for erosion
+
+    post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
+    hydraulicErosion(cells);
+
+    post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
+    const rivers = generateRivers(cells); // final pass — follows carved terrain
+
+    // Refresh elevation-dependent properties after erosion
+    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly);
+    assignBiomes(cells, width, height, noise);
 
     let cities: ReturnType<typeof historyGenerator.generate>['cities'] = [];
     let roads: ReturnType<typeof historyGenerator.generate>['roads'] = [];
