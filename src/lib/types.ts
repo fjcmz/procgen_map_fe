@@ -154,6 +154,9 @@ export type WorkerMessage =
 
 export type MapView = 'terrain' | 'political';
 
+/** 0 = Spring (baseline), 1 = Summer, 2 = Autumn, 3 = Winter */
+export type Season = 0 | 1 | 2 | 3;
+
 export interface LayerVisibility {
   rivers: boolean;
   roads: boolean;
@@ -175,6 +178,8 @@ export interface LayerVisibility {
   minimap: boolean;
   /** Shaded relief (hillshading) on land terrain. */
   hillshading: boolean;
+  /** Seasonal ice/snow variation and permafrost overlay. */
+  seasonalIce: boolean;
 }
 
 export interface BiomeInfo {

@@ -1,5 +1,5 @@
-import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
-import { BIOME_INFO, getVegetationDensity, modulateBiomeColor } from '../terrain/biomes';
+import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry, Season } from '../types';
+import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
@@ -36,19 +36,32 @@ function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
   ctx.closePath();
 }
 
-function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[]): void {
+function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season = 0): void {
   // Draw land first, water last — ensures water always wins at shared polygon edges
   // regardless of cell index order (which has no spatial meaning in Voronoi).
   for (const cell of cells) {
     if (cell.isWater || cell.vertices.length < 2) continue;
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
     const density = getVegetationDensity(cell);
-    ctx.fillStyle = modulateBiomeColor(BIOME_INFO[cell.biome].fillColor, density);
+    ctx.fillStyle = modulateBiomeColor(BIOME_INFO[effectiveBiome].fillColor, density);
     cellPath(ctx, cell);
     ctx.fill();
   }
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
-    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
+    ctx.fillStyle = BIOME_INFO[effectiveBiome].fillColor;
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+}
+
+function drawPermafrost(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season): void {
+  for (const cell of cells) {
+    if (cell.isWater || cell.vertices.length < 2) continue;
+    const alpha = getPermafrostAlpha(cell, season);
+    if (alpha <= 0) continue;
+    ctx.fillStyle = `rgba(180,200,220,${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
     ctx.fill();
   }
@@ -437,7 +450,8 @@ function drawCityIcon(
 function drawIcons(
   ctx: CanvasRenderingContext2D,
   data: MapData,
-  selectedYear?: number
+  selectedYear?: number,
+  season: Season = 0
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
@@ -452,7 +466,8 @@ function drawIcons(
 
     // High-elevation cells (>= 0.75) get mountain icons regardless of biome iconType
     const isHighElev = !cell.isWater && cell.elevation >= 0.75;
-    const info = BIOME_INFO[cell.biome];
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
+    const info = BIOME_INFO[effectiveBiome];
 
     if (isHighElev) {
       // ~40% density for mountains
@@ -916,7 +931,8 @@ export function render(
   layers: LayerVisibility,
   seed: string,
   selectedYear?: number,
-  mapView: MapView = 'terrain'
+  mapView: MapView = 'terrain',
+  season: Season = 0
 ): void {
   initNoisyEdges(seed);
 
@@ -951,11 +967,17 @@ export function render(
     ctx.fillStyle = '#f5e9c8';
     ctx.fillRect(0, 0, width, height);
 
-    // Layer 1: Biome fill
-    drawBiomeFill(ctx, data.cells);
+    // Layer 1: Biome fill (with seasonal variation when enabled)
+    const effectiveSeason = layers.seasonalIce ? season : 0 as Season;
+    drawBiomeFill(ctx, data.cells, effectiveSeason);
 
     // Layer 1b: Hillshading (shaded relief on land)
     if (layers.hillshading) drawHillshading(ctx, data.cells);
+
+    // Layer 1c: Permafrost overlay (seasonal blue-gray tint on sub-polar land)
+    if (layers.seasonalIce && effectiveSeason !== 0) {
+      drawPermafrost(ctx, data.cells, effectiveSeason);
+    }
 
     // Layer 2: Water depth shading
     drawWaterDepth(ctx, data.cells, width, height);
@@ -999,7 +1021,7 @@ export function render(
     if (layers.roads) drawRoads(ctx, data);
 
     // Layer 7: Icons (biome + cities)
-    if (layers.icons) drawIcons(ctx, data, selectedYear);
+    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason);
 
     // Layer 7b: Wonder badges
     if (wonderCells) {

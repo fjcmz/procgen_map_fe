@@ -1,5 +1,6 @@
 import { useState, type ChangeEvent } from 'react';
-import type { MapView, LayerVisibility } from '../lib/types';
+import type { MapView, LayerVisibility, Season } from '../lib/types';
+import { SEASON_LABELS } from '../lib/terrain/biomes';
 
 interface ControlsProps {
   seed: string;
@@ -10,6 +11,8 @@ interface ControlsProps {
   onWaterRatioChange: (r: number) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
+  season: Season;
+  onSeasonChange: (s: Season) => void;
   layers: LayerVisibility;
   onLayerToggle: (key: keyof LayerVisibility) => void;
   generateHistory: boolean;
@@ -38,6 +41,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   religionMarkers: 'Religions',
   minimap: 'Minimap',
   hillshading: 'Relief',
+  seasonalIce: 'Seasons',
 };
 
 export function Controls({
@@ -49,6 +53,8 @@ export function Controls({
   onWaterRatioChange,
   mapView,
   onMapViewChange,
+  season,
+  onSeasonChange,
   layers,
   onLayerToggle,
   generateHistory,
@@ -165,6 +171,24 @@ export function Controls({
               >
                 Political
               </button>
+            </div>
+          </div>
+
+          <div style={styles.label}>
+            Season
+            <div style={styles.viewToggleRow}>
+              {SEASON_LABELS.map((label, i) => (
+                <button
+                  key={label}
+                  style={{
+                    ...styles.viewBtn,
+                    ...(season === i ? styles.viewBtnActive : {}),
+                  }}
+                  onClick={() => onSeasonChange(i as Season)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
 
