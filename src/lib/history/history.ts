@@ -90,14 +90,49 @@ function nextPhysicalCityName(): string {
   return PHYSICAL_CITY_NAMES[_physicalCityNameIdx++ % PHYSICAL_CITY_NAMES.length];
 }
 
-function scoreCellForCity(cell: Cell): number {
+function scoreCellForCity(cell: Cell, cells: Cell[]): number {
   if (cell.isWater || cell.elevation > 0.75) return -Infinity;
+
   let score = 0;
+
+  // River bonuses — tiered by flow magnitude
+  if (cell.riverFlow > 4)  score += 3;   // any visible river
+  if (cell.riverFlow > 15) score += 2;   // major river
+  if (cell.riverFlow > 40) score += 2;   // confluence / large river
+
+  // River mouth: river meeting the coast (Nile delta, Shanghai, London)
+  if (cell.isCoast && cell.riverFlow > 4) score += 4;
+
+  // Coast bonus
   if (cell.isCoast) score += 3;
-  if (cell.riverFlow > 5) score += 2;
-  if (cell.riverFlow > 15) score += 2;
+
+  // Natural harbor: coastal cell sheltered by land (bay/inlet)
+  if (cell.isCoast) {
+    const landNeighborCount = cell.neighbors.filter(ni => !cells[ni].isWater).length;
+    if (landNeighborCount >= 4) score += 2;
+  }
+
+  // Biome penalty for extreme climates
+  const b = cell.biome;
+  let biomePenalty = 0;
+  if (b === 'SNOW' || b === 'ICE' || b === 'TUNDRA')       biomePenalty = 5;
+  else if (b === 'SUBTROPICAL_DESERT')                       biomePenalty = 4;
+  else if (b === 'BARE' || b === 'SCORCHED')                 biomePenalty = 3;
+  else if (b === 'TEMPERATE_DESERT')                         biomePenalty = 2;
+  else if (b === 'MARSH')                                    biomePenalty = 2;
+
+  // Mitigation: rivers/coast in harsh biomes offset the penalty
+  if (biomePenalty > 0) {
+    if (cell.riverFlow > 4)  biomePenalty -= 2;
+    if (cell.isCoast)        biomePenalty -= 1;
+    if (biomePenalty < 0) biomePenalty = 0;
+  }
+  score -= biomePenalty;
+
+  // Terrain preferences
   score -= cell.elevation * 4;
   score += cell.moisture * 1.5;
+
   return score;
 }
 
@@ -374,7 +409,7 @@ export function buildPhysicalWorld(
     for (const region of seedToRegion.values()) {
       const landCells = region.cellIndices
         .filter(ci => !cells[ci].isWater && cells[ci].elevation < 0.75)
-        .sort((a, b) => scoreCellForCity(cells[b]) - scoreCellForCity(cells[a]));
+        .sort((a, b) => scoreCellForCity(cells[b], cells) - scoreCellForCity(cells[a], cells));
 
       if (landCells.length === 0) continue;
 
