@@ -26,6 +26,9 @@ function elevBand(e: number): number {
   return 4;
 }
 
+// Moisture band boundaries for Whittaker lookup (also used by getVegetationDensity)
+const MOISTURE_BREAKS = [0, 0.1, 0.33, 0.66, 1.0];
+
 function moistBand(m: number): number {
   if (m < 0.1) return 0;
   if (m < 0.33) return 1;
@@ -108,6 +111,61 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
 
     cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(effMoisture)];
   }
+}
+
+// Biomes that skip vegetation density modulation (they already have
+// their own visual variation or are non-vegetation types).
+const NEUTRAL_BIOMES: ReadonlySet<BiomeType> = new Set([
+  'OCEAN', 'COAST', 'ICE', 'SNOW', 'BEACH',
+]);
+
+/**
+ * Returns 0.0 (dry/sparse edge) to 1.0 (wet/dense edge) based on where
+ * the cell's moisture sits within its Whittaker moisture band.
+ * Includes a spatial-hash dither to prevent visual banding.
+ */
+export function getVegetationDensity(cell: Cell): number {
+  if (cell.isWater || NEUTRAL_BIOMES.has(cell.biome)) return 0.5;
+
+  const m = cell.moisture;
+  // Find which moisture band the cell is in
+  let band = 0;
+  for (let i = 1; i < MOISTURE_BREAKS.length - 1; i++) {
+    if (m >= MOISTURE_BREAKS[i]) band = i;
+  }
+  const lo = MOISTURE_BREAKS[band];
+  const hi = MOISTURE_BREAKS[band + 1];
+  const t = (m - lo) / (hi - lo);
+
+  // Spatial-hash dither to break banding (same technique as drawWaterDepth)
+  const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+  const dither = (hash - Math.floor(hash)) * 0.1 - 0.05;
+
+  return Math.max(0, Math.min(1, t + dither));
+}
+
+// Pre-parsed RGB cache for hex colors used by modulateBiomeColor
+const hexCache = new Map<string, [number, number, number]>();
+
+function parseHex(hex: string): [number, number, number] {
+  let cached = hexCache.get(hex);
+  if (cached) return cached;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  cached = [r, g, b];
+  hexCache.set(hex, cached);
+  return cached;
+}
+
+/**
+ * Modulates a biome fill color by vegetation density.
+ * density=0 → 12% lighter, density=0.5 → unchanged, density=1 → 12% darker.
+ */
+export function modulateBiomeColor(hexColor: string, density: number): string {
+  const [r, g, b] = parseHex(hexColor);
+  const factor = 1.12 - density * 0.24;
+  return `rgb(${Math.min(255, Math.round(r * factor))},${Math.min(255, Math.round(g * factor))},${Math.min(255, Math.round(b * factor))})`;
 }
 
 // Fantasy parchment-friendly palette

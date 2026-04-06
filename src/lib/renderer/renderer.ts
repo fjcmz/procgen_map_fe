@@ -1,5 +1,5 @@
 import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
-import { BIOME_INFO } from '../terrain/biomes';
+import { BIOME_INFO, getVegetationDensity, modulateBiomeColor } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
@@ -41,7 +41,8 @@ function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[]): void {
   // regardless of cell index order (which has no spatial meaning in Voronoi).
   for (const cell of cells) {
     if (cell.isWater || cell.vertices.length < 2) continue;
-    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
+    const density = getVegetationDensity(cell);
+    ctx.fillStyle = modulateBiomeColor(BIOME_INFO[cell.biome].fillColor, density);
     cellPath(ctx, cell);
     ctx.fill();
   }
@@ -336,10 +337,15 @@ function drawTreeIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  s: number
+  s: number,
+  density: number = 0.5
 ): void {
-  ctx.fillStyle = '#3a6030';
-  ctx.strokeStyle = '#2a4020';
+  // Modulate tree color by vegetation density: sparse/dry → lighter, dense/wet → darker
+  const r = Math.round(58 - density * 20);   // 58 → 38
+  const g = Math.round(96 - density * 30);   // 96 → 66
+  const b = Math.round(48 - density * 16);   // 48 → 32
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.strokeStyle = `rgb(${r - 16},${g - 16},${b - 16})`;
   ctx.lineWidth = 0.5;
   ctx.beginPath();
   ctx.moveTo(x, y - s);
@@ -455,14 +461,24 @@ function drawIcons(
       const elevScale = Math.max(0.8, Math.min(1.4, 0.8 + (cell.elevation - 0.75) * 1.6));
       drawMountainIcon(ctx, cell.x, cell.y, iconSize * elevScale);
     } else if (info.iconType) {
-      // ~20% density for other icons
-      if (cell.index % 5 !== 0) continue;
-      const s = iconSize;
-      switch (info.iconType) {
-        case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
-        case 'tree':     drawTreeIcon(ctx, cell.x, cell.y, s * 0.8); break;
-        case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
-        case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+      if (info.iconType === 'tree') {
+        // Variable tree density: 10% at dry edges, 30% at wet edges
+        const density = getVegetationDensity(cell);
+        const treeRate = 0.1 + density * 0.2;
+        const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+        const rand = hash - Math.floor(hash);
+        if (rand > treeRate) continue;
+        const sizeScale = 0.85 + density * 0.3;
+        drawTreeIcon(ctx, cell.x, cell.y, iconSize * 0.8 * sizeScale, density);
+      } else {
+        // ~20% density for non-tree icons
+        if (cell.index % 5 !== 0) continue;
+        const s = iconSize;
+        switch (info.iconType) {
+          case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
+          case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
+          case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+        }
       }
     }
   }
