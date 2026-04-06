@@ -176,10 +176,10 @@ async function main() {
       }
 
       await page.screenshot({
-        path: path.join(__dirname, 'screenshots', `${config.name}.png`),
+        path: path.join(__dirname, 'improved', `${config.name}.png`),
         fullPage: false,
       });
-      console.log(`  Saved: screenshots/${config.name}.png`);
+      console.log(`  Saved: improved/${config.name}.png`);
 
       // Reset pan for next screenshot (unless next one also pans)
       if (config.panX || config.panY) {
