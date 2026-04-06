@@ -57,7 +57,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/terrain/rivers.ts` | Drainage map + flow accumulation + river tracing |
 | **`src/lib/history/`** | Civilizational simulation + physical world model |
 | `src/lib/history/HistoryGenerator.ts` | **Phase 6 orchestrator**: ties physical world + timeline together; serializes rich simulation state into `HistoryData` for UI; computes ownership snapshots from region-based countries; emits `HistoryStats` |
-| `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + legacy year-by-year simulation + `getOwnershipAtYear` |
+| `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + climate-aware `scoreCellForCity` (river/harbor/biome scoring) + legacy year-by-year simulation + `getOwnershipAtYear` |
 | `src/lib/history/cities.ts` | City placement with spacing + kingdom grouping |
 | `src/lib/history/borders.ts` | BFS flood-fill kingdom borders from capitals |
 | `src/lib/history/roads.ts` | A* road pathfinding between cities + trade route pathfinding (`computeDistanceFromLand` BFS, `tradeRouteAStar` with dual land/water cost, `generateTradeRoutePath` wrapper) |
@@ -136,7 +136,7 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 1. **Continents**: BFS flood-fill finds connected land cells; groups ≥ 10 cells form a `Continent` (via `continentGenerator`)
 2. **Regions**: each continent is subdivided into ~30-cell clusters via multi-source BFS seeding; each gets a `RegionBiome` derived from its dominant Voronoi biome (via `regionGenerator`); geographic adjacency is wired with `regionGenerator.assignNeighbours`; `regionGenerator.updatePotentialNeighbours` computes BFS-layered `potentialNeighbours` (distance graph) for all regions after all continents are built
 3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (17 types: strategic/agricultural/luxury) via `resourceGenerator`
-4. **Cities**: 1–5 `CityEntity` objects per region, placed on highest-scoring terrain cells, via `cityGenerator` (which also inserts into `world.mapCities`)
+4. **Cities**: 1–5 `CityEntity` objects per region, placed on highest-scoring terrain cells via climate-aware `scoreCellForCity`, via `cityGenerator` (which also inserts into `world.mapCities`). Scoring boosts river cells (tiered by flow: >4/15/40), river mouths (coast+river), natural harbors (coastal cells with ≥4 land neighbors), and penalizes extreme biomes (tundra -5, desert -4, bare/scorched -3, temperate desert/marsh -2) with mitigation from rivers (-2) and coast (-1) so harsh-biome cities still appear near water features
 
 The generator singletons (`worldGenerator`, `continentGenerator`, `regionGenerator`, `resourceGenerator`, `cityGenerator`) encapsulate object creation and map-insertion. The visitor singletons (`cityVisitor`, `regionVisitor`) provide iteration and predicate-based selection over the world's runtime index maps — used by Phase 4+ timeline simulation.
 
