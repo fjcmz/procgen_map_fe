@@ -15,6 +15,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Polar ice caps** — automatic polar landmass generation at high latitudes using dedicated FBM noise; smoothstep elevation blending and noise-dithered biome thresholds produce organic, jagged ice edges instead of hard horizontal lines
 - **Rich terrain** — 19 biome types classified via a Whittaker diagram (elevation × moisture), including a transitional alpine meadow band
 - **Realistic moisture** — three-layer moisture model: latitude-based Hadley cell circulation (damped cosine curve producing equatorial wet zones and subtropical desert belts) + continentality gradient (BFS distance-from-ocean decay for dry interiors) + rain shadow behind mountain ranges (prevailing wind simulation); produces Earth-like desert bands, rainforest concentration, and continental aridity
+- **Continental climate effects** — per-cell temperature computed from latitude, continentality (continental interiors more extreme, maritime cells milder), windward ocean proximity (west-coast mildness via upwind neighbor march), and elevation lapse rate; drives polar biome boundaries and nudges the Whittaker biome lookup so western coasts stay milder and continental interiors shift toward more extreme biomes
 - **Hillshading** — shaded relief lighting on land terrain using neighbor-based gradient estimation with a NW light source; toggleable via the "Relief" layer control
 - **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
 - **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities via pathfound coastal-hugging and island-hopping maritime routes, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
@@ -60,15 +61,16 @@ npm run preview
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
 2. **Elevation** — tectonic plate simulation with controlled continental/oceanic split (3–5 large continental plates clustered for continent-sized landmasses, 8–12 oceanic plates spread evenly); size-biased growth gives continental plates ~3× more cells; continental seam elevation boost merges adjacent continental plates; convergent/divergent boundary effects + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
-3. **Moisture** — FBM noise base + smooth Hadley cell latitude curve (damped cosine modeling three atmospheric circulation cells per hemisphere) + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation)
-4. **Biomes** — Whittaker diagram classification into 19 terrain types (5 elevation bands including a transitional alpine meadow zone); polar biomes (ICE/SNOW/TUNDRA) use noise-dithered thresholds for organic transitions
-5. **Rivers** — water flow accumulation determines river paths and widths
-6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region using climate-aware scoring (river mouths, natural harbors, biome penalties with river/coast mitigation)
-7. **History** *(optional)* — if enabled, the **HistoryGenerator** orchestrates a full civilizational simulation: it first builds the physical world (step 6), then runs a 5000-year timeline via the **TimelineGenerator**. Each year, 12 event generators fire in order: cities are founded, make first contact, form countries, produce illustrious figures, discover technologies, build wonders, found religions, open trade routes, suffer cataclysms, wage wars, resolve conquests, and form empires. The first N years (user-configurable) are serialized into the UI's timeline format with ownership snapshots for fast scrubbing.
-8. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
-9. **Trade routes** *(history only)* — active trade connections are pathfound using a dual-domain A* that traverses both land and water; maritime segments use a cost gradient based on distance from land, naturally producing routes that hug coastlines and hop between islands rather than cutting straight across open ocean
+3. **Moisture** — FBM noise base + smooth Hadley cell latitude curve (damped cosine modeling three atmospheric circulation cells per hemisphere) + coastal boost → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation); also produces distance-from-ocean data for the temperature step
+4. **Temperature** — per-cell temperature (0–1) from latitude base + continentality modifier (continental interiors pushed to extremes, maritime cells pulled toward moderate) + windward ocean proximity (upwind march through Voronoi neighbors detects nearby ocean for west-coast mildness effect) + elevation lapse rate + noise perturbation
+5. **Biomes** — Whittaker diagram classification into 19 terrain types (5 elevation bands including a transitional alpine meadow zone); polar biomes (ICE/SNOW/TUNDRA) use temperature-based thresholds with noise dithering for organic transitions; the Whittaker lookup receives a temperature-adjusted effective moisture that shifts biome boundaries at continental margins
+6. **Rivers** — water flow accumulation determines river paths and widths
+7. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region using climate-aware scoring (river mouths, natural harbors, biome penalties with river/coast mitigation)
+8. **History** *(optional)* — if enabled, the **HistoryGenerator** orchestrates a full civilizational simulation: it first builds the physical world (step 7), then runs a 5000-year timeline via the **TimelineGenerator**. Each year, 12 event generators fire in order: cities are founded, make first contact, form countries, produce illustrious figures, discover technologies, build wonders, found religions, open trade routes, suffer cataclysms, wage wars, resolve conquests, and form empires. The first N years (user-configurable) are serialized into the UI's timeline format with ownership snapshots for fast scrubbing.
+9. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
+10. **Trade routes** *(history only)* — active trade connections are pathfound using a dual-domain A* that traverses both land and water; maritime segments use a cost gradient based on distance from land, naturally producing routes that hug coastlines and hop between islands rather than cutting straight across open ocean
 
-If history is **disabled**, steps 7–8 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
+If history is **disabled**, steps 8–10 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
 
 ## Project Structure
 
@@ -89,7 +91,8 @@ src/
 │   │   ├── voronoi.ts    # Cell generation via D3-Delaunay + Lloyd relaxation
 │   │   ├── elevation.ts  # Tectonic plates (continental clustering + size-biased growth + seam boost) + FBM elevation + water ratio marking
 │   │   ├── moisture.ts   # FBM moisture + Hadley cell latitude curve + continentality + rain shadow
-│   │   ├── biomes.ts     # Whittaker biome classification + color palette
+│   │   ├── temperature.ts# Continental climate: latitude + continentality + windward proximity + lapse rate
+│   │   ├── biomes.ts     # Whittaker biome classification + temperature-driven thresholds + color palette
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
 │   │   └── index.ts
 │   ├── history/          # Civilizational simulation

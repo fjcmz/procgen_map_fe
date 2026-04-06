@@ -3,6 +3,7 @@ export type { NoiseSampler, NoiseSampler3D } from './noise';
 export { buildCellGraph } from './voronoi';
 export type { CellGraph } from './voronoi';
 export { assignElevation } from './elevation';
-export { assignMoisture } from './moisture';
+export { assignMoisture, getWindDirection } from './moisture';
+export { assignTemperature } from './temperature';
 export { assignBiomes, BIOME_INFO } from './biomes';
 export { generateRivers } from './rivers';
