@@ -106,6 +106,8 @@ export interface HistoryYear {
 export interface TradeRouteEntry {
   cell1: number;
   cell2: number;
+  /** Full cell-index path from cell1 to cell2 (coastal-hugging A* for maritime routes). */
+  path?: number[];
 }
 
 export interface HistoryData {
