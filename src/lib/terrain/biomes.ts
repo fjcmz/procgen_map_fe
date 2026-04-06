@@ -1,7 +1,7 @@
 import type { Cell, BiomeType, BiomeInfo } from '../types';
 
 // Whittaker biome lookup: [elevationBand][moistureBand]
-// elevation bands: <0.3, 0.3-0.6, 0.6-0.8, 0.8+
+// elevation bands: <0.3, 0.3-0.6, 0.6-0.65, 0.65-0.75, 0.75+
 // moisture bands: <0.1, 0.1-0.33, 0.33-0.66, 0.66+
 const WHITTAKER: BiomeType[][] = [
   // elevation 0 (lowland)
@@ -10,15 +10,18 @@ const WHITTAKER: BiomeType[][] = [
   ['TEMPERATE_DESERT', 'GRASSLAND', 'TEMPERATE_DECIDUOUS_FOREST', 'TEMPERATE_RAIN_FOREST'],
   // elevation 2 (highland)
   ['TEMPERATE_DESERT', 'SHRUBLAND', 'TAIGA', 'TAIGA'],
-  // elevation 3 (mountain)
+  // elevation 3 (alpine)
+  ['TEMPERATE_DESERT', 'ALPINE_MEADOW', 'ALPINE_MEADOW', 'TAIGA'],
+  // elevation 4 (mountain)
   ['SCORCHED', 'BARE', 'TUNDRA', 'SNOW'],
 ];
 
 function elevBand(e: number): number {
   if (e < 0.3) return 0;
   if (e < 0.6) return 1;
-  if (e < 0.8) return 2;
-  return 3;
+  if (e < 0.65) return 2;
+  if (e < 0.75) return 3;
+  return 4;
 }
 
 function moistBand(m: number): number {
@@ -84,4 +87,5 @@ export const BIOME_INFO: Record<BiomeType, BiomeInfo> = {
   SNOW:                        { fillColor: '#e8e8f0', label: 'Snow',                      iconType: 'snow' },
   MARSH:                       { fillColor: '#7a9a70', label: 'Marsh',                     iconType: null },
   ICE:                         { fillColor: '#d8e8f0', label: 'Ice',                       iconType: 'snow' },
+  ALPINE_MEADOW:               { fillColor: '#98b86a', label: 'Alpine Meadow',             iconType: null },
 };

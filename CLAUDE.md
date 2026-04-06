@@ -53,7 +53,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/terrain/voronoi.ts` | Cell generation via D3-Delaunay + Lloyd relaxation |
 | `src/lib/terrain/elevation.ts` | Tectonic plate simulation (3–5 continental plates clustered + size-biased growth, 8–12 oceanic plates, continental seam boost, convergent/divergent boundaries) + FBM elevation + polar ice caps + thermal erosion + water ratio marking |
 | `src/lib/terrain/moisture.ts` | FBM moisture + smooth Hadley cell cosine curve (damped amplitude, 3 cells/hemisphere) + coastal boost → continentality gradient (BFS distance-from-ocean) → rain shadow (upwind mountain barrier march) |
-| `src/lib/terrain/biomes.ts` | Whittaker biome classification + `BIOME_INFO` palette |
+| `src/lib/terrain/biomes.ts` | Whittaker biome classification (5 elevation bands including alpine meadow transition) + `BIOME_INFO` palette (19 biome types) |
 | `src/lib/terrain/rivers.ts` | Drainage map + flow accumulation + river tracing |
 | **`src/lib/history/`** | Civilizational simulation + physical world model |
 | `src/lib/history/HistoryGenerator.ts` | **Phase 6 orchestrator**: ties physical world + timeline together; serializes rich simulation state into `HistoryData` for UI; computes ownership snapshots from region-based countries; emits `HistoryStats` |
@@ -96,7 +96,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/timeline/Merge.ts` | Merge placeholder interface — reserved for future peaceful country merging |
 | **`src/lib/renderer/`** | Canvas drawing logic |
 | `src/lib/renderer/noisyEdges.ts` | Recursive midpoint displacement for organic coastlines |
-| `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, borders, icons |
+| `src/lib/renderer/renderer.ts` | Canvas 2D rendering — all layers, biome fill, hillshading, borders, icons |
 | `src/components/Draggable.tsx` | Reusable drag-to-reposition wrapper using Pointer Events; drag handles identified by `data-drag-handle` attribute; viewport clamping keeps panels visible; `touch-action: none` on handles for mobile; `baseTransform` prop for combining CSS transforms |
 | `src/components/Legend.tsx` | Draggable biome legend React component (replaces the old canvas-drawn legend); visibility controlled by `layers.legend` |
 | `src/components/MapCanvas.tsx` | Zoom/pan interaction and canvas lifecycle |
@@ -210,6 +210,7 @@ All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`. 
 - Coastlines use noisy edges from `renderer/noisyEdges.ts` for an organic look
 - City icons are drawn as simple SVG-path-like canvas commands
 - `drawBiomeFill` renders land cells first, water cells second — this ensures water always wins at shared polygon edges (Voronoi cell indices have no spatial order, so rendering in index order causes land to bleed over water)
+- `drawHillshading` computes per-cell elevation gradients from Voronoi neighbors and applies directional illumination (NW light, 315° azimuth, 45° altitude) as an rgba overlay — white for lit slopes, black for shaded slopes. Placed between biome fill and water depth in the render order. Controlled by `layers.hillshading` (defaults to enabled). Uses elevation scale factor of 8.0 to exaggerate relief
 - The biome legend is a React overlay component (`Legend.tsx`), not drawn on the canvas; it is controlled by `layers.legend` (part of `LayerVisibility`) and rendered in `App.tsx`
 - When `historyData` is present, kingdom borders/fills use `getOwnerAtYear(history, selectedYear, cellIndex)` instead of `cell.kingdom`; city/road/border layers are hidden entirely when no history data exists
 - `getOwnerAtYear` finds the nearest decade snapshot ≤ target year, then replays `ownershipDeltas` forward to the exact year
@@ -238,7 +239,8 @@ Pushes to `main` trigger `.github/workflows/deploy.yml`, which builds and deploy
 - **High-DPI canvas**: `MapCanvas.tsx` scales the canvas by `devicePixelRatio`. Don't set canvas width/height via CSS — use the component's resize logic.
 - **Cell count performance**: Generation above ~10,000 cells is slow. Default is 5,000. Test UI changes at low cell counts.
 - **Base path**: Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source.
-- **Elevation normalization**: After computing FBM + island-falloff elevations, `terrain/elevation.ts` divides all values by the observed maximum so the highest cell always reaches 1.0. Without this, FBM noise in practice tops out around 0.8, and the island mask compresses it further — leaving the Whittaker mountain band (elevation > 0.8) unreachable. Do not remove this normalization step.
+- **Elevation normalization**: After computing FBM + island-falloff elevations, `terrain/elevation.ts` divides all values by the observed maximum so the highest cell always reaches 1.0. Without this, FBM noise in practice tops out around 0.8, and the island mask compresses it further — leaving the Whittaker mountain band (elevation > 0.75) unreachable. Do not remove this normalization step.
+- **Mountain biome bands**: The Whittaker table uses 5 elevation bands: lowland (<0.3), midland (0.3–0.6), highland (0.6–0.65), alpine (0.65–0.75, yields `ALPINE_MEADOW` as a transitional biome), and mountain (0.75+, yields SCORCHED/BARE/TUNDRA/SNOW). Mountain icons are rendered on all land cells with elevation ≥ 0.75 regardless of biome `iconType`, at ~40% density with elevation-scaled sizing.
 - **History is the cities/kingdoms source**: Do not call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `HistoryGenerator` owns that responsibility. Calling both would double-place cities and corrupt kingdom state.
 - **HistoryGenerator is the new orchestrator**: When history is enabled, the worker calls `historyGenerator.generate()` (Phase 6), not the old `generateHistory()` from `history.ts`. The old function is preserved but not used by the worker.
 - **Ownership reconstruction**: `getOwnerAtYear` must apply deltas in strict year order. Out-of-order application produces incorrect borders. The snapshots are keyed by decade (0, 10, 20…); always start from `Math.floor(year / 10) * 10`.

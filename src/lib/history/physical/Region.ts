@@ -33,6 +33,7 @@ export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
   TROPICAL_RAIN_FOREST: 'tropical',   TROPICAL_SEASONAL_FOREST: 'tropical',
   SUBTROPICAL_DESERT: 'desert',
   MARSH: 'swamp',
+  ALPINE_MEADOW: 'temperate',
   OCEAN: 'temperate', COAST: 'temperate', BEACH: 'temperate',
 };
 

@@ -71,6 +71,62 @@ function drawWaterDepth(
   void width; void height;
 }
 
+function drawHillshading(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[]
+): void {
+  // Virtual light source: azimuth 315° (NW), altitude 45°
+  const az = (315 * Math.PI) / 180;
+  const alt = (45 * Math.PI) / 180;
+  const lightX = Math.cos(az) * Math.cos(alt);
+  const lightY = Math.sin(az) * Math.cos(alt);
+  const lightZ = Math.sin(alt);
+  const elevScale = 8.0; // exaggerate relief
+
+  for (const cell of cells) {
+    if (cell.isWater || cell.vertices.length < 2) continue;
+
+    // Estimate gradient from neighbors
+    let dzdx = 0;
+    let dzdy = 0;
+    let weightSum = 0;
+    for (const ni of cell.neighbors) {
+      const nb = cells[ni];
+      if (!nb) continue;
+      const dx = nb.x - cell.x;
+      const dy = nb.y - cell.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < 1e-6) continue;
+      const dz = (nb.elevation - cell.elevation) * elevScale;
+      const w = 1 / dist2;
+      dzdx += dz * dx * w;
+      dzdy += dz * dy * w;
+      weightSum += w;
+    }
+    if (weightSum > 0) {
+      dzdx /= weightSum;
+      dzdy /= weightSum;
+    }
+
+    // Surface normal = normalize(-dzdx, -dzdy, 1)
+    const nx = -dzdx;
+    const ny = -dzdy;
+    const nz = 1;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const illum = (nx * lightX + ny * lightY + nz * lightZ) / len;
+
+    if (illum > 0.5) {
+      const alpha = (illum - 0.5) * 0.3;
+      ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    } else {
+      const alpha = (0.5 - illum) * 0.4;
+      ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
+    }
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+}
+
 function isCoastEdge(cell: Cell, cells: Cell[], ni: number): boolean {
   return cell.isWater !== cells[ni].isWater;
 }
@@ -221,9 +277,16 @@ function drawMountainIcon(
   y: number,
   s: number
 ): void {
-  ctx.fillStyle = '#8a7060';
-  ctx.strokeStyle = '#5a4030';
+  ctx.fillStyle = '#7a6050';
+  ctx.strokeStyle = '#4a3020';
   ctx.lineWidth = 0.8;
+  // Background peak (small, behind the others)
+  ctx.beginPath();
+  ctx.moveTo(x - s * 1.1, y + s * 0.5);
+  ctx.lineTo(x - s * 0.6, y - s * 0.5);
+  ctx.lineTo(x - s * 0.1, y + s * 0.5);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
   // Left peak
   ctx.beginPath();
   ctx.moveTo(x - s, y + s * 0.5);
@@ -231,19 +294,26 @@ function drawMountainIcon(
   ctx.lineTo(x + s * 0.4, y + s * 0.5);
   ctx.closePath();
   ctx.fill(); ctx.stroke();
-  // Right peak (bigger)
+  // Right peak (biggest)
   ctx.beginPath();
   ctx.moveTo(x - s * 0.3, y + s * 0.5);
   ctx.lineTo(x + s * 0.5, y - s);
   ctx.lineTo(x + s * 1.1, y + s * 0.5);
   ctx.closePath();
   ctx.fill(); ctx.stroke();
-  // Snow caps
+  // Snow caps on right peak
   ctx.fillStyle = '#e8e8f0';
   ctx.beginPath();
   ctx.moveTo(x + s * 0.5, y - s);
   ctx.lineTo(x + s * 0.2, y - s * 0.5);
   ctx.lineTo(x + s * 0.8, y - s * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  // Snow cap on left peak
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.2, y - s * 0.8);
+  ctx.lineTo(x - s * 0.45, y - s * 0.4);
+  ctx.lineTo(x + s * 0.05, y - s * 0.4);
   ctx.closePath();
   ctx.fill();
 }
@@ -356,20 +426,30 @@ function drawIcons(
   const citySet = new Set(visibleCities.map(c => c.cellIndex));
   const iconSize = Math.max(4, Math.min(8, data.width / 150));
 
-  // Biome icons (sample ~20% of cells for density control)
+  // Biome icons (sample ~20% of cells for density control, ~40% for mountains)
   for (const cell of cells) {
     if (cell.isWater || citySet.has(cell.index)) continue;
-    const info = BIOME_INFO[cell.biome];
-    if (!info.iconType) continue;
-    // Sample every ~5th cell based on index
-    if (cell.index % 5 !== 0) continue;
 
-    const s = iconSize;
-    switch (info.iconType) {
-      case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
-      case 'tree':     drawTreeIcon(ctx, cell.x, cell.y, s * 0.8); break;
-      case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
-      case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+    // High-elevation cells (>= 0.75) get mountain icons regardless of biome iconType
+    const isHighElev = !cell.isWater && cell.elevation >= 0.75;
+    const info = BIOME_INFO[cell.biome];
+
+    if (isHighElev) {
+      // ~40% density for mountains
+      if (cell.index % 5 >= 2) continue;
+      // Scale icon size by elevation: higher = bigger
+      const elevScale = Math.max(0.8, Math.min(1.4, 0.8 + (cell.elevation - 0.75) * 1.6));
+      drawMountainIcon(ctx, cell.x, cell.y, iconSize * elevScale);
+    } else if (info.iconType) {
+      // ~20% density for other icons
+      if (cell.index % 5 !== 0) continue;
+      const s = iconSize;
+      switch (info.iconType) {
+        case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
+        case 'tree':     drawTreeIcon(ctx, cell.x, cell.y, s * 0.8); break;
+        case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
+        case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+      }
     }
   }
 
@@ -832,6 +912,9 @@ export function render(
 
     // Layer 1: Biome fill
     drawBiomeFill(ctx, data.cells);
+
+    // Layer 1b: Hillshading (shaded relief on land)
+    if (layers.hillshading) drawHillshading(ctx, data.cells);
 
     // Layer 2: Water depth shading
     drawWaterDepth(ctx, data.cells, width, height);
