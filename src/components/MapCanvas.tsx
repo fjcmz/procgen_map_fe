@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
-import type { MapData, MapView, LayerVisibility } from '../lib/types';
+import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import { render } from '../lib/renderer';
 
 interface MapCanvasProps {
@@ -8,6 +8,7 @@ interface MapCanvasProps {
   seed: string;
   selectedYear?: number;
   mapView?: MapView;
+  season?: Season;
   onTransformChange?: (transform: Transform) => void;
 }
 
@@ -61,7 +62,7 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain', onTransformChange }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', season = 0, onTransformChange }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,9 +140,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed, selectedYear, mapView);
+    render(ctx, mapData, layers, seed, selectedYear, mapView, season);
     ctx.resetTransform();
-  }, [mapData, layers, seed, transform, selectedYear, mapView]);
+  }, [mapData, layers, seed, transform, selectedYear, mapView, season]);
 
   // Wheel zoom centered on cursor
   useEffect(() => {

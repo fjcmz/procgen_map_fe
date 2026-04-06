@@ -1,4 +1,4 @@
-import type { Cell, BiomeType, BiomeInfo } from '../types';
+import type { Cell, BiomeType, BiomeInfo, Season } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical } from './noise';
 
@@ -166,6 +166,95 @@ export function modulateBiomeColor(hexColor: string, density: number): string {
   const [r, g, b] = parseHex(hexColor);
   const factor = 1.12 - density * 0.24;
   return `rgb(${Math.min(255, Math.round(r * factor))},${Math.min(255, Math.round(g * factor))},${Math.min(255, Math.round(b * factor))})`;
+}
+
+// --- Seasonal Ice / Permafrost (Phase 4.4) ---
+
+export const SEASON_LABELS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
+
+// Seasonal offsets: [Spring, Summer, Autumn, Winter]
+const SEASON_ICE_OFFSET =    [0.00, -0.04,  0.01,  0.04];
+const SEASON_SNOW_OFFSET =   [0.00, -0.03,  0.01,  0.03];
+const SEASON_TUNDRA_OFFSET = [0.00, -0.03,  0.01,  0.03];
+const SEASON_PERMAFROST_ALPHA = [0.12, 0.06, 0.14, 0.18];
+
+// Permafrost temperature band
+const PERMAFROST_TEMP_LO = 0.10;
+const PERMAFROST_TEMP_HI = 0.30;
+
+/** Spatial hash dither for organic seasonal boundaries (no noise sampler needed at render time). */
+function seasonalDither(x: number, y: number, scale: number): number {
+  const hash = Math.sin(x * 127.1 * scale + y * 311.7 * scale) * 43758.5453;
+  return (hash - Math.floor(hash)) * 0.08 - 0.04; // ±0.04 range
+}
+
+/**
+ * Returns the effective biome for a cell given the current season.
+ * Applies seasonal temperature threshold offsets to shift polar biome boundaries.
+ * Non-polar cells pass through unchanged. Season 0 (Spring) returns cell.biome as-is.
+ */
+export function getSeasonalBiome(cell: Cell, season: Season): BiomeType {
+  if (season === 0) return cell.biome;
+
+  const temp = cell.temperature;
+  const dither = seasonalDither(cell.x, cell.y, 1.3);
+
+  // Check if this cell could be affected by seasonal shifts
+  // (only cells near the polar thresholds need re-evaluation)
+  if (cell.isWater) {
+    const iceThresh = ICE_TEMP_THRESHOLD + SEASON_ICE_OFFSET[season] + dither * 0.06;
+    if (temp < iceThresh && cell.biome !== 'ICE') {
+      // Water cell that should become ICE in this season
+      return 'ICE';
+    }
+    if (temp >= iceThresh && cell.biome === 'ICE') {
+      // ICE cell that should thaw in this season
+      return cell.elevation < 0.1 ? 'OCEAN' : 'COAST';
+    }
+    return cell.biome;
+  }
+
+  // Land cells: check snow and tundra boundaries
+  const snowThresh = SNOW_TEMP_THRESHOLD + SEASON_SNOW_OFFSET[season] + dither * 0.05;
+  const tundraThresh = TUNDRA_TEMP_THRESHOLD + SEASON_TUNDRA_OFFSET[season] + dither * 0.05;
+
+  if (temp < snowThresh) {
+    // Should be SNOW in this season
+    if (cell.biome !== 'SNOW') return 'SNOW';
+    return cell.biome;
+  }
+  if (temp < tundraThresh) {
+    // Should be TUNDRA in this season
+    if (cell.biome !== 'TUNDRA') return 'TUNDRA';
+    return cell.biome;
+  }
+
+  // Above tundra threshold — if the cell was originally SNOW or TUNDRA, it thaws
+  if (cell.biome === 'SNOW' || cell.biome === 'TUNDRA') {
+    // Revert to what the Whittaker table would give for this cell
+    return WHITTAKER[elevBand(cell.elevation)][moistBand(cell.moisture)];
+  }
+
+  return cell.biome;
+}
+
+/**
+ * Returns the permafrost overlay alpha for a cell, or 0 if not in the permafrost band.
+ * Land cells with temperature in [0.10, 0.30] get a blue-gray overlay.
+ * Alpha scales with depth into the band (colder = stronger) and varies by season.
+ */
+export function getPermafrostAlpha(cell: Cell, season: Season): number {
+  if (cell.isWater) return 0;
+  const temp = cell.temperature;
+  if (temp < PERMAFROST_TEMP_LO || temp > PERMAFROST_TEMP_HI) return 0;
+
+  // Depth into the band: 1.0 at the cold edge, 0.0 at the warm edge
+  const depth = 1.0 - (temp - PERMAFROST_TEMP_LO) / (PERMAFROST_TEMP_HI - PERMAFROST_TEMP_LO);
+  const baseAlpha = SEASON_PERMAFROST_ALPHA[season];
+
+  // Spatial dither to prevent hard edges
+  const dither = seasonalDither(cell.x, cell.y, 0.9) * 0.5;
+  return Math.max(0, Math.min(0.25, baseAlpha * depth + dither * 0.03));
 }
 
 // Fantasy parchment-friendly palette
