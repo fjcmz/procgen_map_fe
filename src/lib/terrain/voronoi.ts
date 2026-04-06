@@ -142,6 +142,7 @@ export function buildCellGraph(
       neighbors: Array.from(neighborSet),
       elevation: 0,
       moisture: 0,
+      temperature: 0,
       biome: 'OCEAN',
       isWater: true,
       isCoast: false,

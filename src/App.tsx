@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { MapData, MapView, LayerVisibility, WorkerMessage } from './lib/types';
+import type { MapData, MapView, LayerVisibility, WorkerMessage, Season } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { Controls } from './components/Controls';
@@ -26,6 +26,8 @@ const DEFAULT_LAYERS: LayerVisibility = {
   wonderMarkers: true,
   religionMarkers: true,
   minimap: true,
+  hillshading: true,
+  seasonalIce: true,
 };
 
 export default function App() {
@@ -40,6 +42,7 @@ export default function App() {
   const [generateHistory, setGenerateHistory] = useState(false);
   const [numSimYears, setNumSimYears] = useState(5000);
   const [selectedYear, setSelectedYear] = useState(0);
+  const [season, setSeason] = useState<Season>(0);
   const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
 
   const workerRef = useRef<Worker | null>(null);
@@ -121,6 +124,7 @@ export default function App() {
         seed={seed}
         selectedYear={mapData?.history ? selectedYear : undefined}
         mapView={mapView}
+        season={season}
         onTransformChange={setViewTransform}
       />
       <ZoomControls
@@ -137,6 +141,8 @@ export default function App() {
         onWaterRatioChange={setWaterRatio}
         mapView={mapView}
         onMapViewChange={setMapView}
+        season={season}
+        onSeasonChange={setSeason}
         layers={layers}
         onLayerToggle={handleLayerToggle}
         generateHistory={generateHistory}
@@ -157,6 +163,7 @@ export default function App() {
           seed={seed}
           selectedYear={mapData?.history ? selectedYear : undefined}
           mapView={mapView}
+          season={season}
           viewTransform={viewTransform}
           onNavigate={(mapX, mapY) => mapCanvasRef.current?.navigateTo(mapX, mapY)}
         />

@@ -8,7 +8,7 @@
 import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
-import { generateRoads } from './roads';
+import { generateRoads, computeDistanceFromLand, generateTradeRoutePath } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
 import { HistoryRoot } from './HistoryRoot';
 import type { World } from './physical/World';
@@ -390,6 +390,10 @@ export class HistoryGenerator {
     const activeTrades = new Map<string, Trade>();
     const activeTradeEntries = new Map<string, TradeRouteEntry>();
 
+    // Precompute distance-from-land for trade route pathfinding (coastal-hugging A*)
+    const distFromLand = computeDistanceFromLand(cells);
+    const tradePathCache = new Map<string, number[]>();
+
     // Compute ownership at year 0 (before any events)
     let prevOwnership: Int16Array | null = null;
 
@@ -403,7 +407,13 @@ export class HistoryGenerator {
         const c2 = world.mapCities.get(trade.city2);
         if (c1 && c2) {
           activeTrades.set(trade.id, trade);
-          activeTradeEntries.set(trade.id, { cell1: c1.cellIndex, cell2: c2.cellIndex });
+          const cacheKey = [c1.cellIndex, c2.cellIndex].sort((a, b) => a - b).join('-');
+          let path = tradePathCache.get(cacheKey);
+          if (!path) {
+            path = generateTradeRoutePath(cells, distFromLand, c1.cellIndex, c2.cellIndex, width);
+            tradePathCache.set(cacheKey, path);
+          }
+          activeTradeEntries.set(trade.id, { cell1: c1.cellIndex, cell2: c2.cellIndex, path });
         }
       }
 

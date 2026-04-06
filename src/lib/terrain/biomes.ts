@@ -1,7 +1,9 @@
-import type { Cell, BiomeType, BiomeInfo } from '../types';
+import type { Cell, BiomeType, BiomeInfo, Season } from '../types';
+import type { NoiseSampler3D } from './noise';
+import { fbmCylindrical } from './noise';
 
 // Whittaker biome lookup: [elevationBand][moistureBand]
-// elevation bands: <0.3, 0.3-0.6, 0.6-0.8, 0.8+
+// elevation bands: <0.3, 0.3-0.6, 0.6-0.65, 0.65-0.75, 0.75+
 // moisture bands: <0.1, 0.1-0.33, 0.33-0.66, 0.66+
 const WHITTAKER: BiomeType[][] = [
   // elevation 0 (lowland)
@@ -10,16 +12,22 @@ const WHITTAKER: BiomeType[][] = [
   ['TEMPERATE_DESERT', 'GRASSLAND', 'TEMPERATE_DECIDUOUS_FOREST', 'TEMPERATE_RAIN_FOREST'],
   // elevation 2 (highland)
   ['TEMPERATE_DESERT', 'SHRUBLAND', 'TAIGA', 'TAIGA'],
-  // elevation 3 (mountain)
+  // elevation 3 (alpine)
+  ['TEMPERATE_DESERT', 'ALPINE_MEADOW', 'ALPINE_MEADOW', 'TAIGA'],
+  // elevation 4 (mountain)
   ['SCORCHED', 'BARE', 'TUNDRA', 'SNOW'],
 ];
 
 function elevBand(e: number): number {
   if (e < 0.3) return 0;
   if (e < 0.6) return 1;
-  if (e < 0.8) return 2;
-  return 3;
+  if (e < 0.65) return 2;
+  if (e < 0.75) return 3;
+  return 4;
 }
+
+// Moisture band boundaries for Whittaker lookup (also used by getVegetationDensity)
+const MOISTURE_BREAKS = [0, 0.1, 0.33, 0.66, 1.0];
 
 function moistBand(m: number): number {
   if (m < 0.1) return 0;
@@ -28,24 +36,55 @@ function moistBand(m: number): number {
   return 3;
 }
 
-export function assignBiomes(cells: Cell[], height: number): void {
+// --- Temperature-based polar thresholds ---
+// These replace the old polarDist-based thresholds. Lower temperature = colder.
+// Continental interiors at high latitudes will cross these thresholds sooner
+// (their temperature is pushed colder), while maritime coasts stay milder.
+const ICE_TEMP_THRESHOLD = 0.15;
+const SNOW_TEMP_THRESHOLD = 0.10;
+const TUNDRA_TEMP_THRESHOLD = 0.20;
+
+// How much temperature shifts effective moisture for Whittaker lookup
+const TEMP_MOISTURE_SHIFT = 0.05;
+
+export function assignBiomes(cells: Cell[], width: number, height: number, noise: NoiseSampler3D): void {
   for (const cell of cells) {
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
+    const temp = cell.temperature;
 
-    // Polar ice caps on water
-    if (cell.isWater && polarDist > 0.82) {
-      cell.biome = 'ICE';
-      continue;
+    // Polar ice caps on water — temperature-based with noise dithering
+    if (cell.isWater && temp < ICE_TEMP_THRESHOLD) {
+      const iceNoise = fbmCylindrical(
+        noise.continent, cell.x * 1.3, cell.y * 1.3, width, height, 3, 2.0
+      );
+      const iceThreshold = ICE_TEMP_THRESHOLD - iceNoise * 0.06;
+      if (temp < iceThreshold) {
+        cell.biome = 'ICE';
+        continue;
+      }
     }
-    // Polar land: snow and tundra
-    if (!cell.isWater && polarDist > 0.88) {
-      cell.biome = 'SNOW';
-      continue;
+    // Polar land: snow — temperature-based with noise dithering
+    if (!cell.isWater && temp < SNOW_TEMP_THRESHOLD) {
+      const snowNoise = fbmCylindrical(
+        noise.elevation, cell.x * 1.5, cell.y * 1.5, width, height, 3, 2.0
+      );
+      const snowThreshold = SNOW_TEMP_THRESHOLD - snowNoise * 0.05;
+      if (temp < snowThreshold) {
+        cell.biome = 'SNOW';
+        continue;
+      }
     }
-    if (!cell.isWater && polarDist > 0.8) {
-      cell.biome = 'TUNDRA';
-      continue;
+    // Polar land: tundra — temperature-based with noise dithering
+    if (!cell.isWater && temp < TUNDRA_TEMP_THRESHOLD) {
+      const tundraNoise = fbmCylindrical(
+        noise.elevation, cell.x * 1.2, cell.y * 1.2, width, height, 3, 1.8
+      );
+      const tundraThreshold = TUNDRA_TEMP_THRESHOLD - tundraNoise * 0.05;
+      if (temp < tundraThreshold) {
+        cell.biome = 'TUNDRA';
+        continue;
+      }
     }
 
     if (cell.isWater) {
@@ -60,8 +99,162 @@ export function assignBiomes(cells: Cell[], height: number): void {
       cell.biome = 'BEACH';
       continue;
     }
-    cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(cell.moisture)];
+
+    // Temperature-driven moisture nudge: hot continental cells lose effective
+    // moisture (deserts expand inland), cool maritime cells gain it (forests
+    // persist on coasts). The baseline temperature is pure latitude (1-polarDist).
+    const baselineTemp = 1.0 - polarDist;
+    const tempDelta = temp - baselineTemp;
+    const effMoisture = Math.max(0, Math.min(1,
+      cell.moisture + TEMP_MOISTURE_SHIFT * tempDelta
+    ));
+
+    cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(effMoisture)];
   }
+}
+
+// Biomes that skip vegetation density modulation (they already have
+// their own visual variation or are non-vegetation types).
+const NEUTRAL_BIOMES: ReadonlySet<BiomeType> = new Set([
+  'OCEAN', 'COAST', 'ICE', 'SNOW', 'BEACH',
+]);
+
+/**
+ * Returns 0.0 (dry/sparse edge) to 1.0 (wet/dense edge) based on where
+ * the cell's moisture sits within its Whittaker moisture band.
+ * Includes a spatial-hash dither to prevent visual banding.
+ */
+export function getVegetationDensity(cell: Cell): number {
+  if (cell.isWater || NEUTRAL_BIOMES.has(cell.biome)) return 0.5;
+
+  const m = cell.moisture;
+  // Find which moisture band the cell is in
+  let band = 0;
+  for (let i = 1; i < MOISTURE_BREAKS.length - 1; i++) {
+    if (m >= MOISTURE_BREAKS[i]) band = i;
+  }
+  const lo = MOISTURE_BREAKS[band];
+  const hi = MOISTURE_BREAKS[band + 1];
+  const t = (m - lo) / (hi - lo);
+
+  // Spatial-hash dither to break banding (same technique as drawWaterDepth)
+  const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+  const dither = (hash - Math.floor(hash)) * 0.1 - 0.05;
+
+  return Math.max(0, Math.min(1, t + dither));
+}
+
+// Pre-parsed RGB cache for hex colors used by modulateBiomeColor
+const hexCache = new Map<string, [number, number, number]>();
+
+function parseHex(hex: string): [number, number, number] {
+  let cached = hexCache.get(hex);
+  if (cached) return cached;
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  cached = [r, g, b];
+  hexCache.set(hex, cached);
+  return cached;
+}
+
+/**
+ * Modulates a biome fill color by vegetation density.
+ * density=0 → 12% lighter, density=0.5 → unchanged, density=1 → 12% darker.
+ */
+export function modulateBiomeColor(hexColor: string, density: number): string {
+  const [r, g, b] = parseHex(hexColor);
+  const factor = 1.12 - density * 0.24;
+  return `rgb(${Math.min(255, Math.round(r * factor))},${Math.min(255, Math.round(g * factor))},${Math.min(255, Math.round(b * factor))})`;
+}
+
+// --- Seasonal Ice / Permafrost (Phase 4.4) ---
+
+export const SEASON_LABELS = ['Spring', 'Summer', 'Autumn', 'Winter'] as const;
+
+// Seasonal offsets: [Spring, Summer, Autumn, Winter]
+const SEASON_ICE_OFFSET =    [0.00, -0.04,  0.01,  0.04];
+const SEASON_SNOW_OFFSET =   [0.00, -0.03,  0.01,  0.03];
+const SEASON_TUNDRA_OFFSET = [0.00, -0.03,  0.01,  0.03];
+const SEASON_PERMAFROST_ALPHA = [0.12, 0.06, 0.14, 0.18];
+
+// Permafrost temperature band
+const PERMAFROST_TEMP_LO = 0.10;
+const PERMAFROST_TEMP_HI = 0.30;
+
+/** Spatial hash dither for organic seasonal boundaries (no noise sampler needed at render time). */
+function seasonalDither(x: number, y: number, scale: number): number {
+  const hash = Math.sin(x * 127.1 * scale + y * 311.7 * scale) * 43758.5453;
+  return (hash - Math.floor(hash)) * 0.08 - 0.04; // ±0.04 range
+}
+
+/**
+ * Returns the effective biome for a cell given the current season.
+ * Applies seasonal temperature threshold offsets to shift polar biome boundaries.
+ * Non-polar cells pass through unchanged. Season 0 (Spring) returns cell.biome as-is.
+ */
+export function getSeasonalBiome(cell: Cell, season: Season): BiomeType {
+  if (season === 0) return cell.biome;
+
+  const temp = cell.temperature;
+  const dither = seasonalDither(cell.x, cell.y, 1.3);
+
+  // Check if this cell could be affected by seasonal shifts
+  // (only cells near the polar thresholds need re-evaluation)
+  if (cell.isWater) {
+    const iceThresh = ICE_TEMP_THRESHOLD + SEASON_ICE_OFFSET[season] + dither * 0.06;
+    if (temp < iceThresh && cell.biome !== 'ICE') {
+      // Water cell that should become ICE in this season
+      return 'ICE';
+    }
+    if (temp >= iceThresh && cell.biome === 'ICE') {
+      // ICE cell that should thaw in this season
+      return cell.elevation < 0.1 ? 'OCEAN' : 'COAST';
+    }
+    return cell.biome;
+  }
+
+  // Land cells: check snow and tundra boundaries
+  const snowThresh = SNOW_TEMP_THRESHOLD + SEASON_SNOW_OFFSET[season] + dither * 0.05;
+  const tundraThresh = TUNDRA_TEMP_THRESHOLD + SEASON_TUNDRA_OFFSET[season] + dither * 0.05;
+
+  if (temp < snowThresh) {
+    // Should be SNOW in this season
+    if (cell.biome !== 'SNOW') return 'SNOW';
+    return cell.biome;
+  }
+  if (temp < tundraThresh) {
+    // Should be TUNDRA in this season
+    if (cell.biome !== 'TUNDRA') return 'TUNDRA';
+    return cell.biome;
+  }
+
+  // Above tundra threshold — if the cell was originally SNOW or TUNDRA, it thaws
+  if (cell.biome === 'SNOW' || cell.biome === 'TUNDRA') {
+    // Revert to what the Whittaker table would give for this cell
+    return WHITTAKER[elevBand(cell.elevation)][moistBand(cell.moisture)];
+  }
+
+  return cell.biome;
+}
+
+/**
+ * Returns the permafrost overlay alpha for a cell, or 0 if not in the permafrost band.
+ * Land cells with temperature in [0.10, 0.30] get a blue-gray overlay.
+ * Alpha scales with depth into the band (colder = stronger) and varies by season.
+ */
+export function getPermafrostAlpha(cell: Cell, season: Season): number {
+  if (cell.isWater) return 0;
+  const temp = cell.temperature;
+  if (temp < PERMAFROST_TEMP_LO || temp > PERMAFROST_TEMP_HI) return 0;
+
+  // Depth into the band: 1.0 at the cold edge, 0.0 at the warm edge
+  const depth = 1.0 - (temp - PERMAFROST_TEMP_LO) / (PERMAFROST_TEMP_HI - PERMAFROST_TEMP_LO);
+  const baseAlpha = SEASON_PERMAFROST_ALPHA[season];
+
+  // Spatial dither to prevent hard edges
+  const dither = seasonalDither(cell.x, cell.y, 0.9) * 0.5;
+  return Math.max(0, Math.min(0.25, baseAlpha * depth + dither * 0.03));
 }
 
 // Fantasy parchment-friendly palette
@@ -84,4 +277,5 @@ export const BIOME_INFO: Record<BiomeType, BiomeInfo> = {
   SNOW:                        { fillColor: '#e8e8f0', label: 'Snow',                      iconType: 'snow' },
   MARSH:                       { fillColor: '#7a9a70', label: 'Marsh',                     iconType: null },
   ICE:                         { fillColor: '#d8e8f0', label: 'Ice',                       iconType: 'snow' },
+  ALPINE_MEADOW:               { fillColor: '#98b86a', label: 'Alpine Meadow',             iconType: null },
 };

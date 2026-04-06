@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
-import type { MapData, MapView, LayerVisibility } from '../lib/types';
+import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import type { Transform } from './MapCanvas';
 import { render } from '../lib/renderer';
 import { Draggable } from './Draggable';
@@ -10,6 +10,7 @@ interface MinimapProps {
   seed: string;
   selectedYear?: number;
   mapView: MapView;
+  season?: Season;
   viewTransform: Transform;
   onNavigate: (mapX: number, mapY: number) => void;
 }
@@ -37,6 +38,7 @@ export function Minimap({
   seed,
   selectedYear,
   mapView,
+  season = 0,
   viewTransform,
   onNavigate,
 }: MinimapProps) {
@@ -50,8 +52,8 @@ export function Minimap({
   const scaleY = miniH / mapH;
 
   // Build a cache key from props that affect the rendered map image
-  const cacheKey = `${mapW}x${mapH}-${seed}-${selectedYear ?? ''}-${mapView}`
-    + `-${layers.rivers}-${layers.roads}-${layers.borders}-${layers.regions}-${layers.tradeRoutes}`;
+  const cacheKey = `${mapW}x${mapH}-${seed}-${selectedYear ?? ''}-${mapView}-${season}`
+    + `-${layers.rivers}-${layers.roads}-${layers.borders}-${layers.regions}-${layers.tradeRoutes}-${layers.seasonalIce}`;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -69,7 +71,7 @@ export function Minimap({
       if (offCtx) {
         offCtx.save();
         offCtx.scale(scaleX, scaleY);
-        render(offCtx, mapData, minimapLayers(layers), seed, selectedYear, mapView);
+        render(offCtx, mapData, minimapLayers(layers), seed, selectedYear, mapView, season);
         offCtx.restore();
         mapCacheRef.current = { canvas: offscreen, key: cacheKey };
       }
@@ -116,7 +118,7 @@ export function Minimap({
         ctx.fillRect(wrappedX, ry, rw, rh);
       }
     }
-  }, [mapData, layers, seed, selectedYear, mapView, viewTransform, cacheKey, miniH, scaleX, scaleY]);
+  }, [mapData, layers, seed, selectedYear, mapView, season, viewTransform, cacheKey, miniH, scaleX, scaleY]);
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {

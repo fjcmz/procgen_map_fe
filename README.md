@@ -11,17 +11,26 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Seed-based generation** — reproducible maps from any seed string
 - **Configurable detail** — cell count from 500 to 100,000 for fast previews or high-detail renders
 - **Water ratio** — slider to control the percentage of water vs land (0–100%)
-- **Rich terrain** — 18 biome types classified via a Whittaker diagram (elevation × moisture)
-- **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths
-- **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
-- **Settlements** — capitals and cities placed on suitable terrain (coast, rivers, flat land), connected by roads via A* pathfinding
+- **Tectonic plates** — 11–17 tectonic plates with controlled continental/oceanic split (3–5 large continental plates, 8–12 oceanic); continental plates grow larger via weighted expansion and cluster together to form realistic continent-sized landmasses; convergent boundaries create mountain ranges and volcanic arcs, divergent boundaries form rift valleys and mid-ocean ridges
+- **Polar ice caps** — automatic polar landmass generation at high latitudes using dedicated FBM noise; smoothstep elevation blending and noise-dithered biome thresholds produce organic, jagged ice edges instead of hard horizontal lines
+- **Rich terrain** — 19 biome types classified via a Whittaker diagram (elevation × moisture), including a transitional alpine meadow band; per-cell vegetation density variation modulates biome fill colors and tree icon density/size based on each cell's position within its moisture band, creating organic gradients within biome regions
+- **Realistic moisture** — three-layer moisture model: latitude-based Hadley cell circulation (damped cosine curve producing equatorial wet zones and subtropical desert belts) + continentality gradient (BFS distance-from-ocean decay for dry interiors) + rain shadow behind mountain ranges (prevailing wind simulation); produces Earth-like desert bands, rainforest concentration, and continental aridity
+- **Ocean currents** — simplified ocean gyre simulation: BFS flood-fill detects ocean basins, then an analytical model produces warm poleward currents along western margins (Gulf Stream, Kuroshio) and cold equatorward currents along eastern margins (California, Benguela, Humboldt); the resulting sea surface temperature anomalies feed into coastal moisture (cold currents suppress evaporation for Atacama/Namibia-like aridity) and land temperature (warm currents create milder coasts, cold currents create cooler ones); water rendering is subtly tinted by current temperature
+- **Continental climate effects** — per-cell temperature computed from latitude, continentality (continental interiors more extreme, maritime cells milder), windward ocean proximity (west-coast mildness via upwind neighbor march), ocean current influence (warm/cold currents modify nearby coastal temperatures), and elevation lapse rate; drives polar biome boundaries and nudges the Whittaker biome lookup so western coasts stay milder and continental interiors shift toward more extreme biomes
+- **Seasonal ice / permafrost** — render-time seasonal variation for polar regions: a four-season selector (Spring/Summer/Autumn/Winter) shifts polar ice, snow, and tundra boundaries — ice caps expand in winter and retreat in summer — while a permafrost overlay tints sub-polar land with a blue-gray wash whose intensity varies by season and depth into the cold band; toggleable via the "Seasons" layer control
+- **Hillshading** — shaded relief lighting on land terrain using neighbor-based gradient estimation with a NW light source; toggleable via the "Relief" layer control
+- **Hydrology** — rivers generated from drainage accumulation with flow-scaled widths; hydraulic erosion carves visible river valleys, gorges, and floodplains into the terrain using a stream power model (erosion proportional to flow and slope), with valley widening for hillshading visibility
+- **History simulation** — optional multi-century timeline: cities are founded and make first contact, countries form when all regional cities are established, illustrious figures drive technology and religion, trade routes connect cities via pathfound coastal-hugging and island-hopping maritime routes, cataclysms strike, wars break out between neighbouring countries leading to conquests and empires — all simulated year by year
+- **Settlements** — capitals and cities placed using climate-aware scoring: river mouths, natural harbors, and fertile lowlands are preferred; extreme biomes (desert, tundra, ice) are penalized unless mitigated by rivers or coast access. Connected by roads via A* pathfinding
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
-- **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider
-- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with current-year highlighting and auto-scroll; collapsible to header-only
-- **Draggable UI panels** — the biome legend, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
+- **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider; header shows year, world population, living/total nations, and event count
+- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with year labels, event-type icons, yearly population entries, and current-year highlighting; collapsible to header-only
+- **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
+- **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
+- **Draggable UI panels** — the biome legend, minimap, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
-- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, region borders, and resource icons
+- **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, resource icons, and relief shading
 - **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
 
 ## Tech Stack
@@ -53,15 +62,19 @@ npm run preview
 ## Generation Pipeline
 
 1. **Voronoi cells** — evenly-distributed cells via Delaunay triangulation + Lloyd relaxation
-2. **Elevation** — multi-octave FBM noise with radial island falloff; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
-3. **Moisture** — separate FBM noise layer with coastal humidity boost
-4. **Biomes** — Whittaker diagram classification into 18 terrain types
-5. **Rivers** — water flow accumulation determines river paths and widths
-6. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region on highest-scoring terrain cells
-7. **History** *(optional)* — if enabled, the **HistoryGenerator** orchestrates a full civilizational simulation: it first builds the physical world (step 6), then runs a 5000-year timeline via the **TimelineGenerator**. Each year, 12 event generators fire in order: cities are founded, make first contact, form countries, produce illustrious figures, discover technologies, build wonders, found religions, open trade routes, suffer cataclysms, wage wars, resolve conquests, and form empires. The first N years (user-configurable) are serialized into the UI's timeline format with ownership snapshots for fast scrubbing.
-8. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
+2. **Elevation** — tectonic plate simulation with controlled continental/oceanic split (3–5 large continental plates clustered for continent-sized landmasses, 8–12 oceanic plates spread evenly); size-biased growth gives continental plates ~3× more cells; continental seam elevation boost merges adjacent continental plates; convergent/divergent boundary effects + multi-octave FBM noise + polar ice cap generation; thermal erosion smoothing; elevations normalized so the highest point always reaches 1.0; sea level derived by ranking cells so the exact requested water ratio is always achieved
+3. **Ocean currents** — BFS flood-fill detects connected ocean basins; an analytical gyre model computes per-cell sea surface temperature (SST) anomalies: warm poleward currents on western basin margins, cold equatorward currents on eastern margins, scaled by a latitude envelope (strongest at mid-latitudes, weak near equator and poles); feeds into moisture and temperature steps
+4. **Moisture** — FBM noise base + smooth Hadley cell latitude curve (damped cosine modeling three atmospheric circulation cells per hemisphere) + coastal boost (modulated by ocean currents: cold currents suppress evaporation) → continentality gradient (BFS distance-from-ocean decay) → rain shadow (upwind mountain barrier detection with prevailing wind simulation); also produces distance-from-ocean data for the temperature step
+5. **Temperature** — per-cell temperature (0–1) from latitude base + continentality modifier (continental interiors pushed to extremes, maritime cells pulled toward moderate) + windward ocean proximity (upwind march through Voronoi neighbors detects nearby ocean for west-coast mildness effect) + ocean current influence (SST anomaly of upwind ocean propagated to coastal land cells) + elevation lapse rate + noise perturbation; water cells incorporate SST anomaly directly
+6. **Biomes** — Whittaker diagram classification into 19 terrain types (5 elevation bands including a transitional alpine meadow zone); polar biomes (ICE/SNOW/TUNDRA) use temperature-based thresholds with noise dithering for organic transitions; the Whittaker lookup receives a temperature-adjusted effective moisture that shifts biome boundaries at continental margins
+7. **Rivers (initial)** — water flow accumulation determines river paths and per-cell `riverFlow` values
+8. **Hydraulic erosion** — stream power erosion carves valleys along river paths (erosion ~ flow^0.5 × slope), with sediment deposition creating floodplains downstream and valley widening for visible cross-sections in hillshading; temperature and biomes are refreshed afterward since elevation changed; rivers are re-traced on the carved terrain for precise valley-following paths
+9. **Physical world** — always runs: BFS flood-fills connected land cells to detect continents; subdivides each continent into geographic regions (~30 cells each) via multi-source BFS seeding; places 1–10 natural resources per region (weighted random type across 17 resource types); places 1–5 cities per region using climate-aware scoring (river mouths, natural harbors, biome penalties with river/coast mitigation)
+10. **History** *(optional)* — if enabled, the **HistoryGenerator** orchestrates a full civilizational simulation: it first builds the physical world (step 9), then runs a 5000-year timeline via the **TimelineGenerator**. Each year, 12 event generators fire in order: cities are founded, make first contact, form countries, produce illustrious figures, discover technologies, build wonders, found religions, open trade routes, suffer cataclysms, wage wars, resolve conquests, and form empires. The first N years (user-configurable) are serialized into the UI's timeline format with ownership snapshots for fast scrubbing.
+11. **Roads** *(history only)* — A* pathfinding connects history-generated cities across the terrain
+12. **Trade routes** *(history only)* — active trade connections are pathfound using a dual-domain A* that traverses both land and water; maritime segments use a cost gradient based on distance from land, naturally producing routes that hug coastlines and hop between islands rather than cutting straight across open ocean
 
-If history is **disabled**, steps 7–8 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
+If history is **disabled**, steps 10–12 are skipped and the map shows terrain and physical world structure only (no kingdom simulation, roads, or timeline).
 
 ## Project Structure
 
@@ -72,6 +85,7 @@ src/
 │   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
 │   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
+│   ├── Minimap.tsx       # Draggable minimap with viewport indicator and click-to-navigate
 │   ├── Timeline.tsx      # Draggable playback controls + draggable/collapsible event log side panel
 │   └── ZoomControls.tsx
 ├── lib/                  # Core generation modules
@@ -79,10 +93,12 @@ src/
 │   ├── terrain/          # Physical map generation
 │   │   ├── noise.ts      # Seeded PRNG (Mulberry32) + Simplex noise + FBM helpers
 │   │   ├── voronoi.ts    # Cell generation via D3-Delaunay + Lloyd relaxation
-│   │   ├── elevation.ts  # FBM elevation + island falloff + water ratio marking
-│   │   ├── moisture.ts   # FBM moisture assignment
-│   │   ├── biomes.ts     # Whittaker biome classification + color palette
+│   │   ├── elevation.ts  # Tectonic plates (continental clustering + size-biased growth + seam boost) + FBM elevation + water ratio marking
+│   │   ├── moisture.ts   # FBM moisture + Hadley cell latitude curve + continentality + rain shadow
+│   │   ├── temperature.ts# Continental climate: latitude + continentality + windward proximity + lapse rate
+│   │   ├── biomes.ts     # Whittaker biome classification + temperature-driven thresholds + color palette
 │   │   ├── rivers.ts     # Drainage map + flow accumulation + river tracing
+│   │   ├── hydraulicErosion.ts # Stream power erosion — carves river valleys + floodplains
 │   │   └── index.ts
 │   ├── history/          # Civilizational simulation
 │   │   ├── physical/     # Physical model — data classes (Phase 2) + generators/visitors (Phase 3)
@@ -140,4 +156,5 @@ src/
 - Canvas is rendered at native pixel density to avoid blurriness on high-DPI displays.
 - Cities and kingdoms are **only generated when history is enabled** — they are outputs of the history simulation, not independent pipeline steps.
 - The **HistoryGenerator** (Phase 6) is the top-level orchestrator: it calls `buildPhysicalWorld` then `TimelineGenerator`, and serializes the rich simulation state into the flat `HistoryData` format the renderer and timeline UI consume.
+- **Seasonal rendering** is a pure render-time concept — the generation pipeline is unchanged. `getSeasonalBiome()` applies per-season temperature threshold offsets with spatial-hash dither to shift polar biome boundaries organically. `getPermafrostAlpha()` returns a blue-gray overlay intensity for sub-polar land cells. Season defaults to Spring (0), which produces no visual change.
 - The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in a side panel shows all events up to the selected year, with icons for 15 event types (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquests, empires, and legacy types).

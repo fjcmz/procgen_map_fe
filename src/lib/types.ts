@@ -16,7 +16,8 @@ export type BiomeType =
   | 'TROPICAL_SEASONAL_FOREST'
   | 'SUBTROPICAL_DESERT'
   | 'MARSH'
-  | 'ICE';
+  | 'ICE'
+  | 'ALPINE_MEADOW';
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
 
@@ -41,6 +42,7 @@ export interface Cell {
   neighbors: number[];
   elevation: number;
   moisture: number;
+  temperature: number;
   biome: BiomeType;
   isWater: boolean;
   isCoast: boolean;
@@ -105,6 +107,8 @@ export interface HistoryYear {
 export interface TradeRouteEntry {
   cell1: number;
   cell2: number;
+  /** Full cell-index path from cell1 to cell2 (coastal-hugging A* for maritime routes). */
+  path?: number[];
 }
 
 export interface HistoryData {
@@ -150,6 +154,9 @@ export type WorkerMessage =
 
 export type MapView = 'terrain' | 'political';
 
+/** 0 = Spring (baseline), 1 = Summer, 2 = Autumn, 3 = Winter */
+export type Season = 0 | 1 | 2 | 3;
+
 export interface LayerVisibility {
   rivers: boolean;
   roads: boolean;
@@ -169,6 +176,10 @@ export interface LayerVisibility {
   religionMarkers: boolean;
   /** Small overview minimap in the corner. */
   minimap: boolean;
+  /** Shaded relief (hillshading) on land terrain. */
+  hillshading: boolean;
+  /** Seasonal ice/snow variation and permafrost overlay. */
+  seasonalIce: boolean;
 }
 
 export interface BiomeInfo {

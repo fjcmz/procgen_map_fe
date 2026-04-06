@@ -1,5 +1,5 @@
-import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry } from '../types';
-import { BIOME_INFO } from '../terrain/biomes';
+import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry, Season } from '../types';
+import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
@@ -36,18 +36,32 @@ function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
   ctx.closePath();
 }
 
-function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[]): void {
+function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season = 0): void {
   // Draw land first, water last — ensures water always wins at shared polygon edges
   // regardless of cell index order (which has no spatial meaning in Voronoi).
   for (const cell of cells) {
     if (cell.isWater || cell.vertices.length < 2) continue;
-    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
+    const density = getVegetationDensity(cell);
+    ctx.fillStyle = modulateBiomeColor(BIOME_INFO[effectiveBiome].fillColor, density);
     cellPath(ctx, cell);
     ctx.fill();
   }
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
-    ctx.fillStyle = BIOME_INFO[cell.biome].fillColor;
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
+    ctx.fillStyle = BIOME_INFO[effectiveBiome].fillColor;
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+}
+
+function drawPermafrost(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season): void {
+  for (const cell of cells) {
+    if (cell.isWater || cell.vertices.length < 2) continue;
+    const alpha = getPermafrostAlpha(cell, season);
+    if (alpha <= 0) continue;
+    ctx.fillStyle = `rgba(180,200,220,${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
     ctx.fill();
   }
@@ -62,13 +76,83 @@ function drawWaterDepth(
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
     const depth = Math.max(0, 1 - cell.elevation / 0.4); // 0=shallow, 1=deep
-    const alpha = depth * 0.3;
-    ctx.fillStyle = `rgba(20,50,100,${alpha.toFixed(3)})`;
+
+    // Derive SST anomaly by comparing cell temperature to latitude baseline
+    const ny = (cell.y / height) * 2 - 1;
+    const baseTemp = 1.0 - Math.abs(ny);
+    const tempDelta = cell.temperature - baseTemp; // positive = warm current, negative = cold
+
+    // Tint water color: warm currents → slightly warmer hue, cold currents → deeper blue
+    const r = Math.round(20 + tempDelta * 40);   // ~8–32 range
+    const g = Math.round(50 + tempDelta * 30);   // ~38–62 range
+    const b = Math.round(100 - tempDelta * 30);  // ~70–130 range
+
+    // Spatial hash dither to break horizontal banding
+    const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+    const dither = (hash - Math.floor(hash)) * 0.06 - 0.03;
+
+    const alpha = Math.max(0, Math.min(0.3, depth * 0.3 + dither));
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
     ctx.fill();
   }
-  // Suppress unused parameter warning
-  void width; void height;
+  void width; // used only by callers for consistent signature
+}
+
+function drawHillshading(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[]
+): void {
+  // Virtual light source: azimuth 315° (NW), altitude 45°
+  const az = (315 * Math.PI) / 180;
+  const alt = (45 * Math.PI) / 180;
+  const lightX = Math.cos(az) * Math.cos(alt);
+  const lightY = Math.sin(az) * Math.cos(alt);
+  const lightZ = Math.sin(alt);
+  const elevScale = 8.0; // exaggerate relief
+
+  for (const cell of cells) {
+    if (cell.isWater || cell.vertices.length < 2) continue;
+
+    // Estimate gradient from neighbors
+    let dzdx = 0;
+    let dzdy = 0;
+    let weightSum = 0;
+    for (const ni of cell.neighbors) {
+      const nb = cells[ni];
+      if (!nb) continue;
+      const dx = nb.x - cell.x;
+      const dy = nb.y - cell.y;
+      const dist2 = dx * dx + dy * dy;
+      if (dist2 < 1e-6) continue;
+      const dz = (nb.elevation - cell.elevation) * elevScale;
+      const w = 1 / dist2;
+      dzdx += dz * dx * w;
+      dzdy += dz * dy * w;
+      weightSum += w;
+    }
+    if (weightSum > 0) {
+      dzdx /= weightSum;
+      dzdy /= weightSum;
+    }
+
+    // Surface normal = normalize(-dzdx, -dzdy, 1)
+    const nx = -dzdx;
+    const ny = -dzdy;
+    const nz = 1;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const illum = (nx * lightX + ny * lightY + nz * lightZ) / len;
+
+    if (illum > 0.5) {
+      const alpha = (illum - 0.5) * 0.3;
+      ctx.fillStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+    } else {
+      const alpha = (0.5 - illum) * 0.4;
+      ctx.fillStyle = `rgba(0,0,0,${alpha.toFixed(3)})`;
+    }
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
 }
 
 function isCoastEdge(cell: Cell, cells: Cell[], ni: number): boolean {
@@ -221,9 +305,16 @@ function drawMountainIcon(
   y: number,
   s: number
 ): void {
-  ctx.fillStyle = '#8a7060';
-  ctx.strokeStyle = '#5a4030';
+  ctx.fillStyle = '#7a6050';
+  ctx.strokeStyle = '#4a3020';
   ctx.lineWidth = 0.8;
+  // Background peak (small, behind the others)
+  ctx.beginPath();
+  ctx.moveTo(x - s * 1.1, y + s * 0.5);
+  ctx.lineTo(x - s * 0.6, y - s * 0.5);
+  ctx.lineTo(x - s * 0.1, y + s * 0.5);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
   // Left peak
   ctx.beginPath();
   ctx.moveTo(x - s, y + s * 0.5);
@@ -231,19 +322,26 @@ function drawMountainIcon(
   ctx.lineTo(x + s * 0.4, y + s * 0.5);
   ctx.closePath();
   ctx.fill(); ctx.stroke();
-  // Right peak (bigger)
+  // Right peak (biggest)
   ctx.beginPath();
   ctx.moveTo(x - s * 0.3, y + s * 0.5);
   ctx.lineTo(x + s * 0.5, y - s);
   ctx.lineTo(x + s * 1.1, y + s * 0.5);
   ctx.closePath();
   ctx.fill(); ctx.stroke();
-  // Snow caps
+  // Snow caps on right peak
   ctx.fillStyle = '#e8e8f0';
   ctx.beginPath();
   ctx.moveTo(x + s * 0.5, y - s);
   ctx.lineTo(x + s * 0.2, y - s * 0.5);
   ctx.lineTo(x + s * 0.8, y - s * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  // Snow cap on left peak
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.2, y - s * 0.8);
+  ctx.lineTo(x - s * 0.45, y - s * 0.4);
+  ctx.lineTo(x + s * 0.05, y - s * 0.4);
   ctx.closePath();
   ctx.fill();
 }
@@ -252,10 +350,15 @@ function drawTreeIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  s: number
+  s: number,
+  density: number = 0.5
 ): void {
-  ctx.fillStyle = '#3a6030';
-  ctx.strokeStyle = '#2a4020';
+  // Modulate tree color by vegetation density: sparse/dry → lighter, dense/wet → darker
+  const r = Math.round(58 - density * 20);   // 58 → 38
+  const g = Math.round(96 - density * 30);   // 96 → 66
+  const b = Math.round(48 - density * 16);   // 48 → 32
+  ctx.fillStyle = `rgb(${r},${g},${b})`;
+  ctx.strokeStyle = `rgb(${r - 16},${g - 16},${b - 16})`;
   ctx.lineWidth = 0.5;
   ctx.beginPath();
   ctx.moveTo(x, y - s);
@@ -347,7 +450,8 @@ function drawCityIcon(
 function drawIcons(
   ctx: CanvasRenderingContext2D,
   data: MapData,
-  selectedYear?: number
+  selectedYear?: number,
+  season: Season = 0
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
@@ -356,20 +460,41 @@ function drawIcons(
   const citySet = new Set(visibleCities.map(c => c.cellIndex));
   const iconSize = Math.max(4, Math.min(8, data.width / 150));
 
-  // Biome icons (sample ~20% of cells for density control)
+  // Biome icons (sample ~20% of cells for density control, ~40% for mountains)
   for (const cell of cells) {
     if (cell.isWater || citySet.has(cell.index)) continue;
-    const info = BIOME_INFO[cell.biome];
-    if (!info.iconType) continue;
-    // Sample every ~5th cell based on index
-    if (cell.index % 5 !== 0) continue;
 
-    const s = iconSize;
-    switch (info.iconType) {
-      case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
-      case 'tree':     drawTreeIcon(ctx, cell.x, cell.y, s * 0.8); break;
-      case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
-      case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+    // High-elevation cells (>= 0.75) get mountain icons regardless of biome iconType
+    const isHighElev = !cell.isWater && cell.elevation >= 0.75;
+    const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
+    const info = BIOME_INFO[effectiveBiome];
+
+    if (isHighElev) {
+      // ~40% density for mountains
+      if (cell.index % 5 >= 2) continue;
+      // Scale icon size by elevation: higher = bigger
+      const elevScale = Math.max(0.8, Math.min(1.4, 0.8 + (cell.elevation - 0.75) * 1.6));
+      drawMountainIcon(ctx, cell.x, cell.y, iconSize * elevScale);
+    } else if (info.iconType) {
+      if (info.iconType === 'tree') {
+        // Variable tree density: 10% at dry edges, 30% at wet edges
+        const density = getVegetationDensity(cell);
+        const treeRate = 0.1 + density * 0.2;
+        const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
+        const rand = hash - Math.floor(hash);
+        if (rand > treeRate) continue;
+        const sizeScale = 0.85 + density * 0.3;
+        drawTreeIcon(ctx, cell.x, cell.y, iconSize * 0.8 * sizeScale, density);
+      } else {
+        // ~20% density for non-tree icons
+        if (cell.index % 5 !== 0) continue;
+        const s = iconSize;
+        switch (info.iconType) {
+          case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
+          case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
+          case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+        }
+      }
     }
   }
 
@@ -545,13 +670,24 @@ function drawTradeRoutes(
   ctx.globalAlpha = 0.55;
   ctx.setLineDash([4, 6]);
   for (const route of tradeRoutes) {
-    const c1 = cells[route.cell1];
-    const c2 = cells[route.cell2];
-    if (!c1 || !c2) continue;
-    ctx.beginPath();
-    ctx.moveTo(c1.x, c1.y);
-    ctx.lineTo(c2.x, c2.y);
-    ctx.stroke();
+    if (route.path && route.path.length >= 2) {
+      // Draw multi-segment pathfound route (coastal-hugging / island-hopping)
+      ctx.beginPath();
+      ctx.moveTo(cells[route.path[0]].x, cells[route.path[0]].y);
+      for (let i = 1; i < route.path.length; i++) {
+        ctx.lineTo(cells[route.path[i]].x, cells[route.path[i]].y);
+      }
+      ctx.stroke();
+    } else {
+      // Fallback: straight line between endpoints
+      const c1 = cells[route.cell1];
+      const c2 = cells[route.cell2];
+      if (!c1 || !c2) continue;
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
@@ -795,7 +931,8 @@ export function render(
   layers: LayerVisibility,
   seed: string,
   selectedYear?: number,
-  mapView: MapView = 'terrain'
+  mapView: MapView = 'terrain',
+  season: Season = 0
 ): void {
   initNoisyEdges(seed);
 
@@ -830,8 +967,17 @@ export function render(
     ctx.fillStyle = '#f5e9c8';
     ctx.fillRect(0, 0, width, height);
 
-    // Layer 1: Biome fill
-    drawBiomeFill(ctx, data.cells);
+    // Layer 1: Biome fill (with seasonal variation when enabled)
+    const effectiveSeason = layers.seasonalIce ? season : 0 as Season;
+    drawBiomeFill(ctx, data.cells, effectiveSeason);
+
+    // Layer 1b: Hillshading (shaded relief on land)
+    if (layers.hillshading) drawHillshading(ctx, data.cells);
+
+    // Layer 1c: Permafrost overlay (seasonal blue-gray tint on sub-polar land)
+    if (layers.seasonalIce && effectiveSeason !== 0) {
+      drawPermafrost(ctx, data.cells, effectiveSeason);
+    }
 
     // Layer 2: Water depth shading
     drawWaterDepth(ctx, data.cells, width, height);
@@ -875,7 +1021,7 @@ export function render(
     if (layers.roads) drawRoads(ctx, data);
 
     // Layer 7: Icons (biome + cities)
-    if (layers.icons) drawIcons(ctx, data, selectedYear);
+    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason);
 
     // Layer 7b: Wonder badges
     if (wonderCells) {

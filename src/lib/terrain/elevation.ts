@@ -17,34 +17,118 @@ interface TectonicPlate {
   baseElev: number;
 }
 
+// ---------------------------------------------------------------------------
+// Plate generation tuning constants
+// ---------------------------------------------------------------------------
+
+const NUM_CONTINENTAL_MIN = 3;
+const NUM_CONTINENTAL_MAX = 5;
+const NUM_OCEANIC_MIN = 8;
+const NUM_OCEANIC_MAX = 12;
+
+const CONTINENTAL_GROWTH_MIN = 2.0;
+const CONTINENTAL_GROWTH_MAX = 3.5;
+const OCEANIC_GROWTH_MIN = 0.6;
+const OCEANIC_GROWTH_MAX = 1.0;
+
+const BASE_STEP_SIZE = 4;
+const CONTINENTAL_SEED_MIN_SEP_FACTOR = 0.15; // multiplied by sqrt(n)
+
+const SEAM_BOOST_MIN = 0.08;
+const SEAM_BOOST_MAX = 0.12;
+const SEAM_SPREAD_RINGS = 4;
+
+/**
+ * BFS from a single cell, returns hop distances to all cells.
+ */
+function bfsDistances(cells: Cell[], startCell: number): Int32Array {
+  const n = cells.length;
+  const dist = new Int32Array(n).fill(0x7fffffff);
+  dist[startCell] = 0;
+  const queue: number[] = [startCell];
+  let qi = 0;
+  while (qi < queue.length) {
+    const ci = queue[qi++];
+    for (const ni of cells[ci].neighbors) {
+      if (dist[ni] === 0x7fffffff) {
+        dist[ni] = dist[ci] + 1;
+        queue.push(ni);
+      }
+    }
+  }
+  return dist;
+}
+
 /**
  * Assign every cell to its nearest plate via multi-source BFS on the cell
- * adjacency graph. This produces irregular plate shapes that follow the
- * Voronoi mesh topology — no circles or ellipses.
+ * adjacency graph. Uses a controlled continental/oceanic split with
+ * continental seed clustering and size-biased growth weights.
+ *
+ * Continental plates (3–5) are seeded near each other to form large
+ * landmasses, while oceanic plates (8–12) are spread evenly via
+ * farthest-point sampling. Round-robin weighted BFS gives continental
+ * plates ~3× more cells than oceanic plates.
  */
 function assignPlates(
   cells: Cell[],
-  numPlates: number,
   rng: () => number
 ): { plateOf: Int32Array; plates: TectonicPlate[] } {
   const n = cells.length;
   const plateOf = new Int32Array(n).fill(-1);
 
-  // Pick plate seed cells spread out via farthest-point sampling
-  const seedIndices: number[] = [];
-  // First seed: random
-  seedIndices.push(Math.floor(rng() * n));
-  plateOf[seedIndices[0]] = 0;
+  const numContinental = NUM_CONTINENTAL_MIN + Math.floor(rng() * (NUM_CONTINENTAL_MAX - NUM_CONTINENTAL_MIN + 1));
+  const numOceanic = NUM_OCEANIC_MIN + Math.floor(rng() * (NUM_OCEANIC_MAX - NUM_OCEANIC_MIN + 1));
+  const numPlates = numContinental + numOceanic;
 
-  // Subsequent seeds: pick the cell farthest (by BFS hops) from all existing seeds
-  // Approximate with random candidates + max-min distance
-  const hopDist = new Int32Array(n).fill(0x7fffffff);
+  const minSeparation = Math.floor(Math.sqrt(n) * CONTINENTAL_SEED_MIN_SEP_FACTOR);
+
+  // --- Seed placement ---
+  // Continental seeds: first is random, subsequent cluster near existing
+  // continental seeds. Oceanic seeds: farthest-point from all existing seeds.
+
+  const seedIndices: number[] = [];
+  const hopDist = new Int32Array(n).fill(0x7fffffff); // min distance to any seed
+  const continentalDist = new Int32Array(n).fill(0x7fffffff); // min distance to continental seeds
+
+  const numCandidates = Math.min(n, 80);
+
   for (let s = 0; s < numPlates; s++) {
-    if (s > 0) {
-      // Pick from candidates the one with max min-distance to existing seeds
+    let seedCell: number;
+
+    if (s === 0) {
+      // First continental seed: random
+      seedCell = Math.floor(rng() * n);
+    } else if (s < numContinental) {
+      // Subsequent continental seeds: nearest to existing continental seeds,
+      // but at least minSeparation hops away
+      let bestCell = -1;
+      let bestDist = 0x7fffffff;
+      for (let c = 0; c < numCandidates; c++) {
+        const ci = Math.floor(rng() * n);
+        if (plateOf[ci] !== -1) continue;
+        const d = continentalDist[ci];
+        if (d >= minSeparation && d < bestDist) {
+          bestDist = d;
+          bestCell = ci;
+        }
+      }
+      // Fallback: if no candidate meets minSeparation, just pick the closest
+      // unassigned candidate
+      if (bestCell === -1) {
+        let fallbackDist = 0x7fffffff;
+        for (let c = 0; c < numCandidates; c++) {
+          const ci = Math.floor(rng() * n);
+          if (plateOf[ci] === -1 && continentalDist[ci] < fallbackDist) {
+            fallbackDist = continentalDist[ci];
+            bestCell = ci;
+          }
+        }
+      }
+      seedCell = bestCell !== -1 ? bestCell : Math.floor(rng() * n);
+    } else {
+      // Oceanic seeds: farthest-point sampling from ALL existing seeds
       let bestCell = -1;
       let bestDist = -1;
-      const numCandidates = Math.min(n, 80);
       for (let c = 0; c < numCandidates; c++) {
         const ci = Math.floor(rng() * n);
         if (hopDist[ci] > bestDist && plateOf[ci] === -1) {
@@ -52,68 +136,73 @@ function assignPlates(
           bestCell = ci;
         }
       }
-      if (bestCell === -1) break;
-      seedIndices.push(bestCell);
-      plateOf[bestCell] = s;
+      seedCell = bestCell !== -1 ? bestCell : Math.floor(rng() * n);
     }
+
+    seedIndices.push(seedCell);
+    plateOf[seedCell] = s;
 
     // BFS from this seed to update hop distances
-    const queue: number[] = [seedIndices[s]];
-    const visited = new Uint8Array(n);
-    visited[seedIndices[s]] = 1;
-    const dist = new Int32Array(n).fill(0x7fffffff);
-    dist[seedIndices[s]] = 0;
-    let qi = 0;
-    while (qi < queue.length) {
-      const ci = queue[qi++];
-      for (const ni of cells[ci].neighbors) {
-        if (!visited[ni]) {
-          visited[ni] = 1;
-          dist[ni] = dist[ci] + 1;
-          queue.push(ni);
-        }
-      }
-    }
-    // Update global min-distance
+    const dist = bfsDistances(cells, seedCell);
     for (let i = 0; i < n; i++) {
       if (dist[i] < hopDist[i]) hopDist[i] = dist[i];
-    }
-  }
-
-  // Multi-source BFS from all seeds simultaneously to assign plates
-  // Randomize expansion order slightly for more organic boundaries
-  const queue: number[] = [];
-  const order = new Float64Array(n);
-  for (const si of seedIndices) {
-    queue.push(si);
-    order[si] = rng() * 0.5; // small random priority
-  }
-
-  // Simple BFS (not priority queue, but shuffle neighbors for irregularity)
-  let qi = 0;
-  while (qi < queue.length) {
-    const ci = queue[qi++];
-    const neighbors = cells[ci].neighbors;
-    // Shuffle neighbors for organic boundaries
-    for (let i = neighbors.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      const tmp = neighbors[i];
-      neighbors[i] = neighbors[j];
-      neighbors[j] = tmp;
-    }
-    for (const ni of neighbors) {
-      if (plateOf[ni] === -1) {
-        plateOf[ni] = plateOf[ci];
-        queue.push(ni);
+      if (s < numContinental && dist[i] < continentalDist[i]) {
+        continentalDist[i] = dist[i];
       }
     }
   }
 
-  // Build plate objects
-  const continentalRatio = 0.35 + rng() * 0.15; // 35-50% of plates are continental
+  // --- Round-robin weighted BFS plate growth ---
+  // Continental plates get higher growth weights so they claim more cells.
+  const growthWeight: number[] = [];
+  for (let i = 0; i < numPlates; i++) {
+    if (i < numContinental) {
+      growthWeight.push(CONTINENTAL_GROWTH_MIN + rng() * (CONTINENTAL_GROWTH_MAX - CONTINENTAL_GROWTH_MIN));
+    } else {
+      growthWeight.push(OCEANIC_GROWTH_MIN + rng() * (OCEANIC_GROWTH_MAX - OCEANIC_GROWTH_MIN));
+    }
+  }
+
+  // Per-plate frontier queues
+  const frontiers: number[][] = Array.from({ length: numPlates }, () => []);
+  for (let i = 0; i < seedIndices.length; i++) {
+    frontiers[i].push(seedIndices[i]);
+  }
+
+  let unassigned = n - numPlates;
+  while (unassigned > 0) {
+    let anyExpanded = false;
+    for (let p = 0; p < numPlates; p++) {
+      const steps = Math.max(1, Math.round(BASE_STEP_SIZE * growthWeight[p]));
+      let expanded = 0;
+      while (expanded < steps && frontiers[p].length > 0) {
+        const ci = frontiers[p].shift()!;
+        // Copy neighbors before shuffling to avoid corrupting the cell graph
+        const neighbors = [...cells[ci].neighbors];
+        for (let i = neighbors.length - 1; i > 0; i--) {
+          const j = Math.floor(rng() * (i + 1));
+          const tmp = neighbors[i];
+          neighbors[i] = neighbors[j];
+          neighbors[j] = tmp;
+        }
+        for (const ni of neighbors) {
+          if (plateOf[ni] === -1) {
+            plateOf[ni] = p;
+            frontiers[p].push(ni);
+            expanded++;
+            unassigned--;
+          }
+        }
+        if (expanded > 0) anyExpanded = true;
+      }
+    }
+    if (!anyExpanded) break;
+  }
+
+  // Build plate objects — index-based continental assignment
   const plates: TectonicPlate[] = [];
   for (let i = 0; i < numPlates; i++) {
-    const isContinental = rng() < continentalRatio;
+    const isContinental = i < numContinental;
     const angle = rng() * Math.PI * 2;
     const speed = 0.3 + rng() * 0.7;
     plates.push({
@@ -127,6 +216,62 @@ function assignPlates(
   }
 
   return { plateOf, plates };
+}
+
+/**
+ * Boost elevation along seams between adjacent continental plates.
+ * This fills the gap between neighbouring continental plates so they
+ * merge into a single landmass after the water-ratio ranking step.
+ */
+function boostContinentalSeams(
+  cells: Cell[],
+  plateOf: Int32Array,
+  plates: TectonicPlate[],
+  rng: () => number
+): Float64Array {
+  const n = cells.length;
+  const boost = new Float64Array(n);
+  const mergeBoost = SEAM_BOOST_MIN + rng() * (SEAM_BOOST_MAX - SEAM_BOOST_MIN);
+
+  // Find cells on continental-continental plate boundaries
+  const seamCells: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const myPlate = plateOf[i];
+    if (!plates[myPlate].isContinental) continue;
+    for (const ni of cells[i].neighbors) {
+      const otherPlate = plateOf[ni];
+      if (otherPlate !== myPlate && plates[otherPlate].isContinental) {
+        seamCells.push(i);
+        break;
+      }
+    }
+  }
+
+  // BFS spread from seam cells with decay
+  const visited = new Uint8Array(n);
+  const dist = new Int32Array(n).fill(0x7fffffff);
+  const queue: number[] = [];
+  for (const ci of seamCells) {
+    visited[ci] = 1;
+    dist[ci] = 0;
+    queue.push(ci);
+    boost[ci] = mergeBoost;
+  }
+  let qi = 0;
+  while (qi < queue.length) {
+    const ci = queue[qi++];
+    if (dist[ci] >= SEAM_SPREAD_RINGS) continue;
+    for (const ni of cells[ci].neighbors) {
+      if (!visited[ni] && plates[plateOf[ni]].isContinental) {
+        visited[ni] = 1;
+        dist[ni] = dist[ci] + 1;
+        boost[ni] = mergeBoost * (1 - dist[ni] / (SEAM_SPREAD_RINGS + 1));
+        queue.push(ni);
+      }
+    }
+  }
+
+  return boost;
 }
 
 /**
@@ -242,8 +387,11 @@ export function assignElevation(
   const n = cells.length;
 
   // --- Step 1: Generate tectonic plates ---
-  const numPlates = 8 + Math.floor(rng() * 8); // 8–15 plates
-  const { plateOf, plates } = assignPlates(cells, numPlates, rng);
+  // 3–5 continental plates (clustered, larger) + 8–12 oceanic plates (spread)
+  const { plateOf, plates } = assignPlates(cells, rng);
+
+  // --- Step 1b: Boost seams between adjacent continental plates ---
+  const seamBoost = boostContinentalSeams(cells, plateOf, plates, rng);
 
   // --- Step 2: Compute plate boundary effects ---
   const { stress, convergent } = computeBoundaryEffects(
@@ -255,8 +403,8 @@ export function assignElevation(
     const cell = cells[i];
     const plate = plates[plateOf[i]];
 
-    // Base elevation from plate type
-    let elev = plate.baseElev;
+    // Base elevation from plate type + continental seam boost
+    let elev = plate.baseElev + seamBoost[i];
 
     // --- Plate boundary effects ---
     if (stress[i] > 0.01) {
@@ -309,12 +457,15 @@ export function assignElevation(
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
 
-    if (polarDist > 0.82) {
-      const polarOffset = ny > 0 ? 0.0 : width * 0.5;
+    if (polarDist > 0.72) {
+      // Reduced southern offset for more symmetric poles
+      const polarOffset = ny > 0 ? 0.0 : width * 0.17;
       const polarNoise = fbmCylindrical(
-        noise.continent, cell.x + polarOffset, cell.y, width, height, 3, 1.5
+        noise.continent, cell.x + polarOffset, cell.y, width, height, 4, 2.0
       );
-      const polarBlend = Math.min(1, (polarDist - 0.82) / 0.12);
+      // Smoothstep blend over wider range [0.72, 0.94] to avoid banding
+      const t = Math.min(1, Math.max(0, (polarDist - 0.72) / 0.22));
+      const polarBlend = t * t * (3 - 2 * t);
       const polarLand = (polarNoise - 0.25) * 1.2 * polarBlend;
       elev = Math.max(elev, polarLand);
     }
