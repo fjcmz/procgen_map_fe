@@ -63,17 +63,26 @@ function drawWaterDepth(
     if (!cell.isWater || cell.vertices.length < 2) continue;
     const depth = Math.max(0, 1 - cell.elevation / 0.4); // 0=shallow, 1=deep
 
+    // Derive SST anomaly by comparing cell temperature to latitude baseline
+    const ny = (cell.y / height) * 2 - 1;
+    const baseTemp = 1.0 - Math.abs(ny);
+    const tempDelta = cell.temperature - baseTemp; // positive = warm current, negative = cold
+
+    // Tint water color: warm currents → slightly warmer hue, cold currents → deeper blue
+    const r = Math.round(20 + tempDelta * 40);   // ~8–32 range
+    const g = Math.round(50 + tempDelta * 30);   // ~38–62 range
+    const b = Math.round(100 - tempDelta * 30);  // ~70–130 range
+
     // Spatial hash dither to break horizontal banding
     const hash = Math.sin(cell.x * 127.1 + cell.y * 311.7) * 43758.5453;
     const dither = (hash - Math.floor(hash)) * 0.06 - 0.03;
 
     const alpha = Math.max(0, Math.min(0.3, depth * 0.3 + dither));
-    ctx.fillStyle = `rgba(20,50,100,${alpha.toFixed(3)})`;
+    ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`;
     cellPath(ctx, cell);
     ctx.fill();
   }
-  // Suppress unused parameter warning
-  void width; void height;
+  void width; // used only by callers for consistent signature
 }
 
 function drawHillshading(

@@ -5,5 +5,7 @@ export type { CellGraph } from './voronoi';
 export { assignElevation } from './elevation';
 export { assignMoisture, getWindDirection } from './moisture';
 export { assignTemperature } from './temperature';
+export { computeOceanCurrents } from './oceanCurrents';
+export type { OceanCurrentData } from './oceanCurrents';
 export { assignBiomes, BIOME_INFO } from './biomes';
 export { generateRivers } from './rivers';

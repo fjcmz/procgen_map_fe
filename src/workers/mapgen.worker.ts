@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, assignMoisture, assignTemperature, assignBiomes, generateRivers } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 
@@ -18,11 +18,14 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     const noise = createNoiseSamplers3D(seed);
     assignElevation(cells, width, height, noise, waterRatio, seed);
 
-    post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 30 });
-    const distFromOcean = assignMoisture(cells, width, height, noise);
+    post({ type: 'PROGRESS', step: 'Computing ocean currents\u2026', pct: 25 });
+    const { sstAnomaly } = computeOceanCurrents(cells, width, height);
 
-    post({ type: 'PROGRESS', step: 'Computing temperature\u2026', pct: 40 });
-    assignTemperature(cells, width, height, distFromOcean, noise);
+    post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 32 });
+    const distFromOcean = assignMoisture(cells, width, height, noise, sstAnomaly);
+
+    post({ type: 'PROGRESS', step: 'Computing temperature\u2026', pct: 42 });
+    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly);
 
     post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 48 });
     assignBiomes(cells, width, height, noise);

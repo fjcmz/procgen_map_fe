@@ -12,6 +12,9 @@ const ELEVATION_SCALE = 1.8;      // amplifies barrier effect (sharper from tall
 const CONTINENTALITY_STRENGTH = 0.40;  // max moisture reduction for most inland cells
 const CONTINENTALITY_MIDPOINT = 0.40;  // normalized distance at which decay reaches 50%
 
+// --- Ocean current moisture effect ---
+const COASTAL_MOISTURE_SENSITIVITY = 1.5; // how strongly cold currents reduce coastal moisture
+
 // --- Latitude / Hadley cell constants ---
 const LAT_AMPLITUDE = 0.28;       // base amplitude of latitude moisture curve
 const LAT_POLAR_DAMPING = 0.5;    // how much amplitude decreases toward poles
@@ -182,9 +185,10 @@ export function assignMoisture(
   cells: Cell[],
   width: number,
   height: number,
-  noise: NoiseSampler3D
+  noise: NoiseSampler3D,
+  sstAnomaly?: Float32Array
 ): Float32Array {
-  // Pass 1: Base moisture from noise + latitude + coastal boost (unchanged)
+  // Pass 1: Base moisture from noise + latitude + coastal boost
   for (const cell of cells) {
     let m = fbmCylindrical(noise.moisture, cell.x + width * 0.3, cell.y + height * 0.3, width, height, 3);
 
@@ -198,8 +202,27 @@ export function assignMoisture(
     m += latMod;
 
     // Coastal cells are wetter (compensates for stronger subtropical penalty)
+    // Cold ocean currents suppress evaporation → reduced coastal moisture (Atacama, Namibia)
     if (cell.isCoast) {
-      m = Math.min(1, m + 0.25);
+      let coastBoost = 0.25;
+      if (sstAnomaly) {
+        // Average SST anomaly of neighboring water cells
+        let totalAnomaly = 0;
+        let waterNeighbors = 0;
+        for (const ni of cell.neighbors) {
+          if (cells[ni].isWater) {
+            totalAnomaly += sstAnomaly[ni];
+            waterNeighbors++;
+          }
+        }
+        if (waterNeighbors > 0) {
+          const avgAnomaly = totalAnomaly / waterNeighbors;
+          // Negative anomaly (cold current) reduces the coastal boost
+          const coldFactor = Math.max(0, -avgAnomaly);
+          coastBoost *= Math.max(0, 1.0 - coldFactor * COASTAL_MOISTURE_SENSITIVITY);
+        }
+      }
+      m = Math.min(1, m + coastBoost);
     }
 
     cell.moisture = Math.max(0, Math.min(1, m));
