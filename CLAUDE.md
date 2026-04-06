@@ -60,7 +60,7 @@ Each step is a pure function in `src/lib/` that takes cells and returns updated 
 | `src/lib/history/history.ts` | `buildPhysicalWorld()` (always runs) + legacy year-by-year simulation + `getOwnershipAtYear` |
 | `src/lib/history/cities.ts` | City placement with spacing + kingdom grouping |
 | `src/lib/history/borders.ts` | BFS flood-fill kingdom borders from capitals |
-| `src/lib/history/roads.ts` | A* road pathfinding between cities |
+| `src/lib/history/roads.ts` | A* road pathfinding between cities + trade route pathfinding (`computeDistanceFromLand` BFS, `tradeRouteAStar` with dual land/water cost, `generateTradeRoutePath` wrapper) |
 | **`src/lib/history/physical/`** | Physical model — data classes (Phase 2) + generators/visitors (Phase 3) |
 | `src/lib/history/physical/Resource.ts` | Resource entity: weighted type enum (17 types across strategic/agricultural/luxury), TRADE_MIN=10, TRADE_USE=5 |
 | `src/lib/history/physical/CityEntity.ts` | City entity: full lifecycle (founded, contacted, size enum, population rolls, `canTradeMore()`, `contactCities` set, `knownTechs` map); distinct from render-type `City` in `types.ts` |
@@ -127,6 +127,7 @@ The central type is `Cell` (defined in `types.ts`). Every terrain step annotates
 - `countries: Country[]` — each country has id, name, capitalCellIndex, isAlive
 - `years: HistoryYear[]` — per-year events (15 types: Foundation, Contact, Country, Illustrate, Wonder, Religion, Trade, Cataclysm, War, Tech, Conquest, Empire, plus legacy Merge/Collapse/Expansion) + sparse `ownershipDeltas`
 - `snapshots` — full `Int16Array` of cell→countryId at every 20th year (for fast scrubbing)
+- `tradeSnapshots` — `Record<number, TradeRouteEntry[]>` snapshotted every 20 years; each `TradeRouteEntry` has `cell1`, `cell2`, and an optional `path: number[]` (A*-pathfound cell-index sequence that hugs coastlines for maritime routes; absent only as fallback)
 
 ### Physical World Model
 

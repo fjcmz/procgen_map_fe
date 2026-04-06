@@ -630,13 +630,24 @@ function drawTradeRoutes(
   ctx.globalAlpha = 0.55;
   ctx.setLineDash([4, 6]);
   for (const route of tradeRoutes) {
-    const c1 = cells[route.cell1];
-    const c2 = cells[route.cell2];
-    if (!c1 || !c2) continue;
-    ctx.beginPath();
-    ctx.moveTo(c1.x, c1.y);
-    ctx.lineTo(c2.x, c2.y);
-    ctx.stroke();
+    if (route.path && route.path.length >= 2) {
+      // Draw multi-segment pathfound route (coastal-hugging / island-hopping)
+      ctx.beginPath();
+      ctx.moveTo(cells[route.path[0]].x, cells[route.path[0]].y);
+      for (let i = 1; i < route.path.length; i++) {
+        ctx.lineTo(cells[route.path[i]].x, cells[route.path[i]].y);
+      }
+      ctx.stroke();
+    } else {
+      // Fallback: straight line between endpoints
+      const c1 = cells[route.cell1];
+      const c2 = cells[route.cell2];
+      if (!c1 || !c2) continue;
+      ctx.beginPath();
+      ctx.moveTo(c1.x, c1.y);
+      ctx.lineTo(c2.x, c2.y);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 }
