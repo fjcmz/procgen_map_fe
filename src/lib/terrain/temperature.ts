@@ -14,21 +14,26 @@ const WINDWARD_BONUS = 0.5;        // extra maritime effect for windward coasts
 // --- Elevation lapse rate ---
 const LAPSE_RATE = 0.10;           // temperature reduction per unit elevation
 
+// --- Ocean current land influence ---
+const CURRENT_LAND_INFLUENCE = 0.6; // attenuation of SST anomaly effect on nearby land
+
 // --- Noise ---
 const NOISE_AMPLITUDE = 0.03;      // small perturbation for organic boundaries
 
 /**
  * Computes a windward ocean proximity factor for a land cell.
  * Marches upwind through the Voronoi neighbor graph. If ocean is found
- * nearby upwind, returns a value close to 1.0; if not, returns 0.0.
- * This creates the west-coast mildness effect in the westerlies belt.
+ * nearby upwind, returns a factor close to 1.0; if not, returns 0.0.
+ * Also returns the SST anomaly of the first upwind ocean cell (if available),
+ * so ocean currents can influence coastal land temperatures.
  */
 function computeWindwardFactor(
   cells: Cell[],
   cellIndex: number,
   width: number,
-  height: number
-): number {
+  height: number,
+  sstAnomaly?: Float32Array
+): { factor: number; oceanAnomaly: number } {
   const cell = cells[cellIndex];
   const ny = (cell.y / height) * 2 - 1;
   const wind = getWindDirection(ny);
@@ -64,12 +69,14 @@ function computeWindwardFactor(
     current = bestNeighbor;
 
     if (cells[current].isWater) {
-      // Ocean found upwind — return factor decayed by distance
-      return 1.0 - (hop / WINDWARD_HOPS) * 0.6;
+      // Ocean found upwind — return factor decayed by distance + SST anomaly
+      const factor = 1.0 - (hop / WINDWARD_HOPS) * 0.6;
+      const oceanAnomaly = sstAnomaly ? sstAnomaly[current] : 0;
+      return { factor, oceanAnomaly };
     }
   }
 
-  return 0;
+  return { factor: 0, oceanAnomaly: 0 };
 }
 
 /**
@@ -85,7 +92,8 @@ export function assignTemperature(
   width: number,
   height: number,
   distFromOcean: Float32Array,
-  noise: NoiseSampler3D
+  noise: NoiseSampler3D,
+  sstAnomaly?: Float32Array
 ): void {
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
@@ -95,10 +103,11 @@ export function assignTemperature(
     const polarDist = Math.abs(ny);
     const baseTemp = 1.0 - polarDist;
 
-    // Water cells: simple latitude-based temperature + noise, skip continentality
+    // Water cells: latitude-based temperature + ocean current anomaly + noise
     if (cell.isWater) {
       const n = fbmCylindrical(noise.continent, cell.x * 0.8, cell.y * 0.8, width, height, 2, 2.0);
-      cell.temperature = Math.max(0, Math.min(1, baseTemp + n * NOISE_AMPLITUDE));
+      const currentAnomaly = sstAnomaly ? sstAnomaly[i] : 0;
+      cell.temperature = Math.max(0, Math.min(1, baseTemp + currentAnomaly + n * NOISE_AMPLITUDE));
       continue;
     }
 
@@ -113,8 +122,11 @@ export function assignTemperature(
     const maritimeMod = -sign * (1 - d) * MARITIME_STRENGTH;
 
     // 3. Windward ocean proximity — strengthens maritime effect on windward coasts
-    const windwardFactor = computeWindwardFactor(cells, i, width, height);
+    const { factor: windwardFactor, oceanAnomaly } = computeWindwardFactor(cells, i, width, height, sstAnomaly);
     const windwardMod = -sign * windwardFactor * WINDWARD_BONUS * MARITIME_STRENGTH;
+
+    // 3b. Ocean current influence on land — warm/cold currents modify coastal temps
+    const currentMod = windwardFactor * oceanAnomaly * CURRENT_LAND_INFLUENCE;
 
     // 4. Elevation lapse rate: higher elevation = colder
     const elevCooling = cell.elevation * LAPSE_RATE;
@@ -124,7 +136,7 @@ export function assignTemperature(
     const noiseMod = n * NOISE_AMPLITUDE;
 
     cell.temperature = Math.max(0, Math.min(1,
-      baseTemp + contMod + maritimeMod + windwardMod - elevCooling + noiseMod
+      baseTemp + contMod + maritimeMod + windwardMod + currentMod - elevCooling + noiseMod
     ));
   }
 }
