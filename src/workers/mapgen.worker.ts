@@ -22,7 +22,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     assignMoisture(cells, width, height, noise);
 
     post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 45 });
-    assignBiomes(cells, height);
+    assignBiomes(cells, width, height, noise);
 
     post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 55 });
     const rivers = generateRivers(cells);

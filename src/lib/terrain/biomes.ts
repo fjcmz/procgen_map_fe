@@ -1,4 +1,6 @@
 import type { Cell, BiomeType, BiomeInfo } from '../types';
+import type { NoiseSampler3D } from './noise';
+import { fbmCylindrical } from './noise';
 
 // Whittaker biome lookup: [elevationBand][moistureBand]
 // elevation bands: <0.3, 0.3-0.6, 0.6-0.65, 0.65-0.75, 0.75+
@@ -31,24 +33,43 @@ function moistBand(m: number): number {
   return 3;
 }
 
-export function assignBiomes(cells: Cell[], height: number): void {
+export function assignBiomes(cells: Cell[], width: number, height: number, noise: NoiseSampler3D): void {
   for (const cell of cells) {
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
 
-    // Polar ice caps on water
-    if (cell.isWater && polarDist > 0.82) {
-      cell.biome = 'ICE';
-      continue;
+    // Polar ice caps on water — noise-dithered threshold for organic ice edge
+    if (cell.isWater && polarDist > 0.75) {
+      const iceNoise = fbmCylindrical(
+        noise.continent, cell.x * 1.3, cell.y * 1.3, width, height, 3, 2.0
+      );
+      const iceThreshold = 0.75 + iceNoise * 0.14;
+      if (polarDist > iceThreshold) {
+        cell.biome = 'ICE';
+        continue;
+      }
     }
-    // Polar land: snow and tundra
-    if (!cell.isWater && polarDist > 0.88) {
-      cell.biome = 'SNOW';
-      continue;
+    // Polar land: snow — noise-dithered threshold
+    if (!cell.isWater && polarDist > 0.80) {
+      const snowNoise = fbmCylindrical(
+        noise.elevation, cell.x * 1.5, cell.y * 1.5, width, height, 3, 2.0
+      );
+      const snowThreshold = 0.80 + snowNoise * 0.12;
+      if (polarDist > snowThreshold) {
+        cell.biome = 'SNOW';
+        continue;
+      }
     }
-    if (!cell.isWater && polarDist > 0.8) {
-      cell.biome = 'TUNDRA';
-      continue;
+    // Polar land: tundra — noise-dithered threshold
+    if (!cell.isWater && polarDist > 0.72) {
+      const tundraNoise = fbmCylindrical(
+        noise.elevation, cell.x * 1.2, cell.y * 1.2, width, height, 3, 1.8
+      );
+      const tundraThreshold = 0.72 + tundraNoise * 0.12;
+      if (polarDist > tundraThreshold) {
+        cell.biome = 'TUNDRA';
+        continue;
+      }
     }
 
     if (cell.isWater) {
