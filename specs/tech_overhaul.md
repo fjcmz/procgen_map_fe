@@ -8,24 +8,28 @@ the simulation, followed by a phased plan to make tech matter.
 ### 1.1 Discovery Path
 
 Tech discovery is implemented in `src/lib/history/timeline/Tech.ts` and is
-called once per simulated year by `YearGenerator` (Phase 5, slot 10 of 12).
+called by `YearGenerator` (Phase 5, slot 10 of 12). The generator runs in a
+loop **`rndSize(5, 1)` times per year** (1 to 5 invocations; see
+`YearGenerator.ts:227`), short-circuiting when it can't produce a tech, so the
+practical throughput is 0–5 techs/year worldwide.
 
 ```
 YearGenerator.generate()
-  └─ techGenerator.generate(rng, year, world)
-       ├─ pick 1 random illustrate from world.mapUsableIllustrates
-       ├─ map illustrate.type → eligible TechField[]   (ILLUSTRATE_TO_TECH)
-       ├─ pick 1 random eligible field
-       ├─ resolve scope: empire-founder country > country > origin city
-       ├─ level = existingLevelInScope + 1
-       ├─ scope.knownTechs.set(field, tech)
-       └─ consume illustrate (delete from mapUsableIllustrates, set greatDeed)
+  └─ for i in 0..rndSize(5, 1):
+        techGenerator.generate(rng, year, world)
+          ├─ pick 1 random illustrate from world.mapUsableIllustrates
+          ├─ map illustrate.type → eligible TechField[]   (ILLUSTRATE_TO_TECH)
+          ├─ pick 1 random eligible field
+          ├─ resolve scope: empire-founder country > country > origin city
+          ├─ level = existingLevelInScope + 1
+          ├─ scope.knownTechs.set(field, tech)
+          └─ consume illustrate (delete from mapUsableIllustrates, set greatDeed)
 ```
 
 Properties of the current path:
 
-- **Throughput cap**: at most 1 tech / year for the entire world; 0 if no usable
-  illustrate exists.
+- **Throughput cap**: 0–5 techs / year for the entire world (drops to 0 once
+  `mapUsableIllustrates` is empty).
 - **Source**: any usable illustrate, regardless of city size, country status, or
   spirit. Selection is uniform random.
 - **Field choice**: uniform random within the illustrate-type-eligible subset

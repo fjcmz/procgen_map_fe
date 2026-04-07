@@ -3,7 +3,8 @@ import type { World } from '../physical/World';
 import type { Year } from './Year';
 import type { War } from './War';
 import type { CountryEvent } from './Country';
-import { mergeAllTechs, getNewTechs } from './Tech';
+import type { Empire } from './Empire';
+import { mergeAllTechs, getNewTechs, getCountryTechLevel } from './Tech';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -37,12 +38,17 @@ export class ConquerGenerator {
     }
     if (!finishingWar) return null;
 
-    // Randomly select winner between aggressor and defender
+    // Select winner between aggressor and defender, biased by military tech
+    // (Phase 1: +0.05 P(win) per level of advantage, capped at ±0.4 so the
+    // roll stays in [0.1, 0.9]).
     const aggressorCountry = world.mapCountries.get(finishingWar.aggressor) as CountryEvent | undefined;
     const defenderCountry = world.mapCountries.get(finishingWar.defender) as CountryEvent | undefined;
     if (!aggressorCountry || !defenderCountry) return null;
 
-    const winnerIsAggressor = rng() < 0.5;
+    const aggMil = getCountryTechLevel(world, aggressorCountry, 'military');
+    const defMil = getCountryTechLevel(world, defenderCountry, 'military');
+    const militaryBias = Math.max(-0.4, Math.min(0.4, (aggMil - defMil) * 0.05));
+    const winnerIsAggressor = rng() < 0.5 + militaryBias;
     const conquerorCountry = winnerIsAggressor ? aggressorCountry : defenderCountry;
     const conqueredCountry = winnerIsAggressor ? defenderCountry : aggressorCountry;
 
@@ -83,7 +89,35 @@ export class ConquerGenerator {
     // Empire implications
     this._handleEmpireEffects(conqueredCountry, conquerorCountry, world);
 
+    // Phase 1 `government` tech: if the winner's empire integration is weaker
+    // than the loser's, the conqueror's empire may dissolve entirely. Small
+    // 15% chance, gated on (a) the conqueror is currently in an empire and
+    // (b) conquerorGov < conqueredGov.
+    if (conquerorCountry.memberOf) {
+      const conquerorGov = getCountryTechLevel(world, conquerorCountry, 'government');
+      const conqueredGov = getCountryTechLevel(world, conqueredCountry, 'government');
+      if (conquerorGov < conqueredGov && rng() < 0.15) {
+        this._dissolveEmpire(conquerorCountry.memberOf, absYear);
+      }
+    }
+
     return conquer;
+  }
+
+  /**
+   * Fully dissolve an empire: mark destroyedOn, clear all member references,
+   * and release every country back to independent status. The empire event
+   * itself remains in the history log.
+   */
+  private _dissolveEmpire(empire: Empire, absYear: number): void {
+    empire.destroyedOn = absYear;
+    empire.conqueredBy = ''; // self-inflicted, no specific destroyer
+    if (empire.members) {
+      for (const member of empire.members) member.memberOf = null;
+      empire.members.clear();
+    }
+    empire.countries.clear();
+    empire.reach.clear();
   }
 
   private _handleEmpireEffects(

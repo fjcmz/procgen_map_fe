@@ -5,6 +5,7 @@ import { cityVisitor } from '../physical/CityVisitor';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Illustrate } from './Illustrate';
 import type { Wonder } from './Wonder';
+import { getCityTechLevel } from './Tech';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -41,6 +42,12 @@ const CATACLYSM_TYPES: Record<CataclysmType, CataclysmTypeInfo> = {
 const CATACLYSM_TYPE_TOTAL = (Object.values(CATACLYSM_TYPES) as CataclysmTypeInfo[])
   .reduce((a, b) => a + b.probability, 0);
 
+// Slow-onset, survivable-with-medicine/food-storage disasters. No explicit
+// plague type exists today; these are the closest "biology applies" analogues.
+// Impact events (earthquake, volcano, asteroid, tsunami, tornado) are NOT
+// included — biology tech can't realistically mitigate instantaneous destruction.
+const BIOLOGY_MITIGATED: ReadonlySet<CataclysmType> = new Set(['drought', 'heat_wave', 'cold_wave', 'flood']);
+
 export type CataclysmStrength = 'local' | 'regional' | 'continental' | 'global';
 
 const STRENGTH_WEIGHTS: Record<CataclysmStrength, number> = {
@@ -76,8 +83,9 @@ export interface Cataclysm {
   year?: Year;
 }
 
-function applyCasualties(city: CityEntity, killRatio: number, world: World): number {
-  const casualties = Math.round(city.currentPopulation * killRatio);
+function applyCasualties(city: CityEntity, killRatio: number, world: World, mitigation = 0): number {
+  const effectiveRatio = killRatio * (1 - mitigation);
+  const casualties = Math.round(city.currentPopulation * effectiveRatio);
   if (casualties >= city.currentPopulation) {
     const killed = city.currentPopulation;
     city.currentPopulation = 0;
@@ -148,12 +156,18 @@ export class CataclysmGenerator {
     // Local: always applies to epicenter
     affectedCities.add(epicenterCity);
 
-    // Apply casualties
+    // Apply casualties (Phase 1: `biology` tech mitigates slow-onset disasters)
+    const biologyApplies = BIOLOGY_MITIGATED.has(type);
     let totalKilled = 0;
     for (const city of affectedCities) {
       if (!world.mapUsableCities.has(city.id) && city !== epicenterCity) continue;
       city.destroyedOn = 0; // reset
-      const killed = applyCasualties(city, killRatio, world);
+      let mitigation = 0;
+      if (biologyApplies) {
+        const bioLevel = getCityTechLevel(world, city, 'biology');
+        mitigation = Math.min(0.5, 0.1 * bioLevel);
+      }
+      const killed = applyCasualties(city, killRatio, world, mitigation);
       if (city.destroyedOn === 1) city.destroyedOn = absYear;
       totalKilled += killed;
       city.cataclysms.push(cataclysm.id);
