@@ -3,6 +3,7 @@ import type { World } from '../physical/World';
 import type { Year } from './Year';
 import type { Illustrate, IllustrateType } from './Illustrate';
 import type { CityEntity } from '../physical/CityEntity';
+import type { Spirit } from './Country';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -30,6 +31,51 @@ const ILLUSTRATE_TO_TECH: Record<IllustrateType, TechField[]> = {
   religion: ['government', 'art'],
   art: ['art'],
 };
+
+/**
+ * Phase 2 — Soft adjacency graph for tech leveling. To advance a field from
+ * level (N-1) to level N (where N >= 2), at least one neighbour in this graph
+ * must already be at level >= N-1 in the same country-scope tech map. The
+ * graph is bidirectional and hand-mirrored. NOT exported — implementation
+ * detail of `_pickFieldForCountry`. The spec also mentions `art ↔ religion-flag`,
+ * which has no corresponding TechField; it collapses to `art ↔ government`.
+ */
+const TECH_ADJACENCY: Record<TechField, ReadonlyArray<TechField>> = {
+  science:     ['biology', 'energy'],
+  biology:     ['science'],
+  energy:      ['science', 'industry'],
+  industry:    ['energy', 'growth', 'military'],
+  growth:      ['industry'],
+  military:    ['industry', 'government'],
+  government:  ['military', 'art', 'exploration'],
+  art:         ['government'],
+  exploration: ['government'],
+};
+
+/**
+ * Phase 2 — per-country spirit alignment bonus. Fields listed here get a
+ * weight bump in `_pickFieldForCountry` for the matching spirit. Bounded
+ * (multiplier is 1.5×) to avoid the snowball pitfall flagged in Phase 1.
+ */
+const SPIRIT_FIELD_BONUS: Record<Spirit, ReadonlyArray<TechField>> = {
+  military:    ['military'],
+  religious:   ['art', 'government'],
+  industrious: ['industry', 'energy', 'growth'],
+  neutral:     [],
+};
+
+// One-shot sanity check: TECH_ADJACENCY must be symmetric. Runs once at
+// module load (~20 ops, trivially cheap). Mirrors the unconditional Phase 0
+// monotonicity check in mapgen.worker.ts.
+(function _assertTechAdjacencySymmetric(): void {
+  for (const [a, neigh] of Object.entries(TECH_ADJACENCY) as [TechField, ReadonlyArray<TechField>][]) {
+    for (const b of neigh) {
+      if (!TECH_ADJACENCY[b]?.includes(a)) {
+        throw new Error(`TECH_ADJACENCY not symmetric: ${a} → ${b} (missing reverse edge)`);
+      }
+    }
+  }
+})();
 
 export interface Tech {
   readonly id: string;
@@ -130,16 +176,168 @@ export function getCityTechLevel(world: World, city: CityEntity, field: TechFiel
 }
 
 export class TechGenerator {
-  generate(rng: () => number, year: Year, world: World): Tech | null {
-    // Pick a usable illustrate, weighted toward illustrates whose country has
-    // higher `science` tech (Phase 1: models scientific institutions attracting
-    // talent). Weight = 1 + 0.25 * min(sciLevel, 8); max weight 3.0. The cap is
-    // tightened from the spec-suggested 0.5/level because techGenerator.generate
-    // runs up to 5 times per year (YearGenerator:227, rndSize(5, 1)) — a larger
-    // coefficient would snowball the tech leader.
-    if (world.mapUsableIllustrates.size === 0) return null;
+  /**
+   * Phase 2 — own the entire per-year tech-discovery flow.
+   *
+   * 1. Throughput cap: N = clamp(0..5, floor(log10(worldPop / 10_000))).
+   *    Pop 10k→0, 100k→1, 1M→2, 10M→3, 100M→4, 1B→5.
+   * 2. Bucket usable illustrates by their resolved country (via
+   *    originCity → region → countryId). Stateless (no country yet)
+   *    illustrates fall into a separate pool.
+   * 3. Iterate countries in shuffled order; each country with illustrates
+   *    rolls min(1, count/5). On success, pick a discoverer (uniform random
+   *    inside its bucket) and a field via `_pickFieldForCountry` (which
+   *    applies unknown-bonus, spirit-alignment, and soft adjacency
+   *    prerequisites). Stop when N techs have been generated.
+   * 4. If slots remain and stateless illustrates exist, run ONE legacy
+   *    science-weighted pick over the stateless bucket.
+   *
+   * The bucket is built once at the top of the call from a snapshot of
+   * `mapUsableIllustrates`; `_createTech` deletes from that map as we go,
+   * but our captured arrays are unaffected so there is no concurrent-
+   * modification hazard within the year.
+   */
+  generateForYear(rng: () => number, year: Year, world: World): Tech[] {
+    const results: Tech[] = [];
 
-    const illustrates = Array.from(world.mapUsableIllustrates.values()) as Illustrate[];
+    // Step 1 — throughput cap
+    const N = this._throughputCap(year.worldPopulation);
+    if (N === 0 || world.mapUsableIllustrates.size === 0) return results;
+
+    // Step 2 — bucket illustrates
+    const byCountry = new Map<string, Illustrate[]>();
+    const stateless: Illustrate[] = [];
+    for (const ill of world.mapUsableIllustrates.values() as Iterable<Illustrate>) {
+      const countryId = this._resolveCountryId(world, ill);
+      if (countryId && world.mapCountries.has(countryId)) {
+        const arr = byCountry.get(countryId);
+        if (arr) arr.push(ill);
+        else byCountry.set(countryId, [ill]);
+      } else {
+        stateless.push(ill);
+      }
+    }
+
+    // Step 3 — per-country rolls in shuffled order (Fisher-Yates)
+    const entries = Array.from(byCountry.entries());
+    for (let i = entries.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [entries[i], entries[j]] = [entries[j], entries[i]];
+    }
+
+    for (const [countryId, illustrates] of entries) {
+      if (results.length >= N) break;
+      const country = world.mapCountries.get(countryId);
+      if (!country) continue;
+      // Per-country roll: min(1, illustrateCount / 5)
+      const chance = Math.min(1, illustrates.length / 5);
+      if (rng() >= chance) continue;
+
+      // Pick discoverer uniform random over the bucket
+      const illustrate = illustrates[Math.floor(rng() * illustrates.length)];
+      if (!illustrate) continue;
+
+      const field = this._pickFieldForCountry(rng, world, country, illustrate);
+      if (!field) continue; // soft-prereq filter blocked all eligible fields
+
+      results.push(this._createTech(rng, year, world, illustrate, field));
+    }
+
+    // Step 4 — stateless tail (one legacy single-roll)
+    if (results.length < N && stateless.length > 0) {
+      const t = this._pickStatelessTech(rng, year, world, stateless);
+      if (t) results.push(t);
+    }
+
+    return results;
+  }
+
+  /** Phase 2 throughput cap: floor(log10(worldPop / 10_000)) clamped to [0, 5]. */
+  private _throughputCap(worldPopulation: number): number {
+    if (worldPopulation < 10_000) return 0;
+    const raw = Math.floor(Math.log10(worldPopulation / 10_000));
+    return Math.max(0, Math.min(5, raw));
+  }
+
+  /** Resolve an illustrate's owning country via originCity → region → countryId. */
+  private _resolveCountryId(world: World, ill: Illustrate): string | null {
+    const city = ill.originCity;
+    if (!city) return null;
+    const region = world.mapRegions.get(city.regionId);
+    return region?.countryId ?? null;
+  }
+
+  /**
+   * Phase 2 field selection for a country path. Returns null if no eligible
+   * field passes the soft-prereq filter (caller skips the slot).
+   */
+  private _pickFieldForCountry(
+    rng: () => number,
+    world: World,
+    country: { knownTechs: Map<TechField, Tech>; memberOf: { foundedBy: string } | null; spirit: Spirit },
+    illustrate: Illustrate,
+  ): TechField | null {
+    const eligible = ILLUSTRATE_TO_TECH[illustrate.type];
+    if (!eligible || eligible.length === 0) {
+      // Defensive fallback — every IllustrateType currently maps to ≥1 field
+      return pickTechField(rng);
+    }
+
+    const effectiveTechs = getCountryEffectiveTechs(world, country);
+    const aligned = SPIRIT_FIELD_BONUS[country.spirit];
+
+    type Candidate = { field: TechField; weight: number };
+    const candidates: Candidate[] = [];
+    for (const field of eligible) {
+      const currentLevel = effectiveTechs.get(field)?.level ?? 0;
+      const nextLevel = currentLevel + 1;
+
+      // Soft prerequisite: nextLevel ≥ 2 needs an adjacent field at ≥ nextLevel - 1
+      if (nextLevel >= 2) {
+        const adjacents = TECH_ADJACENCY[field];
+        let satisfied = false;
+        for (const adj of adjacents) {
+          if ((effectiveTechs.get(adj)?.level ?? 0) >= nextLevel - 1) {
+            satisfied = true;
+            break;
+          }
+        }
+        if (!satisfied) continue;
+      }
+
+      // Weight = base × unknownMult × spiritMult
+      const unknownMult = currentLevel === 0 ? 2.0 : 1.0;
+      const spiritMult = aligned.includes(field) ? 1.5 : 1.0;
+      candidates.push({ field, weight: unknownMult * spiritMult });
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Weighted pick
+    let total = 0;
+    for (const c of candidates) total += c.weight;
+    let r = rng() * total;
+    for (const c of candidates) {
+      r -= c.weight;
+      if (r <= 0) return c.field;
+    }
+    return candidates[candidates.length - 1].field;
+  }
+
+  /**
+   * Legacy single-tech path used as the stateless fallback when slots remain
+   * after the per-country pass. Preserves the Phase 1 science-weighted
+   * illustrate picker (weight = 1 + 0.25 × min(sciLevel, 8)). Operates on
+   * the stateless bucket only — does not touch the per-country illustrates.
+   */
+  private _pickStatelessTech(
+    rng: () => number,
+    year: Year,
+    world: World,
+    illustrates: Illustrate[],
+  ): Tech | null {
+    if (illustrates.length === 0) return null;
+
     const weights = illustrates.map(ill => {
       if (!ill.originCity) return 1;
       const sciLevel = getCityTechLevel(world, ill.originCity, 'science');
@@ -158,16 +356,10 @@ export class TechGenerator {
     const illustrate = illustrates[chosenIdx];
     if (!illustrate) return null;
 
-    // Determine eligible tech fields from illustrate type
     const eligibleFields = ILLUSTRATE_TO_TECH[illustrate.type];
-    if (!eligibleFields || eligibleFields.length === 0) {
-      // Fallback: pick random field
-      const field = pickTechField(rng);
-      return this._createTech(rng, year, world, illustrate, field);
-    }
-
-    // Pick one of the eligible fields
-    const field = eligibleFields[Math.floor(rng() * eligibleFields.length)];
+    const field = (eligibleFields && eligibleFields.length > 0)
+      ? eligibleFields[Math.floor(rng() * eligibleFields.length)]
+      : pickTechField(rng);
     return this._createTech(rng, year, world, illustrate, field);
   }
 

@@ -233,12 +233,10 @@ export class YearGenerator {
       if (w) year.wars.push(w); else break;
     }
 
-    // 10. Techs: rndSize(5, 1)
-    const techCount = rndSize(5, 1);
-    for (let i = 0; i < techCount; i++) {
-      const t = techGenerator.generate(rng, year, world);
-      if (t) year.techs.push(t); else break;
-    }
+    // 10. Techs (Phase 2): per-year throughput is N=clamp(0..5, log10(worldPop/10k)),
+    // rolled per-country (chance min(1, illustrates/5)) plus a single legacy
+    // stateless fallback. The whole flow lives in techGenerator.generateForYear.
+    year.techs.push(...techGenerator.generateForYear(rng, year, world));
 
     // 11. Conquers: rndSize(4, 1)
     const conquerCount = rndSize(4, 1);
