@@ -12,6 +12,13 @@ export const CITY_SIZE_TRADE_CAP: Record<CitySize, number> = {
   small: 10, medium: 15, large: 20, metropolis: 30, megalopolis: 50,
 };
 
+/**
+ * Tech fields that multiply trade capacity by (1 + level/10) per known tech.
+ * Mirror of `TRADE_TECHS` in `src/lib/history/timeline/Tech.ts`; duplicated
+ * here to avoid a physical → timeline circular dependency. Keep in sync.
+ */
+const TRADE_TECH_FIELDS = ['exploration', 'growth', 'industry', 'government'] as const;
+
 function roll(rng: () => number, n: number, sides: number): number {
   let total = 0;
   for (let i = 0; i < n; i++) total += Math.floor(rng() * sides) + 1;
@@ -76,7 +83,22 @@ export class CityEntity {
     this.currentPopulation = this.initialPopulation;
   }
 
+  /**
+   * Effective trade capacity, accounting for TRADE_TECHS multipliers.
+   * Per spec (`specs/04_City.md` § Trade Capacity), the base cap is
+   * multiplied by `(1 + level/10)` for each known tech in a TRADE_TECH field,
+   * then rounded. Used by `canTradeMore()`.
+   */
+  effectiveTradeCap(): number {
+    let capacity = CITY_SIZE_TRADE_CAP[this.size];
+    for (const field of TRADE_TECH_FIELDS) {
+      const tech = this.knownTechs.get(field);
+      if (tech) capacity *= 1 + tech.level / 10;
+    }
+    return Math.round(capacity);
+  }
+
   canTradeMore(): boolean {
-    return this.trades.length < CITY_SIZE_TRADE_CAP[this.size];
+    return this.trades.length < this.effectiveTradeCap();
   }
 }

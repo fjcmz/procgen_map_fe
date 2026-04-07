@@ -2,10 +2,39 @@ import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '
 import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
+import { CityEntity, CITY_SIZE_TRADE_CAP, type CitySize } from '../lib/history/physical/CityEntity';
 
 function post(msg: WorkerMessage): void {
   self.postMessage(msg);
 }
+
+// One-shot sanity check: effective trade cap must be monotonic non-decreasing
+// as TRADE_TECH levels rise. Catches any regression in the Phase 0
+// canTradeMore() multiplier. Cheap (~100 iterations) so it runs at worker
+// startup regardless of build mode.
+function _assertTradeCapMonotonic(): void {
+  const fields = ['exploration', 'growth', 'industry', 'government'] as const;
+  const sizes: CitySize[] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
+  const fakeRng = () => 0.5;
+  for (const size of sizes) {
+    for (const field of fields) {
+      const city = new CityEntity(0, 'SanityCheck', fakeRng);
+      city.size = size;
+      let prev = CITY_SIZE_TRADE_CAP[size];
+      for (let level = 0; level <= 5; level++) {
+        if (level > 0) city.knownTechs.set(field, { level });
+        const cap = city.effectiveTradeCap();
+        if (cap < prev) {
+          throw new Error(
+            `TRADE_TECHS sanity check failed: size=${size} field=${field} level=${level} cap=${cap} < prev=${prev}`,
+          );
+        }
+        prev = cap;
+      }
+    }
+  }
+}
+_assertTradeCapMonotonic();
 
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
   const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = e.data;
