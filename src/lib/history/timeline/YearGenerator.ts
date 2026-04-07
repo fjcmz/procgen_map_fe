@@ -13,7 +13,7 @@ import { wonderGenerator } from './Wonder';
 import { cataclysmGenerator } from './Cataclysm';
 import { warGenerator } from './War';
 import type { War } from './War';
-import { techGenerator } from './Tech';
+import { techGenerator, getCityTechLevel } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
 import type { CountryEvent } from './Country';
@@ -41,14 +41,22 @@ export class YearGenerator {
     year.worldPopulation = worldPop;
 
     // Step 4: Logistic growth with biome carrying capacity
+    // Phase 1: `energy` tech multiplies `growth`'s effective level, capped so
+    // a level-10 energy country gets +50% growth boost (1.5×) at most.
+    // Note: tech effects read from the country-scope (or empire founder) via
+    // getCityTechLevel, not directly from city.knownTechs — see Tech.ts helpers.
     for (const city of world.mapUsableCities.values()) {
       const region = world.mapRegions.get(city.regionId);
       if (region) {
         const growthRate = REGION_BIOME_GROWTH[region.biome] / 100;
-        // Carrying capacity: base from biome, scaled up by growth tech
+        // Carrying capacity: base from biome, scaled up by growth tech (× energy)
         let capacity = REGION_BIOME_CAPACITY[region.biome];
-        const growthTech = city.knownTechs.get('growth');
-        if (growthTech) capacity *= (1 + growthTech.level * 0.15);
+        const growthLevel = getCityTechLevel(world, city, 'growth');
+        if (growthLevel > 0) {
+          const energyLevel = getCityTechLevel(world, city, 'energy');
+          const energyMult = 1 + 0.05 * Math.min(energyLevel, 10);
+          capacity *= 1 + growthLevel * 0.15 * energyMult;
+        }
         // Logistic growth: rate decelerates as population approaches capacity
         const logisticFactor = 1 - city.currentPopulation / capacity;
         city.currentPopulation = Math.max(
@@ -85,23 +93,25 @@ export class YearGenerator {
     }
 
     // Step 6: Propagate religions
+    // Phase 1: `art` tech bumps adherence drift +0.05 → +0.07 (soft-power lever).
     for (const city of world.mapUsableCities.values()) {
       if (city.religions.size === 0) continue;
+      const drift = 0.05 + (getCityTechLevel(world, city, 'art') > 0 ? 0.02 : 0);
       if (city.religions.size === 1) {
-        // Single-religion: adherence drifts +0.05 toward dominance until 0.9
+        // Single-religion: adherence drifts toward dominance until 0.9
         for (const [relId, adherence] of city.religions) {
           if (adherence < 0.9) {
-            city.religions.set(relId, Math.min(0.9, adherence + 0.05));
+            city.religions.set(relId, Math.min(0.9, adherence + drift));
           }
         }
       } else {
-        // Multi-religion: if total adherence < 0.9, random existing religion gains +0.05
+        // Multi-religion: if total adherence < 0.9, random existing religion gains drift
         let totalAdherence = 0;
         for (const adherence of city.religions.values()) totalAdherence += adherence;
         if (totalAdherence < 0.9) {
           const relIds = Array.from(city.religions.keys());
           const picked = relIds[Math.floor(rng() * relIds.length)];
-          city.religions.set(picked, (city.religions.get(picked) ?? 0) + 0.05);
+          city.religions.set(picked, (city.religions.get(picked) ?? 0) + drift);
         }
       }
     }

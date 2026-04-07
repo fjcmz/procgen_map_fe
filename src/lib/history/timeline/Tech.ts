@@ -2,6 +2,7 @@ import { IdUtil } from '../IdUtil';
 import type { World } from '../physical/World';
 import type { Year } from './Year';
 import type { Illustrate, IllustrateType } from './Illustrate';
+import type { CityEntity } from '../physical/CityEntity';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -82,19 +83,79 @@ export function getNewTechs(
   return delta;
 }
 
+/**
+ * Minimal structural type for country-like objects with empire + tech state.
+ * Kept local here to avoid a circular `import type { CountryEvent } from './Country'`
+ * (Country.ts already imports from this file).
+ */
+interface TechScope {
+  knownTechs: Map<TechField, Tech>;
+  memberOf: { foundedBy: string } | null;
+}
+
+/**
+ * Resolve a country's effective tech map: empire-founder country if the
+ * country is a member, else the country's own map. Load-bearing only for
+ * empire-member countries — plain countries return themselves.
+ */
+export function getCountryEffectiveTechs(world: World, country: TechScope): Map<TechField, Tech> {
+  if (country.memberOf) {
+    const founder = world.mapCountries.get(country.memberOf.foundedBy) as TechScope | undefined;
+    if (founder) return founder.knownTechs;
+  }
+  return country.knownTechs;
+}
+
+export function getCountryTechLevel(world: World, country: TechScope, field: TechField): number {
+  return getCountryEffectiveTechs(world, country).get(field)?.level ?? 0;
+}
+
+/**
+ * Resolve a city's effective tech map via region → country → empire-founder.
+ * Falls back to the city's own map only when the city has no country yet.
+ * Mirrors the scope ladder used by TechGenerator._createTech so Phase 1
+ * effects read from the same place tech was originally recorded.
+ */
+export function getCityEffectiveTechs(world: World, city: CityEntity): Map<TechField, Tech> | null {
+  const region = world.mapRegions.get(city.regionId);
+  if (region?.countryId) {
+    const country = world.mapCountries.get(region.countryId) as TechScope | undefined;
+    if (country) return getCountryEffectiveTechs(world, country);
+  }
+  return (city.knownTechs as Map<TechField, Tech>) ?? null;
+}
+
+export function getCityTechLevel(world: World, city: CityEntity, field: TechField): number {
+  return getCityEffectiveTechs(world, city)?.get(field)?.level ?? 0;
+}
+
 export class TechGenerator {
   generate(rng: () => number, year: Year, world: World): Tech | null {
-    // Pick a random usable illustrate
+    // Pick a usable illustrate, weighted toward illustrates whose country has
+    // higher `science` tech (Phase 1: models scientific institutions attracting
+    // talent). Weight = 1 + 0.25 * min(sciLevel, 8); max weight 3.0. The cap is
+    // tightened from the spec-suggested 0.5/level because techGenerator.generate
+    // runs up to 5 times per year (YearGenerator:227, rndSize(5, 1)) — a larger
+    // coefficient would snowball the tech leader.
     if (world.mapUsableIllustrates.size === 0) return null;
 
     const illustrates = Array.from(world.mapUsableIllustrates.values()) as Illustrate[];
-    // Shuffle
-    for (let i = illustrates.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [illustrates[i], illustrates[j]] = [illustrates[j], illustrates[i]];
+    const weights = illustrates.map(ill => {
+      if (!ill.originCity) return 1;
+      const sciLevel = getCityTechLevel(world, ill.originCity, 'science');
+      return 1 + 0.25 * Math.min(sciLevel, 8);
+    });
+
+    let total = 0;
+    for (const w of weights) total += w;
+    let r = rng() * total;
+    let chosenIdx = illustrates.length - 1;
+    for (let i = 0; i < illustrates.length; i++) {
+      r -= weights[i];
+      if (r <= 0) { chosenIdx = i; break; }
     }
 
-    const illustrate = illustrates[0];
+    const illustrate = illustrates[chosenIdx];
     if (!illustrate) return null;
 
     // Determine eligible tech fields from illustrate type
@@ -117,23 +178,11 @@ export class TechGenerator {
     illustrate: Illustrate,
     field: TechField,
   ): Tech {
-    // Determine known-tech map scope
+    // Determine known-tech map scope via the shared helper (empire founder → country → city)
     const originCity = illustrate.originCity;
-    let techMap: Map<TechField, Tech> | undefined;
-
-    if (originCity) {
-      const region = world.mapRegions.get(originCity.regionId);
-      if (region && region.countryId) {
-        const country = world.mapCountries.get(region.countryId);
-        if (country && country.memberOf) {
-          // Empire scope: use empire founder country's techs
-          const founderCountry = world.mapCountries.get(country.memberOf.foundedBy);
-          if (founderCountry) techMap = founderCountry.knownTechs;
-        }
-        if (!techMap && country) techMap = country.knownTechs;
-      }
-      if (!techMap) techMap = originCity.knownTechs as Map<TechField, Tech>;
-    }
+    const techMap: Map<TechField, Tech> | null = originCity
+      ? getCityEffectiveTechs(world, originCity)
+      : null;
 
     const existingLevel = techMap?.get(field)?.level ?? 0;
     const level = existingLevel + 1;
