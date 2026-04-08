@@ -24,6 +24,7 @@ const EVENT_ICONS: Record<string, string> = {
   TRADE: '\uD83D\uDCB0',
   CATACLYSM: '\uD83C\uDF0B',
   TECH: '\uD83D\uDD2C',
+  TECH_LOSS: '\uD83D\uDCDA',
   EMPIRE: '\uD83D\uDC51',
   POPULATION: '\uD83D\uDC65',
 };
@@ -43,6 +44,7 @@ const EVENT_COLORS: Record<string, string> = {
   TRADE: '#20a040',
   CATACLYSM: '#d03010',
   TECH: '#208080',
+  TECH_LOSS: '#a04040',
   EMPIRE: '#c08000',
   POPULATION: '#5a7a5a',
 };

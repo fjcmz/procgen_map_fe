@@ -81,7 +81,7 @@ export type HistoryEventType =
   | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
   | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
-  | 'TECH' | 'EMPIRE';
+  | 'TECH' | 'TECH_LOSS' | 'EMPIRE';
 
 export interface HistoryEvent {
   type: HistoryEventType;
@@ -106,6 +106,10 @@ export interface HistoryEvent {
   countryName?: string;
   /** CONQUEST-only (Phase 3): tech delta acquired by the conqueror, when non-empty. */
   acquiredTechs?: Array<{ field: string; level: number }>;
+  /** TECH_LOSS-only (spec stretch §1): fields whose level was decremented (post-decrement; 0 means removed). */
+  lostTechs?: Array<{ field: string; newLevel: number }>;
+  /** TECH_LOSS-only (spec stretch §1): fields whose loss was absorbed by `government >= 2` (level unchanged). */
+  absorbedTechs?: Array<{ field: string; level: number }>;
 }
 
 export interface HistoryYear {
