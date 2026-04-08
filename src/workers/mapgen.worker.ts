@@ -75,6 +75,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     let cities: ReturnType<typeof historyGenerator.generate>['cities'] = [];
     let roads: ReturnType<typeof historyGenerator.generate>['roads'] = [];
     let history: ReturnType<typeof historyGenerator.generate>['historyData'] | undefined;
+    let historyStats: ReturnType<typeof historyGenerator.generate>['stats'] | undefined;
     let regions: RegionData[] = [];
     let continents: ContinentData[] = [];
 
@@ -87,6 +88,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
+      historyStats = result.stats;
       regions = result.regions;
       continents = result.continents;
     } else {
@@ -101,7 +103,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
 
     post({
       type: 'DONE',
-      data: { cells, rivers, cities, roads, width, height, history, regions, continents },
+      data: { cells, rivers, cities, roads, width, height, history, regions, continents, historyStats },
     });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });

@@ -4,7 +4,7 @@ import type { Year } from './Year';
 import type { War } from './War';
 import type { CountryEvent } from './Country';
 import type { Empire } from './Empire';
-import { mergeAllTechs, getNewTechs, getCountryTechLevel } from './Tech';
+import { mergeAllTechs, getNewTechs, getCountryTechLevel, type TechField } from './Tech';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -18,6 +18,12 @@ export interface Conquer {
   readonly conqueror: string; // country ID
   readonly conquered: string; // country ID
   acquired: Record<string, string[]>; // e.g. acquired["techs"] = list of tech IDs
+  /**
+   * Phase 3: resolved snapshot of techs the conqueror gained from this conquest.
+   * Populated alongside acquired["techs"]; consumed by HistoryGenerator to
+   * surface the delta in the event log without re-resolving Tech objects.
+   */
+  acquiredTechList?: Array<{ field: TechField; level: number }>;
   year?: Year;
   inWar?: War;
   conquerorCountry?: CountryEvent;
@@ -79,11 +85,14 @@ export class ConquerGenerator {
     // Compute acquired delta
     const delta = getNewTechs(originalTechs, merged);
     const acquiredTechIds: string[] = [];
+    const acquiredTechList: Array<{ field: TechField; level: number }> = [];
     for (const tech of delta.values()) {
       acquiredTechIds.push(tech.id);
+      acquiredTechList.push({ field: tech.field, level: tech.level });
     }
     if (acquiredTechIds.length > 0) {
       conquer.acquired['techs'] = acquiredTechIds;
+      conquer.acquiredTechList = acquiredTechList;
     }
 
     // Empire implications

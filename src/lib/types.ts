@@ -100,6 +100,12 @@ export interface HistoryEvent {
   level?: number;
   /** TECH-only (Phase 2): identifier of the illustrate that made the discovery. */
   discovererName?: string;
+  /** TECH-only (Phase 3): illustrate type — 'science' | 'military' | 'philosophy' | 'industry' | 'religion' | 'art'. */
+  discovererType?: string;
+  /** TECH/CONQUEST (Phase 3): resolved country display name at the time of the event. */
+  countryName?: string;
+  /** CONQUEST-only (Phase 3): tech delta acquired by the conqueror, when non-empty. */
+  acquiredTechs?: Array<{ field: string; level: number }>;
 }
 
 export interface HistoryYear {
@@ -140,6 +146,8 @@ export interface MapData {
   history?: HistoryData;
   regions?: RegionData[];
   continents?: ContinentData[];
+  /** Phase 3: optional aggregate stats forwarded from the worker for introspection. */
+  historyStats?: import('./history/HistoryGenerator').HistoryStats;
 }
 
 export interface GenerateRequest {
