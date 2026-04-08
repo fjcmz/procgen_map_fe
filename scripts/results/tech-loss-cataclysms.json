@@ -6,10 +6,10 @@
     "width": 1600,
     "height": 1000,
     "waterRatio": 0.4,
-    "label": "baseline-a"
+    "label": "tech-loss-cataclysms"
   },
-  "generatedAt": "2026-04-08T06:10:19.488Z",
-  "elapsedMsTotal": 7438,
+  "generatedAt": "2026-04-08T06:02:49.225Z",
+  "elapsedMsTotal": 7221,
   "perSeed": [
     {
       "seed": "seed-01",
@@ -536,7 +536,7 @@
           "government": 129
         }
       },
-      "elapsedMs": 1497
+      "elapsedMs": 1511
     },
     {
       "seed": "seed-02",
@@ -1063,7 +1063,7 @@
           "government": 146
         }
       },
-      "elapsedMs": 1577
+      "elapsedMs": 1491
     },
     {
       "seed": "seed-03",
@@ -1590,7 +1590,7 @@
           "government": 177
         }
       },
-      "elapsedMs": 1518
+      "elapsedMs": 1308
     },
     {
       "seed": "seed-04",
@@ -2117,7 +2117,7 @@
           "government": 138
         }
       },
-      "elapsedMs": 1454
+      "elapsedMs": 1562
     },
     {
       "seed": "seed-05",
@@ -2644,7 +2644,7 @@
           "government": 174
         }
       },
-      "elapsedMs": 1390
+      "elapsedMs": 1349
     }
   ],
   "aggregates": {

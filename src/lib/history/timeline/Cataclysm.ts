@@ -5,7 +5,9 @@ import { cityVisitor } from '../physical/CityVisitor';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Illustrate } from './Illustrate';
 import type { Wonder } from './Wonder';
-import { getCityTechLevel } from './Tech';
+import type { CountryEvent } from './Country';
+import type { TechField } from './Tech';
+import { getCityTechLevel, getCountryTechLevel, getCountryEffectiveTechs } from './Tech';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -48,6 +50,14 @@ const CATACLYSM_TYPE_TOTAL = (Object.values(CATACLYSM_TYPES) as CataclysmTypeInf
 // included — biology tech can't realistically mitigate instantaneous destruction.
 const BIOLOGY_MITIGATED: ReadonlySet<CataclysmType> = new Set(['drought', 'heat_wave', 'cold_wave', 'flood']);
 
+// Spec stretch §1: large knowledge-destroying disasters can erase tech.
+// `fire/war/plague/dark_age/magical` from the spec are mapped onto the
+// closest existing physical disasters — volcano (firestorm), asteroid
+// (impact + library loss), tornado (structural). Earthquakes, tsunamis,
+// floods, and slow-onset disasters are excluded: they kill people and
+// crops, not libraries.
+const KNOWLEDGE_DESTROYING: ReadonlySet<CataclysmType> = new Set(['volcano', 'asteroid', 'tornado']);
+
 export type CataclysmStrength = 'local' | 'regional' | 'continental' | 'global';
 
 const STRENGTH_WEIGHTS: Record<CataclysmStrength, number> = {
@@ -73,6 +83,22 @@ function pickStrength(rng: () => number): CataclysmStrength {
   return 'local';
 }
 
+/** Spec stretch §1: a single tech-loss applied to a country by a cataclysm. */
+export interface TechLossEntry {
+  countryId: string;
+  field: TechField;
+  /** Post-decrement level. 0 means the field was removed from `knownTechs`. */
+  newLevel: number;
+}
+
+/** Spec stretch §1: a tech-loss roll that `government >= 2` silently absorbed. */
+export interface AbsorbedTechLossEntry {
+  countryId: string;
+  field: TechField;
+  /** Untouched current level (no decrement applied). */
+  level: number;
+}
+
 export interface Cataclysm {
   readonly id: string;
   readonly type: CataclysmType;
@@ -80,7 +106,86 @@ export interface Cataclysm {
   readonly city: string; // epicenter city ID
   killRatio: number;
   killed: number;
+  /** Spec stretch §1: techs degraded by this cataclysm (empty if none). */
+  techLosses: TechLossEntry[];
+  /** Spec stretch §1: tech-loss rolls absorbed by `government >= 2` (empty if none). */
+  absorbedTechLosses: AbsorbedTechLossEntry[];
   year?: Year;
+}
+
+/**
+ * Spec stretch §1: degrade country techs after a knowledge-destroying cataclysm.
+ *
+ * Trigger gates: cataclysm strength must be `continental` or `global`, and
+ * the type must be in `KNOWLEDGE_DESTROYING`. For each affected country we
+ * roll up to `lossCount` times at `lossChance` each; on success we pick a
+ * field weighted by current level (high levels are more "fragile" because
+ * they depend on more infrastructure) and decrement it by 1, removing the
+ * entry entirely if it hits 0. `government >= 2` silently absorbs each
+ * loss but the roll/pick is still recorded so the timeline can show what
+ * was saved.
+ */
+function applyTechLoss(
+  cataclysm: Cataclysm,
+  affectedCountries: Set<CountryEvent>,
+  world: World,
+  rng: () => number,
+): void {
+  if (!KNOWLEDGE_DESTROYING.has(cataclysm.type)) return;
+  if (cataclysm.strength !== 'continental' && cataclysm.strength !== 'global') return;
+
+  const lossChance = cataclysm.strength === 'global' ? 0.6 : 0.3;
+  const lossCount = cataclysm.strength === 'global' ? 2 : 1;
+
+  for (const country of affectedCountries) {
+    const govLevel = getCountryTechLevel(world, country, 'government');
+    // Empire-aware: writes through the founder's map for empire members,
+    // mirroring the read scope used elsewhere in Phase 1.
+    const techs = getCountryEffectiveTechs(world, country);
+
+    for (let i = 0; i < lossCount; i++) {
+      if (rng() >= lossChance) continue;
+
+      // Build a level-weighted candidate pool of fields with level >= 1.
+      const candidates: { field: TechField; level: number }[] = [];
+      let totalWeight = 0;
+      for (const [field, tech] of techs.entries()) {
+        if (tech.level >= 1) {
+          candidates.push({ field, level: tech.level });
+          totalWeight += tech.level;
+        }
+      }
+      if (candidates.length === 0) break; // nothing left to lose this country
+
+      let r = rng() * totalWeight;
+      let pick = candidates[0];
+      for (const c of candidates) {
+        r -= c.level;
+        if (r <= 0) {
+          pick = c;
+          break;
+        }
+      }
+
+      if (govLevel >= 2) {
+        cataclysm.absorbedTechLosses.push({
+          countryId: country.id,
+          field: pick.field,
+          level: pick.level,
+        });
+        continue;
+      }
+
+      const tech = techs.get(pick.field)!;
+      tech.level -= 1;
+      if (tech.level <= 0) techs.delete(pick.field);
+      cataclysm.techLosses.push({
+        countryId: country.id,
+        field: pick.field,
+        newLevel: tech.level,
+      });
+    }
+  }
 }
 
 function applyCasualties(city: CityEntity, killRatio: number, world: World, mitigation = 0): number {
@@ -118,6 +223,8 @@ export class CataclysmGenerator {
       city: epicenterCity.id,
       killRatio,
       killed: 0,
+      techLosses: [],
+      absorbedTechLosses: [],
       year,
     };
 
@@ -173,6 +280,18 @@ export class CataclysmGenerator {
       city.cataclysms.push(cataclysm.id);
     }
     cataclysm.killed = totalKilled;
+
+    // Spec stretch §1: knowledge-destroying disasters degrade country techs.
+    // Resolve affected countries from affected cities (region.countryId), then
+    // delegate to applyTechLoss which handles the strength/type gates.
+    const affectedCountries = new Set<CountryEvent>();
+    for (const city of affectedCities) {
+      const region = world.mapRegions.get(city.regionId);
+      if (!region?.countryId) continue;
+      const country = world.mapCountries.get(region.countryId) as CountryEvent | undefined;
+      if (country) affectedCountries.add(country);
+    }
+    applyTechLoss(cataclysm, affectedCountries, world, rng);
 
     // Secondary effect: Illustrate death (50% chance)
     if (rng() < 0.5 && world.mapUsableIllustrates.size > 0) {

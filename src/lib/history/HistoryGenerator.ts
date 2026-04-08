@@ -43,6 +43,10 @@ export interface HistoryStats {
   totalConquests: number;
   /** Phase 4: total population killed by cataclysms across the timeline. */
   totalCataclysmDeaths: number;
+  /** Spec stretch §1: total tech-loss decrements applied across the timeline. */
+  totalTechLosses: number;
+  /** Spec stretch §1: total tech-loss rolls absorbed by `government >= 2`. */
+  totalTechLossesAbsorbed: number;
   /**
    * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
    * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
@@ -245,6 +249,64 @@ function serializeYearEvents(
       description: `${cat.strength} ${cat.type} strikes ${city?.name ?? '?'} — ${cat.killed.toLocaleString()} killed.`,
       locationCellIndex: city?.cellIndex,
     });
+
+    // Spec stretch §1: emit per-country TECH_LOSS events for any
+    // knowledge-destroying cataclysm. Lost and absorbed entries are bundled
+    // per country so the renderer can show "destroyed N, government absorbed M"
+    // in a single row instead of duplicating context across multiple events.
+    if (cat.techLosses.length === 0 && cat.absorbedTechLosses.length === 0) continue;
+
+    type Bucket = { lost: typeof cat.techLosses; absorbed: typeof cat.absorbedTechLosses };
+    const byCountry = new Map<string, Bucket>();
+    for (const l of cat.techLosses) {
+      let bucket = byCountry.get(l.countryId);
+      if (!bucket) {
+        bucket = { lost: [], absorbed: [] };
+        byCountry.set(l.countryId, bucket);
+      }
+      bucket.lost.push(l);
+    }
+    for (const a of cat.absorbedTechLosses) {
+      let bucket = byCountry.get(a.countryId);
+      if (!bucket) {
+        bucket = { lost: [], absorbed: [] };
+        byCountry.set(a.countryId, bucket);
+      }
+      bucket.absorbed.push(a);
+    }
+
+    for (const [countryId, { lost, absorbed }] of byCountry) {
+      const country = world.mapCountries.get(countryId) as CountryEvent | undefined;
+      const cRegion = country ? world.mapRegions.get(country.governingRegion) : null;
+      const cName = cRegion?.cities[0]?.name ?? countryId;
+      const cIdx = countryMap.idToIndex.get(countryId) ?? -1;
+
+      let description: string;
+      if (lost.length > 0 && absorbed.length === 0) {
+        const first = lost[0];
+        description = `${cName} loses ${first.field} knowledge (level ${first.newLevel + 1}\u2192${first.newLevel}) in the ${cat.type}.`;
+        if (lost.length > 1) description += ` (+${lost.length - 1} more)`;
+      } else if (lost.length === 0 && absorbed.length > 0) {
+        description = `${cName}'s government absorbs the ${cat.type}'s blow to knowledge.`;
+      } else {
+        description = `${cName} loses ${lost.length} tech${lost.length === 1 ? '' : 's'} in the ${cat.type} (government absorbs ${absorbed.length}).`;
+      }
+
+      events.push({
+        type: 'TECH_LOSS',
+        year: absYear,
+        initiatorId: cIdx,
+        description,
+        locationCellIndex: city?.cellIndex,
+        countryName: cName,
+        lostTechs: lost.length > 0
+          ? lost.map(l => ({ field: l.field, newLevel: l.newLevel }))
+          : undefined,
+        absorbedTechs: absorbed.length > 0
+          ? absorbed.map(a => ({ field: a.field, level: a.level }))
+          : undefined,
+      });
+    }
   }
 
   // Wars
@@ -653,6 +715,8 @@ export class HistoryGenerator {
     let totalTrades = 0;
     let totalConquests = 0;
     let totalCataclysmDeaths = 0;
+    let totalTechLosses = 0;
+    let totalTechLossesAbsorbed = 0;
     const peakTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
       exploration: 0, biology: 0, art: 0, government: 0,
@@ -669,7 +733,11 @@ export class HistoryGenerator {
       }
       totalTrades += y.trades.length;
       totalConquests += y.conquers.length;
-      for (const c of y.cataclysms) totalCataclysmDeaths += c.killed;
+      for (const c of y.cataclysms) {
+        totalCataclysmDeaths += c.killed;
+        totalTechLosses += c.techLosses.length;
+        totalTechLossesAbsorbed += c.absorbedTechLosses.length;
+      }
     }
 
     // Phase 4: per-country tech level walk (final state). Uses the effective
@@ -725,6 +793,8 @@ export class HistoryGenerator {
       totalTrades,
       totalConquests,
       totalCataclysmDeaths,
+      totalTechLosses,
+      totalTechLossesAbsorbed,
       techEventsPerCenturyByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,
