@@ -15,6 +15,7 @@ import type { World } from './physical/World';
 import type { Year } from './timeline/Year';
 import type { CountryEvent } from './timeline/Country';
 import type { TechField } from './timeline/Tech';
+import { getCountryTechLevel } from './timeline/Tech';
 import type { IllustrateType } from './timeline/Illustrate';
 
 /** Statistics about the generated history, for optional introspection. */
@@ -36,6 +37,29 @@ export interface HistoryStats {
   totalTechs: number;
   /** Phase 3: peak level reached for each of the 9 tech fields. */
   peakTechLevelByField: Record<TechField, number>;
+  /** Phase 4: total trade events across the timeline. */
+  totalTrades: number;
+  /** Phase 4: total conquest outcomes across the timeline. */
+  totalConquests: number;
+  /** Phase 4: total population killed by cataclysms across the timeline. */
+  totalCataclysmDeaths: number;
+  /**
+   * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
+   * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
+   * harness to detect throughput snowballs in late-game centuries.
+   */
+  techEventsPerCenturyByField: Record<TechField, number[]>;
+  /**
+   * Phase 4: final-year peak country tech level per field. Walks `world.mapCountries`
+   * once at end-of-simulation via `getCountryTechLevel` so empire-member countries
+   * resolve through the founder scope correctly.
+   */
+  peakCountryTechLevelByField: Record<TechField, number>;
+  /**
+   * Phase 4: final-year median country tech level per field. Same walk as `peak…`
+   * above; median is computed over all countries (including level-0 entries).
+   */
+  medianCountryTechLevelByField: Record<TechField, number>;
 }
 
 /** Phase 3: human-readable noun for each illustrate type, used in tech-event descriptions. */
@@ -607,17 +631,78 @@ export class HistoryGenerator {
     }
 
     // Phase 3: tech aggregates — total discoveries and peak level per field.
+    // Phase 4: also bucket tech events per century per field for snowball detection,
+    // and total trade / conquest / cataclysm-death counts used by the sweep harness.
+    const TECH_FIELDS: TechField[] = [
+      'science', 'military', 'industry', 'energy', 'growth',
+      'exploration', 'biology', 'art', 'government',
+    ];
+    const centuryCount = Math.max(1, Math.ceil(yearsToSerialize / 100));
+    const techEventsPerCenturyByField: Record<TechField, number[]> = {
+      science: new Array(centuryCount).fill(0),
+      military: new Array(centuryCount).fill(0),
+      industry: new Array(centuryCount).fill(0),
+      energy: new Array(centuryCount).fill(0),
+      growth: new Array(centuryCount).fill(0),
+      exploration: new Array(centuryCount).fill(0),
+      biology: new Array(centuryCount).fill(0),
+      art: new Array(centuryCount).fill(0),
+      government: new Array(centuryCount).fill(0),
+    };
     let totalTechs = 0;
+    let totalTrades = 0;
+    let totalConquests = 0;
+    let totalCataclysmDeaths = 0;
     const peakTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
       exploration: 0, biology: 0, art: 0, government: 0,
     };
-    for (const y of timeline.years) {
+    for (let yi = 0; yi < timeline.years.length; yi++) {
+      const y = timeline.years[yi];
+      const century = Math.min(centuryCount - 1, Math.floor(yi / 100));
       for (const t of y.techs) {
         totalTechs++;
+        techEventsPerCenturyByField[t.field][century]++;
         if (t.level > peakTechLevelByField[t.field]) {
           peakTechLevelByField[t.field] = t.level;
         }
+      }
+      totalTrades += y.trades.length;
+      totalConquests += y.conquers.length;
+      for (const c of y.cataclysms) totalCataclysmDeaths += c.killed;
+    }
+
+    // Phase 4: per-country tech level walk (final state). Uses the effective
+    // (empire-founder → country) scope via `getCountryTechLevel` so empire-member
+    // countries resolve through the founder correctly — do NOT read
+    // `country.knownTechs.get(...)` directly here, it would silently miss empire
+    // membership. Medians are computed over the full country set (including
+    // level-0 entries) to keep small-world runs comparable to large ones.
+    const peakCountryTechLevelByField: Record<TechField, number> = {
+      science: 0, military: 0, industry: 0, energy: 0, growth: 0,
+      exploration: 0, biology: 0, art: 0, government: 0,
+    };
+    const medianCountryTechLevelByField: Record<TechField, number> = {
+      science: 0, military: 0, industry: 0, energy: 0, growth: 0,
+      exploration: 0, biology: 0, art: 0, government: 0,
+    };
+    const countryList = Array.from(world.mapCountries.values());
+    if (countryList.length > 0) {
+      for (const field of TECH_FIELDS) {
+        const levels: number[] = [];
+        let peak = 0;
+        for (const c of countryList) {
+          const lvl = getCountryTechLevel(world, c, field);
+          levels.push(lvl);
+          if (lvl > peak) peak = lvl;
+        }
+        levels.sort((a, b) => a - b);
+        const mid = Math.floor(levels.length / 2);
+        const median = levels.length % 2 === 0
+          ? (levels[mid - 1] + levels[mid]) / 2
+          : levels[mid];
+        peakCountryTechLevelByField[field] = peak;
+        medianCountryTechLevelByField[field] = median;
       }
     }
 
@@ -637,6 +722,12 @@ export class HistoryGenerator {
       peakPopulation: peakPop,
       totalTechs,
       peakTechLevelByField,
+      totalTrades,
+      totalConquests,
+      totalCataclysmDeaths,
+      techEventsPerCenturyByField,
+      peakCountryTechLevelByField,
+      medianCountryTechLevelByField,
     };
 
     const historyData: HistoryData = {

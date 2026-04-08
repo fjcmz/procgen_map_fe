@@ -64,11 +64,15 @@ function findTargetCity(
   const sourceRegion = world.mapRegions.get(sourceCity.regionId);
   if (!sourceRegion) return null;
 
-  // Determine BFS depth
+  // Determine BFS depth. Phase 4 tuning: `level + 1` → `1 + ceil(level/2)`.
+  // With the old formula, an exploration-4 city contacted 5 region-layers per
+  // year which closed the contact graph in the first few centuries of the run
+  // and flattened the mid-game contact curve. Halving the slope keeps early
+  // exploration useful without short-circuiting the whole diffusion phase.
   let depth = 1;
   if (sourceCity.knownTechs) {
     const explorationTech = sourceCity.knownTechs.get('exploration');
-    if (explorationTech) depth = explorationTech.level + 1;
+    if (explorationTech) depth = 1 + Math.ceil(explorationTech.level / 2);
   }
 
   // BFS over region adjacency
