@@ -1,3 +1,21 @@
+/**
+ * Re-exported from `history/timeline/Tech.ts` so UI modules (Timeline.tsx)
+ * don't have to reach into the history layer.
+ */
+export type { TechField } from './history/timeline/Tech';
+import type { TechField } from './history/timeline/Tech';
+
+/**
+ * Spec stretch §5: per-field running-max time series, precomputed in
+ * `HistoryGenerator.generate()` during the same walk that produces
+ * `HistoryStats.peakTechLevelByField`. One `Uint8Array` per field, indexed
+ * by year offset (0..numYears-1). `Uint8Array` is safe because tech levels
+ * never realistically exceed ~30 in practice (cap 255).
+ */
+export interface TechTimeline {
+  byField: Record<TechField, Uint8Array>;
+}
+
 export type BiomeType =
   | 'OCEAN'
   | 'COAST'
@@ -149,6 +167,8 @@ export interface HistoryData {
   wonderSnapshots: Record<number, number[]>;
   /** Cell indices of cities with active religions, snapshotted every 20 years. */
   religionSnapshots: Record<number, number[]>;
+  /** Spec stretch §5: per-field running-max tech level, indexed by year offset. */
+  techTimeline?: TechTimeline;
 }
 
 export interface MapData {

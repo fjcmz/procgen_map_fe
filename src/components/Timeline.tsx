@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { ChangeEvent } from 'react';
-import type { HistoryData, HistoryEvent } from '../lib/types';
+import type { HistoryData, HistoryEvent, TechField } from '../lib/types';
 import { Draggable } from './Draggable';
 
 interface TimelineProps {
@@ -49,6 +49,37 @@ const EVENT_COLORS: Record<string, string> = {
   POPULATION: '#5a7a5a',
 };
 
+// Spec stretch §5: per-field colors for the tech chart. Anchored on the
+// existing EVENT_COLORS.TECH teal so the chart feels part of the same
+// visual family. If a new TechField is ever added, this Record becomes a
+// TypeScript error until the entry is filled in.
+const TECH_FIELD_COLORS: Record<TechField, string> = {
+  science: '#208080',     // teal (canonical tech color)
+  military: '#c03020',    // red
+  industry: '#d4a800',    // gold
+  energy: '#e07020',      // orange
+  growth: '#60a040',      // green
+  exploration: '#4080c0', // blue
+  biology: '#60c0a0',     // mint
+  art: '#b060a0',         // magenta
+  government: '#8060c0',  // purple
+};
+
+const TECH_FIELD_LABELS: Record<TechField, string> = {
+  science: 'Sci',
+  military: 'Mil',
+  industry: 'Ind',
+  energy: 'Eng',
+  growth: 'Grw',
+  exploration: 'Exp',
+  biology: 'Bio',
+  art: 'Art',
+  government: 'Gov',
+};
+
+const TECH_CHART_WIDTH = 240;
+const TECH_CHART_HEIGHT = 80;
+
 const PLAY_INTERVAL_MS = 200;
 
 function formatPopulation(pop: number): string {
@@ -61,8 +92,10 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
   const [playing, setPlaying] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
   const [logCollapsed, setLogCollapsed] = useState(false);
+  const [techCollapsed, setTechCollapsed] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const techChartRef = useRef<HTMLCanvasElement>(null);
 
   const maxYear = historyData.numYears - 1;
 
@@ -89,6 +122,86 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedYear]);
+
+  // Spec stretch §5: draw the per-field tech chart. A single canvas is
+  // used for polylines + cursor — for a 240×80 canvas with 9 fields this
+  // is well under 1ms per frame and vastly simpler than two stacked
+  // canvases. Early-exit when the sub-panel is collapsed (the canvas is
+  // not mounted) or no timeline data exists.
+  useEffect(() => {
+    if (techCollapsed) return;
+    const canvas = techChartRef.current;
+    if (!canvas) return;
+    const timeline = historyData.techTimeline;
+    if (!timeline) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = TECH_CHART_WIDTH;
+    const h = TECH_CHART_HEIGHT;
+    const numYears = historyData.numYears;
+
+    // Device-pixel-ratio scaling for crisp lines on hidpi displays.
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+
+    // Background
+    ctx.fillStyle = 'rgba(255,248,230,0.6)';
+    ctx.fillRect(0, 0, w, h);
+
+    // Compute Y-axis max across all fields/years — floor at 1 to avoid
+    // divide-by-zero on empty histories (chart collapses to a flat line
+    // at the bottom in that case).
+    let yMax = 1;
+    for (const field of Object.keys(timeline.byField) as TechField[]) {
+      const arr = timeline.byField[field];
+      // Running max is monotonic, so only the last cell can be the peak.
+      const peak = arr.length > 0 ? arr[arr.length - 1] : 0;
+      if (peak > yMax) yMax = peak;
+    }
+
+    // Chart padding (leaves room for the year cursor ticks at top/bottom).
+    const padL = 2;
+    const padR = 2;
+    const padT = 4;
+    const padB = 4;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
+    const xForYear = (y: number) =>
+      padL + (numYears <= 1 ? 0 : (y / (numYears - 1)) * plotW);
+    const yForLevel = (lvl: number) => padT + plotH - (lvl / yMax) * plotH;
+
+    // Draw polylines — one per field, in a stable order matching the
+    // TECH_FIELD_COLORS definition so the legend lines up.
+    ctx.lineWidth = 1.25;
+    ctx.lineJoin = 'round';
+    for (const field of Object.keys(TECH_FIELD_COLORS) as TechField[]) {
+      const arr = timeline.byField[field];
+      if (!arr || arr.length === 0) continue;
+      ctx.strokeStyle = TECH_FIELD_COLORS[field];
+      ctx.beginPath();
+      ctx.moveTo(xForYear(0), yForLevel(arr[0]));
+      for (let i = 1; i < arr.length; i++) {
+        ctx.lineTo(xForYear(i), yForLevel(arr[i]));
+      }
+      ctx.stroke();
+    }
+
+    // Year cursor — vertical line at selectedYear.
+    const cursorX = xForYear(Math.max(0, Math.min(numYears - 1, selectedYear)));
+    ctx.strokeStyle = 'rgba(58,26,0,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cursorX + 0.5, padT);
+    ctx.lineTo(cursorX + 0.5, padT + plotH);
+    ctx.stroke();
+  }, [historyData.techTimeline, historyData.numYears, selectedYear, techCollapsed]);
 
   const clampYear = useCallback((y: number) => Math.max(0, Math.min(maxYear, y)), [maxYear]);
 
@@ -216,6 +329,45 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
                 {logCollapsed ? '\u25BE' : '\u25B4'}
               </button>
             </div>
+            {!logCollapsed && historyData.techTimeline && (
+              <div style={styles.techPanel}>
+                <div style={styles.techHeader}>
+                  <span style={styles.techTitle}>Tech</span>
+                  <button
+                    style={styles.collapseBtn}
+                    onClick={() => setTechCollapsed(c => !c)}
+                    title={techCollapsed ? 'Expand' : 'Collapse'}
+                  >
+                    {techCollapsed ? '\u25BE' : '\u25B4'}
+                  </button>
+                </div>
+                {!techCollapsed && (
+                  <>
+                    <div style={styles.techLegend}>
+                      {(Object.keys(TECH_FIELD_COLORS) as TechField[]).map(field => (
+                        <span key={field} style={styles.techLegendItem}>
+                          <span
+                            style={{
+                              ...styles.techSwatch,
+                              background: TECH_FIELD_COLORS[field],
+                            }}
+                          />
+                          {TECH_FIELD_LABELS[field]}
+                        </span>
+                      ))}
+                    </div>
+                    <canvas
+                      ref={techChartRef}
+                      style={{
+                        ...styles.techCanvas,
+                        width: TECH_CHART_WIDTH,
+                        height: TECH_CHART_HEIGHT,
+                      }}
+                    />
+                  </>
+                )}
+              </div>
+            )}
             {!logCollapsed && (
               <div style={styles.logList}>
                 {cumulativeEvents.length === 0 ? (
@@ -425,5 +577,53 @@ const styles: Record<string, React.CSSProperties> = {
   },
   logDesc: {
     flex: 1,
+  },
+  // Spec stretch §5: tech chart sub-panel — sits between logHeader and
+  // logList (outside the scrollable region so logEndRef.scrollIntoView
+  // doesn't push the chart off screen on every play tick).
+  techPanel: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    padding: '6px 10px 8px',
+    borderBottom: '1px solid #d4b896',
+    flexShrink: 0,
+  },
+  techHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 6,
+  },
+  techTitle: {
+    fontWeight: 'bold',
+    fontSize: 11,
+    color: '#3a1a00',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  techLegend: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '2px 6px',
+    fontSize: 9,
+    color: '#5a3a10',
+  },
+  techLegendItem: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+  },
+  techSwatch: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: 2,
+    border: '1px solid rgba(58,26,0,0.4)',
+  },
+  techCanvas: {
+    display: 'block',
+    border: '1px solid #8b6040',
+    borderRadius: 3,
   },
 };

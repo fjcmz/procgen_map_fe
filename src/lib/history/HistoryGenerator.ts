@@ -5,7 +5,7 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { generateRoads, computeDistanceFromLand, generateTradeRoutePath } from './roads';
@@ -795,6 +795,23 @@ export class HistoryGenerator {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
       exploration: 0, biology: 0, art: 0, government: 0,
     };
+    // Spec stretch §5: per-field running-max time series. Populated in the
+    // same walk as peakTechLevelByField — one Uint8Array per field, indexed
+    // by year offset [0..yearsToSerialize-1]. Allocation is bounded to
+    // yearsToSerialize (NOT timeline.years.length) so the array length
+    // matches historyData.numYears — a truncated run must not write past
+    // the end.
+    const techTimelineByField: Record<TechField, Uint8Array> = {
+      science: new Uint8Array(yearsToSerialize),
+      military: new Uint8Array(yearsToSerialize),
+      industry: new Uint8Array(yearsToSerialize),
+      energy: new Uint8Array(yearsToSerialize),
+      growth: new Uint8Array(yearsToSerialize),
+      exploration: new Uint8Array(yearsToSerialize),
+      biology: new Uint8Array(yearsToSerialize),
+      art: new Uint8Array(yearsToSerialize),
+      government: new Uint8Array(yearsToSerialize),
+    };
     for (let yi = 0; yi < timeline.years.length; yi++) {
       const y = timeline.years[yi];
       const century = Math.min(centuryCount - 1, Math.floor(yi / 100));
@@ -803,6 +820,12 @@ export class HistoryGenerator {
         techEventsPerCenturyByField[t.field][century]++;
         if (t.level > peakTechLevelByField[t.field]) {
           peakTechLevelByField[t.field] = t.level;
+        }
+        // Timeline write is bounded to yearsToSerialize so a lowered
+        // numSimYears doesn't silently drop the tail.
+        if (yi < yearsToSerialize) {
+          const arr = techTimelineByField[t.field];
+          if (t.level > arr[yi]) arr[yi] = t.level;
         }
       }
       totalTrades += y.trades.length;
@@ -816,6 +839,15 @@ export class HistoryGenerator {
         totalTechLossesAbsorbed += c.absorbedTechLosses.length;
       }
     }
+    // Forward-fill: quiet years inherit the previous year's running max so
+    // the chart polylines stay flat instead of dropping to zero.
+    for (const field of TECH_FIELDS) {
+      const arr = techTimelineByField[field];
+      for (let yi = 1; yi < yearsToSerialize; yi++) {
+        if (arr[yi - 1] > arr[yi]) arr[yi] = arr[yi - 1];
+      }
+    }
+    const techTimeline: TechTimeline = { byField: techTimelineByField };
 
     // Phase 4: per-country tech level walk (final state). Uses the effective
     // (empire-founder → country) scope via `getCountryTechLevel` so empire-member
@@ -886,6 +918,7 @@ export class HistoryGenerator {
       tradeSnapshots,
       wonderSnapshots,
       religionSnapshots,
+      techTimeline,
     };
 
     return {
