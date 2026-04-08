@@ -16,6 +16,7 @@ import type { Year } from './timeline/Year';
 import type { CountryEvent } from './timeline/Country';
 import type { TechField } from './timeline/Tech';
 import { getCountryTechLevel } from './timeline/Tech';
+import { nameForLevel } from './timeline/techNames';
 import type { IllustrateType } from './timeline/Illustrate';
 
 /** Statistics about the generated history, for optional introspection. */
@@ -84,11 +85,18 @@ function capitalize(s: string): string {
 }
 
 /**
- * Phase 3: format a TECH event description.
+ * Phase 3 + spec stretch §3: format a TECH event description.
  *
- * - Country known: "Avaloria discovers military level 3 (by a military leader in Tall Harbor)"
- * - No country, city + illustrate known: "Tall Harbor discovers military level 3 (by a military leader)"
- * - Stateless / unknown: "Military advances to level 3."
+ * When `displayName` is supplied (the normal path — caller resolves it via
+ * `nameForLevel`), the bare `${field} level ${level}` phrase becomes
+ * `${displayName} (${field} L${level})`:
+ *
+ * - Country known: "Avaloria discovers Astronomy (science L4) (by a science figure in Tall Harbor)"
+ * - No country, city + illustrate known: "Tall Harbor discovers Astronomy (science L4) (by a science figure)"
+ * - Stateless / unknown: "Science advances to Astronomy (L4)."
+ *
+ * `displayName` stays optional so the function remains robust if a future
+ * call site forgets to pass it — the fallback reproduces the pre-§3 text.
  */
 function buildTechDescription(args: {
   countryName?: string;
@@ -96,20 +104,27 @@ function buildTechDescription(args: {
   illustrateType?: IllustrateType;
   field: string;
   level: number;
+  displayName?: string;
 }): string {
-  const { countryName, cityName, illustrateType, field, level } = args;
+  const { countryName, cityName, illustrateType, field, level, displayName } = args;
   const noun = illustrateType ? ILLUSTRATE_NOUN[illustrateType] : undefined;
+  const techPhrase = displayName
+    ? `${displayName} (${field} L${level})`
+    : `${field} level ${level}`;
   if (countryName) {
     const by = noun
       ? cityName
         ? ` (by a ${noun} in ${cityName})`
         : ` (by a ${noun})`
       : '';
-    return `${countryName} discovers ${field} level ${level}${by}.`;
+    return `${countryName} discovers ${techPhrase}${by}.`;
   }
   if (cityName) {
     const by = noun ? ` (by a ${noun})` : '';
-    return `${cityName} discovers ${field} level ${level}${by}.`;
+    return `${cityName} discovers ${techPhrase}${by}.`;
+  }
+  if (displayName) {
+    return `${capitalize(field)} advances to ${displayName} (L${level}).`;
   }
   return `${capitalize(field)} advances to level ${level}.`;
 }
@@ -373,6 +388,7 @@ function serializeYearEvents(
       : undefined;
     const countryName = countryRegion?.cities[0]?.name;
 
+    const displayName = nameForLevel(t.field, t.level);
     events.push({
       type: 'TECH',
       year: absYear,
@@ -383,10 +399,12 @@ function serializeYearEvents(
         illustrateType: illustrate?.type,
         field: t.field,
         level: t.level,
+        displayName,
       }),
       locationCellIndex: city?.cellIndex,
       field: t.field,
       level: t.level,
+      displayName,
       discovererName: illustrate?.id ?? 'unknown',
       discovererType: illustrate?.type,
       countryName,
@@ -404,7 +422,11 @@ function serializeYearEvents(
     const cqdName = cqdRegion?.cities[0]?.name ?? c.conquered;
     const cqrIdx = countryMap.idToIndex.get(c.conqueror) ?? -1;
     const cqdIdx = countryMap.idToIndex.get(c.conquered) ?? -1;
-    const acquired = c.acquiredTechList ?? [];
+    const acquired = (c.acquiredTechList ?? []).map(a => ({
+      field: a.field,
+      level: a.level,
+      displayName: nameForLevel(a.field, a.level),
+    }));
     const techSuffix = acquired.length > 0
       ? ` (+${acquired.length} tech${acquired.length === 1 ? '' : 's'})`
       : '';
