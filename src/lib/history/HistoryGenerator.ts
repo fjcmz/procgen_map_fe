@@ -14,6 +14,8 @@ import { HistoryRoot } from './HistoryRoot';
 import type { World } from './physical/World';
 import type { Year } from './timeline/Year';
 import type { CountryEvent } from './timeline/Country';
+import type { TechField } from './timeline/Tech';
+import type { IllustrateType } from './timeline/Illustrate';
 
 /** Statistics about the generated history, for optional introspection. */
 export interface HistoryStats {
@@ -30,6 +32,56 @@ export interface HistoryStats {
   worldEnded: boolean;
   worldEndedOn?: number;
   peakPopulation: number;
+  /** Phase 3: total number of tech discoveries across the simulated timeline. */
+  totalTechs: number;
+  /** Phase 3: peak level reached for each of the 9 tech fields. */
+  peakTechLevelByField: Record<TechField, number>;
+}
+
+/** Phase 3: human-readable noun for each illustrate type, used in tech-event descriptions. */
+const ILLUSTRATE_NOUN: Record<IllustrateType, string> = {
+  science: 'scientist',
+  military: 'military leader',
+  philosophy: 'philosopher',
+  industry: 'industrialist',
+  religion: 'religious figure',
+  art: 'artist',
+};
+
+/** Phase 3: capitalize the first letter of a string for sentence-case rendering. */
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s[0].toUpperCase() + s.slice(1);
+}
+
+/**
+ * Phase 3: format a TECH event description.
+ *
+ * - Country known: "Avaloria discovers military level 3 (by a military leader in Tall Harbor)"
+ * - No country, city + illustrate known: "Tall Harbor discovers military level 3 (by a military leader)"
+ * - Stateless / unknown: "Military advances to level 3."
+ */
+function buildTechDescription(args: {
+  countryName?: string;
+  cityName?: string;
+  illustrateType?: IllustrateType;
+  field: string;
+  level: number;
+}): string {
+  const { countryName, cityName, illustrateType, field, level } = args;
+  const noun = illustrateType ? ILLUSTRATE_NOUN[illustrateType] : undefined;
+  if (countryName) {
+    const by = noun
+      ? cityName
+        ? ` (by a ${noun} in ${cityName})`
+        : ` (by a ${noun})`
+      : '';
+    return `${countryName} discovers ${field} level ${level}${by}.`;
+  }
+  if (cityName) {
+    const by = noun ? ` (by a ${noun})` : '';
+    return `${cityName} discovers ${field} level ${level}${by}.`;
+  }
+  return `${capitalize(field)} advances to level ${level}.`;
 }
 
 /** Mapping from internal country ID (string) to numeric country index for ownership arrays. */
@@ -192,31 +244,46 @@ function serializeYearEvents(
     });
   }
 
-  // Techs (Phase 2): enrich event with country index, structured field/level,
-  // and a city-name-prefixed description so the UI can render rich rows.
+  // Techs (Phase 3): enrich event with country index + name, illustrate type,
+  // structured field/level, and a spec-format description so the UI can render
+  // rich rows without per-event-type formatting logic.
   for (const t of year.techs) {
     const illustrate = world.mapIllustrates.get(t.discoverer);
     const city = illustrate ? world.mapCities.get(illustrate.city) : undefined;
     const region = city ? world.mapRegions.get(city.regionId) : undefined;
-    const countryIdx = region?.countryId
-      ? countryMap.idToIndex.get(region.countryId) ?? -1
+    const country = region?.countryId
+      ? (world.mapCountries.get(region.countryId) as CountryEvent | undefined)
+      : undefined;
+    const countryIdx = country
+      ? countryMap.idToIndex.get(country.id) ?? -1
       : -1;
-    const cityName = city?.name ?? '';
+    const countryRegion = country
+      ? world.mapRegions.get(country.governingRegion)
+      : undefined;
+    const countryName = countryRegion?.cities[0]?.name;
+
     events.push({
       type: 'TECH',
       year: absYear,
       initiatorId: countryIdx,
-      description: cityName
-        ? `${cityName}: ${t.field} advances to level ${t.level}.`
-        : `${t.field} advances to level ${t.level}.`,
+      description: buildTechDescription({
+        countryName,
+        cityName: city?.name,
+        illustrateType: illustrate?.type,
+        field: t.field,
+        level: t.level,
+      }),
       locationCellIndex: city?.cellIndex,
       field: t.field,
       level: t.level,
       discovererName: illustrate?.id ?? 'unknown',
+      discovererType: illustrate?.type,
+      countryName,
     });
   }
 
-  // Conquers
+  // Conquers (Phase 3): surface the acquired-tech delta in both the description
+  // and a structured `acquiredTechs` field for any UI that wants the raw list.
   for (const c of year.conquers) {
     const conqueror = world.mapCountries.get(c.conqueror) as CountryEvent | undefined;
     const conquered = world.mapCountries.get(c.conquered) as CountryEvent | undefined;
@@ -226,14 +293,20 @@ function serializeYearEvents(
     const cqdName = cqdRegion?.cities[0]?.name ?? c.conquered;
     const cqrIdx = countryMap.idToIndex.get(c.conqueror) ?? -1;
     const cqdIdx = countryMap.idToIndex.get(c.conquered) ?? -1;
+    const acquired = c.acquiredTechList ?? [];
+    const techSuffix = acquired.length > 0
+      ? ` (+${acquired.length} tech${acquired.length === 1 ? '' : 's'})`
+      : '';
     events.push({
       type: 'CONQUEST',
       year: absYear,
       initiatorId: cqrIdx,
       targetId: cqdIdx,
-      description: `${cqrName} conquers ${cqdName}.`,
+      description: `${cqrName} conquers ${cqdName}${techSuffix}.`,
       locationCellIndex: cqrRegion?.cities[0]?.cellIndex,
       targetCellIndex: cqdRegion?.cities[0]?.cellIndex,
+      countryName: cqrName,
+      acquiredTechs: acquired.length > 0 ? acquired : undefined,
     });
   }
 
@@ -533,6 +606,21 @@ export class HistoryGenerator {
       if (y.worldPopulation > peakPop) peakPop = y.worldPopulation;
     }
 
+    // Phase 3: tech aggregates — total discoveries and peak level per field.
+    let totalTechs = 0;
+    const peakTechLevelByField: Record<TechField, number> = {
+      science: 0, military: 0, industry: 0, energy: 0, growth: 0,
+      exploration: 0, biology: 0, art: 0, government: 0,
+    };
+    for (const y of timeline.years) {
+      for (const t of y.techs) {
+        totalTechs++;
+        if (t.level > peakTechLevelByField[t.field]) {
+          peakTechLevelByField[t.field] = t.level;
+        }
+      }
+    }
+
     const stats: HistoryStats = {
       totalYearsSimulated: yearsToSerialize,
       startOfTime: timeline.startOfTime,
@@ -547,6 +635,8 @@ export class HistoryGenerator {
       worldEnded: world.endedBy !== '',
       worldEndedOn: world.endedOn || undefined,
       peakPopulation: peakPop,
+      totalTechs,
+      peakTechLevelByField,
     };
 
     const historyData: HistoryData = {
