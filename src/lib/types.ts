@@ -119,6 +119,8 @@ export interface HistoryEvent {
     toCountryName: string;
     newLevel: number;
   };
+  /** RELIGION-only (spec stretch §4): which origin-country tech bonuses are boosting this religion's propagation (art ×0.02 adherence drift, government up to ×0.03 drift + Path 2 outward-expansion weighting). `'none'` is omitted rather than stored. */
+  propagationReason?: 'art' | 'government' | 'both';
 }
 
 export interface HistoryYear {

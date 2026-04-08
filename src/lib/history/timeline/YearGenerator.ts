@@ -8,12 +8,13 @@ import { countryGenerator } from './Country';
 import { illustrateGenerator } from './Illustrate';
 import type { Illustrate } from './Illustrate';
 import { religionGenerator } from './Religion';
+import type { Religion } from './Religion';
 import { tradeGenerator } from './Trade';
 import { wonderGenerator } from './Wonder';
 import { cataclysmGenerator } from './Cataclysm';
 import { warGenerator } from './War';
 import type { War } from './War';
-import { techGenerator, getCityTechLevel } from './Tech';
+import { techGenerator, getCityTechLevel, getCountryTechLevel } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
 import type { CountryEvent } from './Country';
@@ -101,13 +102,27 @@ export class YearGenerator {
 
     // Step 6: Propagate religions
     // Phase 1: `art` tech bumps adherence drift +0.05 → +0.07 (soft-power lever).
+    // Spec stretch §4: the religion's origin country's `government` tech adds a
+    // further +0.01 per level, capped at +0.03 (government level 3+). The art
+    // bonus is city-scoped (applies to any religion in an `art` city) while the
+    // government bonus is religion-scoped (travels with the religion), so drift
+    // is now computed per (city × religion) rather than per city.
+    const computeGovBonus = (religion: Religion | undefined): number => {
+      if (!religion?.originCountry) return 0;
+      const origin = world.mapCountries.get(religion.originCountry) as CountryEvent | undefined;
+      if (!origin) return 0;
+      const govLevel = getCountryTechLevel(world, origin, 'government');
+      return 0.01 * Math.min(3, govLevel);
+    };
     for (const city of world.mapUsableCities.values()) {
       if (city.religions.size === 0) continue;
-      const drift = 0.05 + (getCityTechLevel(world, city, 'art') > 0 ? 0.02 : 0);
+      const artBonus = getCityTechLevel(world, city, 'art') > 0 ? 0.02 : 0;
       if (city.religions.size === 1) {
         // Single-religion: adherence drifts toward dominance until 0.9
         for (const [relId, adherence] of city.religions) {
           if (adherence < 0.9) {
+            const religion = world.mapReligions.get(relId) as Religion | undefined;
+            const drift = 0.05 + artBonus + computeGovBonus(religion);
             city.religions.set(relId, Math.min(0.9, adherence + drift));
           }
         }
@@ -117,7 +132,11 @@ export class YearGenerator {
         for (const adherence of city.religions.values()) totalAdherence += adherence;
         if (totalAdherence < 0.9) {
           const relIds = Array.from(city.religions.keys());
+          // RNG draw happens before drift computation — identical call order
+          // to the pre-§4 code path so seed reproducibility is preserved.
           const picked = relIds[Math.floor(rng() * relIds.length)];
+          const religion = world.mapReligions.get(picked) as Religion | undefined;
+          const drift = 0.05 + artBonus + computeGovBonus(religion);
           city.religions.set(picked, (city.religions.get(picked) ?? 0) + drift);
         }
       }
