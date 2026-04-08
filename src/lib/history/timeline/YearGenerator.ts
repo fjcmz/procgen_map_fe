@@ -55,7 +55,14 @@ export class YearGenerator {
         if (growthLevel > 0) {
           const energyLevel = getCityTechLevel(world, city, 'energy');
           const energyMult = 1 + 0.05 * Math.min(energyLevel, 10);
-          capacity *= 1 + growthLevel * 0.15 * energyMult;
+          // Phase 4 tuning: growth coefficient 0.15 → 0.12. `energy` stacks
+          // (up to ×1.5) on top of `growth` since Phase 1, so 0.15 was
+          // effectively 0.225 at energy level 10 — the compounding snowball
+          // the spec warns about in `tech_overhaul.md` Phase 4. A full halving
+          // to 0.10 dropped peakPopulation by ~32% across the 5-seed sweep
+          // (outside the ±30% quality gate), so round 2 backs off to 0.12 to
+          // land inside the gate while still curbing the compounding effect.
+          capacity *= 1 + growthLevel * 0.12 * energyMult;
         }
         // Logistic growth: rate decelerates as population approaches capacity
         const logisticFactor = 1 - city.currentPopulation / capacity;
