@@ -98,14 +98,16 @@ export interface HistoryEvent {
   field?: string;
   /** TECH-only (Phase 2): the new level after the discovery. */
   level?: number;
+  /** TECH-only (spec stretch §3): flavor name for the discovered tech, e.g. "Astronomy". */
+  displayName?: string;
   /** TECH-only (Phase 2): identifier of the illustrate that made the discovery. */
   discovererName?: string;
   /** TECH-only (Phase 3): illustrate type — 'science' | 'military' | 'philosophy' | 'industry' | 'religion' | 'art'. */
   discovererType?: string;
   /** TECH/CONQUEST (Phase 3): resolved country display name at the time of the event. */
   countryName?: string;
-  /** CONQUEST-only (Phase 3): tech delta acquired by the conqueror, when non-empty. */
-  acquiredTechs?: Array<{ field: string; level: number }>;
+  /** CONQUEST-only (Phase 3): tech delta acquired by the conqueror, when non-empty. Spec stretch §3: each entry may carry an optional `displayName` flavor string. */
+  acquiredTechs?: Array<{ field: string; level: number; displayName?: string }>;
   /** TECH_LOSS-only (spec stretch §1): fields whose level was decremented (post-decrement; 0 means removed). */
   lostTechs?: Array<{ field: string; newLevel: number }>;
   /** TECH_LOSS-only (spec stretch §1): fields whose loss was absorbed by `government >= 2` (level unchanged). */
