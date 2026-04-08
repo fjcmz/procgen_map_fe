@@ -231,14 +231,40 @@ function serializeYearEvents(
   }
 
   // Religions
+  // Spec stretch §4: resolve the religion's origin country at serialization
+  // time, compute which tech bonuses (art / government) are currently
+  // boosting its propagation, and surface that as both a flavor suffix on
+  // the description and a structured `propagationReason` field. This mirrors
+  // the "enrich description + optional structured field" pattern used by
+  // TRADE/`techDiffusion` and TECH_LOSS — zero simulation impact, purely a
+  // read-side enrichment over the live tech state.
   for (const r of year.religions) {
     const city = world.mapCities.get(r.foundingCity);
+    let description = `A new religion is founded in ${city?.name ?? '?'}.`;
+    let propagationReason: HistoryEvent['propagationReason'];
+    if (r.originCountry) {
+      const origin = world.mapCountries.get(r.originCountry) as CountryEvent | undefined;
+      if (origin) {
+        const hasArt = getCountryTechLevel(world, origin, 'art') > 0;
+        const hasGov = getCountryTechLevel(world, origin, 'government') > 0;
+        if (hasArt && hasGov) propagationReason = 'both';
+        else if (hasArt)      propagationReason = 'art';
+        else if (hasGov)      propagationReason = 'government';
+        if (propagationReason) {
+          const label = propagationReason === 'both'
+            ? 'art and government'
+            : propagationReason;
+          description += ` (spread boosted by ${label})`;
+        }
+      }
+    }
     events.push({
       type: 'RELIGION',
       year: absYear,
       initiatorId: -1,
-      description: `A new religion is founded in ${city?.name ?? '?'}.`,
+      description,
       locationCellIndex: city?.cellIndex,
+      propagationReason,
     });
   }
 

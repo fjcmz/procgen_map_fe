@@ -2,6 +2,8 @@ import { IdUtil } from '../IdUtil';
 import type { World } from '../physical/World';
 import type { Year } from './Year';
 import type { Illustrate } from './Illustrate';
+import type { CountryEvent } from './Country';
+import { getCountryTechLevel } from './Tech';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -14,6 +16,14 @@ export interface Religion {
   readonly founder: string; // illustrate ID
   foundedOn: number;
   readonly foundingCity: string; // city ID
+  /**
+   * Spec stretch §4: id of the country whose region hosted the founding city
+   * at founding time. Snapshot-at-founding — not updated on conquest, so the
+   * "origin country" bonus tracks the original civilization even if the
+   * founding region later changes hands. `null` when the founding city was
+   * pre-country (no region owner yet); bonuses then silently no-op.
+   */
+  readonly originCountry: string | null;
   members: number;
   year?: Year;
 }
@@ -38,11 +48,17 @@ export class ReligionGenerator {
 
     if (eligibleFounder && eligibleFounder.originCity) {
       const absYear = year.year;
+      // Spec stretch §4: snapshot the founding city's current country id.
+      // Null when the city has no country yet — the government-bonus code
+      // in YearGenerator step 6 and Path 2 below both handle that case.
+      const foundingRegion = world.mapRegions.get(eligibleFounder.originCity.regionId);
+      const originCountry = foundingRegion?.countryId ?? null;
       const religion: Religion = {
         id: IdUtil.id('religion', absYear, rngHex(rng)) ?? 'religion_unknown',
         founder: eligibleFounder.id,
         foundedOn: absYear,
         foundingCity: eligibleFounder.originCity.id,
+        originCountry,
         members: 0,
         year,
       };
@@ -90,7 +106,39 @@ export class ReligionGenerator {
 
     if (targetCandidates.length === 0) return null;
 
-    const targetCity = targetCandidates[Math.floor(rng() * targetCandidates.length)];
+    // Spec stretch §4: weight neighbour-region candidates by
+    // `1 + 0.25 * government.level` (capped at 2). Same-region candidates
+    // keep weight 1, so high-`government` religions bias outward and "reach
+    // further per tick". `originCountry` is read from the religion being
+    // expanded, not the source city's current country, so the bonus tracks
+    // the original civilization's institutional strength.
+    const religion = world.mapReligions.get(religionId) as Religion | undefined;
+    let govMult = 1;
+    if (religion?.originCountry) {
+      const originCountry = world.mapCountries.get(religion.originCountry) as CountryEvent | undefined;
+      if (originCountry) {
+        const govLevel = getCountryTechLevel(world, originCountry, 'government');
+        govMult = Math.min(2, 1 + 0.25 * govLevel);
+      }
+    }
+    const weightOf = (cellRegionId: string): number =>
+      cellRegionId === sourceCity.regionId ? 1 : govMult;
+
+    let targetCity: typeof targetCandidates[number];
+    if (govMult === 1) {
+      // Fast path: uniform pick preserves the pre-§4 RNG usage at
+      // government level 0 and is indistinguishable from the original code.
+      targetCity = targetCandidates[Math.floor(rng() * targetCandidates.length)];
+    } else {
+      let total = 0;
+      for (const c of targetCandidates) total += weightOf(c.regionId);
+      let r = rng() * total;
+      targetCity = targetCandidates[targetCandidates.length - 1];
+      for (const c of targetCandidates) {
+        r -= weightOf(c.regionId);
+        if (r <= 0) { targetCity = c; break; }
+      }
+    }
 
     // Seed target city's adherence with random [0.01, 0.09]
     const seedAdherence = 0.01 + rng() * 0.08;
