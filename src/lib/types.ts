@@ -94,6 +94,12 @@ export interface HistoryEvent {
   locationCellIndex?: number;
   /** Cell index of the secondary location (e.g. target city for CONTACT/TRADE) */
   targetCellIndex?: number;
+  /** TECH-only (Phase 2): the discovered tech field name. */
+  field?: string;
+  /** TECH-only (Phase 2): the new level after the discovery. */
+  level?: number;
+  /** TECH-only (Phase 2): identifier of the illustrate that made the discovery. */
+  discovererName?: string;
 }
 
 export interface HistoryYear {

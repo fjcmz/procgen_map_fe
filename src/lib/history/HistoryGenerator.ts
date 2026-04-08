@@ -192,16 +192,27 @@ function serializeYearEvents(
     });
   }
 
-  // Techs
+  // Techs (Phase 2): enrich event with country index, structured field/level,
+  // and a city-name-prefixed description so the UI can render rich rows.
   for (const t of year.techs) {
     const illustrate = world.mapIllustrates.get(t.discoverer);
     const city = illustrate ? world.mapCities.get(illustrate.city) : undefined;
+    const region = city ? world.mapRegions.get(city.regionId) : undefined;
+    const countryIdx = region?.countryId
+      ? countryMap.idToIndex.get(region.countryId) ?? -1
+      : -1;
+    const cityName = city?.name ?? '';
     events.push({
       type: 'TECH',
       year: absYear,
-      initiatorId: -1,
-      description: `${t.field} technology advances to level ${t.level}.`,
+      initiatorId: countryIdx,
+      description: cityName
+        ? `${cityName}: ${t.field} advances to level ${t.level}.`
+        : `${t.field} advances to level ${t.level}.`,
       locationCellIndex: city?.cellIndex,
+      field: t.field,
+      level: t.level,
+      discovererName: illustrate?.id ?? 'unknown',
     });
   }
 
