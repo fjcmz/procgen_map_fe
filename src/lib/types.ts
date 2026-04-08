@@ -110,6 +110,13 @@ export interface HistoryEvent {
   lostTechs?: Array<{ field: string; newLevel: number }>;
   /** TECH_LOSS-only (spec stretch §1): fields whose loss was absorbed by `government >= 2` (level unchanged). */
   absorbedTechs?: Array<{ field: string; level: number }>;
+  /** TRADE-only (spec stretch §2): tech transferred from donor to receiver country via this trade. */
+  techDiffusion?: {
+    field: string;
+    fromCountryName: string;
+    toCountryName: string;
+    newLevel: number;
+  };
 }
 
 export interface HistoryYear {

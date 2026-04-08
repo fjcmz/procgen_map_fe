@@ -47,6 +47,8 @@ export interface HistoryStats {
   totalTechLosses: number;
   /** Spec stretch §1: total tech-loss rolls absorbed by `government >= 2`. */
   totalTechLossesAbsorbed: number;
+  /** Spec stretch §2: total trade-driven tech-diffusion events across the timeline. */
+  totalTechDiffusions: number;
   /**
    * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
    * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
@@ -229,13 +231,36 @@ function serializeYearEvents(
   for (const t of year.trades) {
     const c1 = world.mapCities.get(t.city1);
     const c2 = world.mapCities.get(t.city2);
+    let description = `Trade route opened: ${c1?.name ?? '?'} \u2194 ${c2?.name ?? '?'} (${t.resource1}/${t.resource2}).`;
+
+    // Spec stretch §2: surface trade-driven tech diffusion. Resolve donor +
+    // receiver country names via the same `governingRegion → cities[0]?.name`
+    // ladder used by the CONQUEST/TECH blocks below.
+    let techDiffusionPayload: HistoryEvent['techDiffusion'];
+    if (t.techDiffusion) {
+      const donorCountry = world.mapCountries.get(t.techDiffusion.donorCountryId) as CountryEvent | undefined;
+      const receiverCountry = world.mapCountries.get(t.techDiffusion.receiverCountryId) as CountryEvent | undefined;
+      const donorRegion = donorCountry ? world.mapRegions.get(donorCountry.governingRegion) : null;
+      const receiverRegion = receiverCountry ? world.mapRegions.get(receiverCountry.governingRegion) : null;
+      const fromName = donorRegion?.cities[0]?.name ?? t.techDiffusion.donorCountryId;
+      const toName = receiverRegion?.cities[0]?.name ?? t.techDiffusion.receiverCountryId;
+      description += ` ${toName} learns ${t.techDiffusion.field} L${t.techDiffusion.newLevel} via trade with ${fromName}.`;
+      techDiffusionPayload = {
+        field: t.techDiffusion.field,
+        fromCountryName: fromName,
+        toCountryName: toName,
+        newLevel: t.techDiffusion.newLevel,
+      };
+    }
+
     events.push({
       type: 'TRADE',
       year: absYear,
       initiatorId: -1,
-      description: `Trade route opened: ${c1?.name ?? '?'} \u2194 ${c2?.name ?? '?'} (${t.resource1}/${t.resource2}).`,
+      description,
       locationCellIndex: c1?.cellIndex,
       targetCellIndex: c2?.cellIndex,
+      techDiffusion: techDiffusionPayload,
     });
   }
 
@@ -717,6 +742,7 @@ export class HistoryGenerator {
     let totalCataclysmDeaths = 0;
     let totalTechLosses = 0;
     let totalTechLossesAbsorbed = 0;
+    let totalTechDiffusions = 0;
     const peakTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
       exploration: 0, biology: 0, art: 0, government: 0,
@@ -732,6 +758,9 @@ export class HistoryGenerator {
         }
       }
       totalTrades += y.trades.length;
+      for (const t of y.trades) {
+        if (t.techDiffusion) totalTechDiffusions++;
+      }
       totalConquests += y.conquers.length;
       for (const c of y.cataclysms) {
         totalCataclysmDeaths += c.killed;
@@ -795,6 +824,7 @@ export class HistoryGenerator {
       totalCataclysmDeaths,
       totalTechLosses,
       totalTechLossesAbsorbed,
+      totalTechDiffusions,
       techEventsPerCenturyByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,

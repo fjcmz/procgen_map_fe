@@ -22,6 +22,14 @@ const TECH_FIELD_TOTAL = (Object.values(TECH_FIELD_WEIGHTS) as number[]).reduce(
 /** Fields that affect trade capacity: each known tech multiplies capacity by (1 + level/10). */
 export const TRADE_TECHS = new Set<TechField>(['exploration', 'growth', 'industry', 'government']);
 
+/**
+ * Spec stretch §2: sentinel `Tech.discoverer` value for techs acquired via
+ * trade-driven diffusion. Distinct from any real illustrate ID so the
+ * HistoryGenerator and any future serializers can distinguish "discovered
+ * by an illustrate" from "diffused via trade route" without an extra flag.
+ */
+export const TRADE_DIFFUSION_DISCOVERER = 'trade_diffusion';
+
 /** Mapping from illustrate type to eligible tech fields. */
 const ILLUSTRATE_TO_TECH: Record<IllustrateType, TechField[]> = {
   science: ['science', 'biology', 'energy'],
@@ -173,6 +181,39 @@ export function getCityEffectiveTechs(world: World, city: CityEntity): Map<TechF
 
 export function getCityTechLevel(world: World, city: CityEntity, field: TechField): number {
   return getCityEffectiveTechs(world, city)?.get(field)?.level ?? 0;
+}
+
+/**
+ * Spec stretch §2: write a diffused tech into the receiver country's
+ * effective tech map. The caller (`tradeGenerator.generate`) owns
+ * eligibility, gap computation, donor/receiver picking, probability, and
+ * `newLevel` derivation. This helper only mints the `Tech` object and
+ * writes it through `getCountryEffectiveTechs` so empire-member countries
+ * mutate the founder's shared map — same scope ladder the Phase 1 tech
+ * effects and the spec stretch §1 cataclysm tech-loss path use.
+ *
+ * The minted tech uses `TRADE_DIFFUSION_DISCOVERER` instead of an
+ * illustrate ID, and no illustrate is consumed from `mapUsableIllustrates`
+ * — the whole point of the alternative discovery path.
+ */
+export function recordDiffusedTech(
+  rng: () => number,
+  year: Year,
+  world: World,
+  receiver: TechScope,
+  field: TechField,
+  newLevel: number,
+): Tech {
+  const absYear = year.year;
+  const tech: Tech = {
+    id: IdUtil.id('tech', absYear, field, newLevel, rngHex(rng)) ?? 'tech_unknown',
+    field,
+    level: newLevel,
+    discoverer: TRADE_DIFFUSION_DISCOVERER,
+    year,
+  };
+  getCountryEffectiveTechs(world, receiver).set(field, tech);
+  return tech;
 }
 
 export class TechGenerator {
