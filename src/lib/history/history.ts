@@ -791,6 +791,7 @@ export function generateHistory(
     tradeSnapshots: {},
     wonderSnapshots: {},
     religionSnapshots: {},
+    empireSnapshots: {},
   };
 
   return { cities, roads, historyData, regions: regionData, continents: continentData };
