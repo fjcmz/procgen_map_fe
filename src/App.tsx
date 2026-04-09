@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { MapData, MapView, LayerVisibility, WorkerMessage, Season } from './lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { UnifiedOverlay } from './components/UnifiedOverlay';
@@ -35,6 +35,7 @@ export default function App() {
   const [numCells, setNumCells] = useState(DEFAULT_CELLS);
   const [waterRatio, setWaterRatio] = useState(DEFAULT_WATER_RATIO);
   const [mapView, setMapView] = useState<MapView>('terrain');
+  const [politicalMode, setPoliticalMode] = useState<PoliticalMode>('countries');
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -124,6 +125,7 @@ export default function App() {
         seed={seed}
         selectedYear={mapData?.history ? selectedYear : undefined}
         mapView={mapView}
+        politicalMode={politicalMode}
         season={season}
         onTransformChange={setViewTransform}
       />
@@ -141,6 +143,8 @@ export default function App() {
         onWaterRatioChange={setWaterRatio}
         mapView={mapView}
         onMapViewChange={setMapView}
+        politicalMode={politicalMode}
+        onPoliticalModeChange={setPoliticalMode}
         season={season}
         onSeasonChange={setSeason}
         layers={layers}

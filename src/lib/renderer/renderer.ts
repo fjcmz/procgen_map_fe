@@ -1,9 +1,10 @@
-import type { MapData, MapView, LayerVisibility, Cell, RegionData, HistoryEvent, TradeRouteEntry, Season } from '../types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, EmpireSnapshotEntry, Season } from '../types';
 import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
 import type { ResourceType } from '../history/physical/Resource';
+import { PatternCache, strokeColorForIndex } from './patterns';
 
 // Kingdom colors for terrain view (subtle fills)
 const KINGDOM_COLORS_TERRAIN = [
@@ -12,15 +13,6 @@ const KINGDOM_COLORS_TERRAIN = [
   { fill: 'rgba(80,190,80,0.12)',  stroke: '#308030' },
   { fill: 'rgba(220,160,40,0.12)', stroke: '#a07020' },
   { fill: 'rgba(160,80,200,0.12)', stroke: '#804090' },
-];
-
-// Kingdom colors for political view (stronger fills)
-const KINGDOM_COLORS_POLITICAL = [
-  { fill: 'rgba(220,80,80,0.35)',  stroke: '#c04040' },
-  { fill: 'rgba(80,120,220,0.35)', stroke: '#3060b0' },
-  { fill: 'rgba(80,190,80,0.35)',  stroke: '#308030' },
-  { fill: 'rgba(220,160,40,0.35)', stroke: '#a07020' },
-  { fill: 'rgba(160,80,200,0.35)', stroke: '#804090' },
 ];
 
 type KingdomColor = { fill: string; stroke: string };
@@ -270,6 +262,125 @@ function drawKingdomBorders(
         ? colors[cellOwner % colors.length]
         : { stroke: '#888' };
       ctx.strokeStyle = kc.stroke;
+      ctx.beginPath();
+      ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
+      ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+}
+
+// ── Empire snapshot lookup (mirrors HierarchyTab.lookupEmpireSnapshot) ──
+
+function lookupEmpireSnapshot(
+  historyData: HistoryData,
+  selectedYear: number,
+): EmpireSnapshotEntry[] {
+  const finalKey = historyData.numYears;
+  if (selectedYear >= finalKey && historyData.empireSnapshots[finalKey]) {
+    return historyData.empireSnapshots[finalKey];
+  }
+  const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+  for (let y = floored; y >= 0; y -= 20) {
+    const snap = historyData.empireSnapshots[y];
+    if (snap) return snap;
+  }
+  return [];
+}
+
+// ── Patterned borders (countries = stripes, empires = plaid) ────────
+
+function drawPatternedBorders(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  ownershipOverride: Int16Array | undefined,
+  politicalMode: PoliticalMode,
+  historyData: HistoryData | undefined,
+  selectedYear: number | undefined,
+  patternCache: PatternCache,
+): void {
+  const ALPHA = 0.35;
+
+  const getOwner = (cell: Cell): number | null => {
+    if (ownershipOverride) {
+      const o = ownershipOverride[cell.index];
+      return o >= 0 ? o : null;
+    }
+    return cell.kingdom;
+  };
+
+  // Build country→empire map for empire mode
+  let countryToEmpireIdx: Map<number, number> | undefined;
+  if (politicalMode === 'empires' && historyData && selectedYear !== undefined) {
+    const snapshot = lookupEmpireSnapshot(historyData, selectedYear);
+    countryToEmpireIdx = new Map();
+    // Sort by empireId for deterministic index assignment
+    const sorted = [...snapshot].sort((a, b) => a.empireId.localeCompare(b.empireId));
+    sorted.forEach((emp, empIdx) => {
+      for (const memberIdx of emp.memberCountryIndices) {
+        countryToEmpireIdx!.set(memberIdx, empIdx);
+      }
+    });
+  }
+
+  // Fill cells with patterns
+  for (const cell of cells) {
+    if (cell.isWater || cell.vertices.length < 2) continue;
+    const owner = getOwner(cell);
+    if (owner === null) continue;
+
+    let pattern: CanvasPattern;
+    if (politicalMode === 'empires' && countryToEmpireIdx) {
+      const empIdx = countryToEmpireIdx.get(owner);
+      if (empIdx !== undefined) {
+        // Empire member → plaid
+        pattern = patternCache.getPlaid(ctx, empIdx, ALPHA);
+      } else {
+        // Independent country → diagonal stripes
+        pattern = patternCache.getStripe(ctx, owner, ALPHA);
+      }
+    } else {
+      // Country mode → diagonal stripes
+      pattern = patternCache.getStripe(ctx, owner, ALPHA);
+    }
+
+    ctx.fillStyle = pattern;
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+
+  // Draw border edges (same logic as drawKingdomBorders but with pattern-derived strokes)
+  const drawnPairs = new Set<string>();
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 1.5;
+
+  for (const cell of cells) {
+    if (cell.isWater) continue;
+    const cellOwner = getOwner(cell);
+    for (const ni of cell.neighbors) {
+      const neighbor = cells[ni];
+      if (neighbor.isWater) continue;
+      const neighborOwner = getOwner(neighbor);
+      if (cellOwner === neighborOwner) continue;
+      const key = [cell.index, ni].sort().join('-');
+      if (drawnPairs.has(key)) continue;
+      drawnPairs.add(key);
+
+      const sharedVerts = cell.vertices.filter(v =>
+        neighbor.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
+      );
+      if (sharedVerts.length < 2) continue;
+
+      // Determine stroke color from the entity index
+      let strokeIdx: number;
+      if (cellOwner !== null && politicalMode === 'empires' && countryToEmpireIdx) {
+        const empIdx = countryToEmpireIdx.get(cellOwner);
+        strokeIdx = empIdx !== undefined ? empIdx : cellOwner;
+      } else {
+        strokeIdx = cellOwner ?? 0;
+      }
+      ctx.strokeStyle = strokeColorForIndex(strokeIdx);
       ctx.beginPath();
       ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
       ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
@@ -932,7 +1043,8 @@ export function render(
   seed: string,
   selectedYear?: number,
   mapView: MapView = 'terrain',
-  season: Season = 0
+  season: Season = 0,
+  politicalMode: PoliticalMode = 'countries',
 ): void {
   initNoisyEdges(seed);
 
@@ -955,6 +1067,9 @@ export function render(
     layers.religionMarkers && data.history && selectedYear !== undefined
       ? getReligionsAtYear(data.history, selectedYear)
       : undefined;
+
+  // Pattern cache for patterned political fills (shared across all offset copies)
+  const patternCache = mapView === 'political' ? new PatternCache() : undefined;
 
   // Draw the map at three horizontal offsets for seamless east-west wrapping.
   // The canvas clip region (set by the caller's transform) hides invisible copies.
@@ -1006,10 +1121,14 @@ export function render(
 
     // Layer 5: Kingdom borders
     if (layers.borders) {
-      const kingdomColors = mapView === 'political'
-        ? KINGDOM_COLORS_POLITICAL
-        : KINGDOM_COLORS_TERRAIN;
-      drawKingdomBorders(ctx, data.cells, ownershipAtYear, kingdomColors);
+      if (mapView === 'political' && patternCache) {
+        drawPatternedBorders(
+          ctx, data.cells, ownershipAtYear,
+          politicalMode, data.history, selectedYear, patternCache,
+        );
+      } else {
+        drawKingdomBorders(ctx, data.cells, ownershipAtYear, KINGDOM_COLORS_TERRAIN);
+      }
     }
 
     // Layer 5b: Trade routes
