@@ -32,7 +32,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Draggable UI panels** — the biome legend, minimap, timeline playback controls, and the unified overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, resource icons, and relief shading
-- **Unified tabbed overlay** — generation parameters, the cumulative event log, a collapsible Empire → Country → City tree at the selected year, and the per-field tech chart live in the Generation, Events, Hierarchy (Realm), and Tech tabs of a single draggable, collapsible panel. The overlay collapses to a minimal title bar to free up screen space
+- **Unified tabbed overlay** — generation parameters, the cumulative event log, a collapsible Empire → Country → City tree at the selected year, and the per-field tech chart live in the Generation, Events, Hierarchy (Realm), and Tech tabs of a single draggable, collapsible panel. The overlay collapses to a minimal title bar to free up screen space. Active tab and drag position persist across sessions via `localStorage`. Switch tabs with `Alt+1..4`. On viewports narrower than 600 px, the overlay docks full-width at the top and dragging is suppressed. Tab buttons carry proper ARIA `role="tab"` / `aria-selected` attributes with a visible keyboard focus ring. Per-tab width differences (280 px default, 360 px for Tech) animate with a 180 ms CSS transition
 
 ## Tech Stack
 

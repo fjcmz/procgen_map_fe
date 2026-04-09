@@ -8,6 +8,27 @@ interface DraggableProps {
   style?: CSSProperties;
   /** Extra CSS transform to apply before the drag offset (e.g. 'translateX(-50%)') */
   baseTransform?: string;
+  /** localStorage key for persisting the drag offset across sessions */
+  storageKey?: string;
+  /** When the viewport is narrower than `breakpoint` px, dock the panel and suppress dragging */
+  responsiveDock?: { breakpoint: number; dockStyle?: CSSProperties };
+}
+
+/** Read a persisted {x,y} offset from localStorage, or return {x:0,y:0}. */
+function readStoredOffset(key: string | undefined): { x: number; y: number } {
+  if (!key) return { x: 0, y: 0 };
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return { x: 0, y: 0 };
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' && parsed !== null &&
+      Number.isFinite(parsed.x) && Number.isFinite(parsed.y)
+    ) {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch { /* private-browsing or corrupt data — fall through */ }
+  return { x: 0, y: 0 };
 }
 
 /**
@@ -18,10 +39,33 @@ interface DraggableProps {
  * Set `touch-action: none` on handle elements to prevent browser gestures
  * from interfering on mobile.
  */
-export function Draggable({ children, defaultPosition, style, baseTransform }: DraggableProps) {
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+export function Draggable({ children, defaultPosition, style, baseTransform, storageKey, responsiveDock }: DraggableProps) {
+  const [offset, setOffset] = useState(() => readStoredOffset(storageKey));
   const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Responsive dock state
+  const [isDocked, setIsDocked] = useState(() => {
+    if (!responsiveDock) return false;
+    if (typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia(`(max-width: ${responsiveDock.breakpoint - 1}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (!responsiveDock) return;
+    if (typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(`(max-width: ${responsiveDock.breakpoint - 1}px)`);
+    const handler = (e: MediaQueryListEvent) => setIsDocked(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [responsiveDock]);
+
+  // Persist offset to localStorage on change (debounced to pointer-up via the
+  // write in onPointerUp, but also catch programmatic resets from clamp).
+  const persistOffset = useCallback((o: { x: number; y: number }) => {
+    if (!storageKey) return;
+    try { localStorage.setItem(storageKey, JSON.stringify(o)); } catch { /* ignore */ }
+  }, [storageKey]);
 
   // Clamp offset so the panel stays at least partially visible
   const clampOffset = useCallback((x: number, y: number): { x: number; y: number } => {
@@ -43,6 +87,7 @@ export function Draggable({ children, defaultPosition, style, baseTransform }: D
   }, [offset]);
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
+    if (isDocked) return;
     const target = e.target as HTMLElement;
     if (!target.closest('[data-drag-handle]')) return;
     if (target.tagName === 'INPUT' || target.tagName === 'BUTTON') return;
@@ -50,7 +95,7 @@ export function Draggable({ children, defaultPosition, style, baseTransform }: D
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     dragState.current = { startX: e.clientX, startY: e.clientY, origX: offset.x, origY: offset.y };
-  }, [offset]);
+  }, [offset, isDocked]);
 
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     if (!dragState.current) return;
@@ -61,15 +106,42 @@ export function Draggable({ children, defaultPosition, style, baseTransform }: D
   }, [clampOffset]);
 
   const onPointerUp = useCallback(() => {
+    if (dragState.current) {
+      persistOffset(offset);
+    }
     dragState.current = null;
-  }, []);
+  }, [offset, persistOffset]);
 
   // Re-clamp when window resizes (e.g. orientation change on mobile)
   useEffect(() => {
-    const onResize = () => setOffset(prev => clampOffset(prev.x, prev.y));
+    if (isDocked) return;
+    const onResize = () => setOffset(prev => {
+      const clamped = clampOffset(prev.x, prev.y);
+      return clamped;
+    });
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
-  }, [clampOffset]);
+  }, [clampOffset, isDocked]);
+
+  // Docked mode: override styles, suppress transform
+  if (isDocked && responsiveDock) {
+    const dockStyle: CSSProperties = {
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      borderRadius: 0,
+      ...style,
+      width: '100%',
+      transform: 'none',
+      ...responsiveDock.dockStyle,
+    };
+    return (
+      <div ref={containerRef} style={dockStyle}>
+        {children}
+      </div>
+    );
+  }
 
   const transform = baseTransform
     ? `${baseTransform} translate(${offset.x}px, ${offset.y}px)`

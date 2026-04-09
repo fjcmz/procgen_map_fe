@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
@@ -7,6 +7,8 @@ import { HierarchyTab } from './overlay/HierarchyTab';
 import { TechTab } from './overlay/TechTab';
 
 export type OverlayTab = 'generation' | 'events' | 'hierarchy' | 'tech';
+
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'hierarchy', 'tech'];
 
 interface UnifiedOverlayProps {
   // Generation tab — same shape as the old ControlsProps
@@ -37,16 +39,11 @@ interface UnifiedOverlayProps {
 }
 
 /**
- * Per-tab width constants. All four tabs currently render at the same width,
- * but the constant is centralized here so Phase 5 can introduce per-tab widths
- * without churning every consumer.
+ * Per-tab width constants. The Tech tab gets wider to give the polyline chart
+ * more horizontal room; the other tabs share a narrower default.
  */
 const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   generation: 280,
-  // Phase 3: the tech chart moved out of EventsTab into its own tab, so
-  // events can shrink back to the default. The Tech tab gets the wider
-  // real estate the chart was cramped for under the parked layout —
-  // `TechTab.tsx` uses a ResizeObserver to fill whatever width is given.
   events: 280,
   hierarchy: 280,
   tech: 360,
@@ -59,9 +56,38 @@ const TAB_LABELS: Record<OverlayTab, string> = {
   tech: 'Tech',
 };
 
+// ── Focus-ring injection ──────────────────────────────────────────────
+// Inline styles can't express :focus-visible, so inject a one-shot <style>
+// block scoped to our tab buttons.
+let focusStyleInjected = false;
+function ensureFocusStyle() {
+  if (focusStyleInjected) return;
+  focusStyleInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `button[role="tab"]:focus-visible { outline: 2px solid #8b6040; outline-offset: 2px; }`;
+  document.head.appendChild(style);
+}
+
+/** Read a persisted tab key from localStorage, validated against the union. */
+function readStoredTab(): OverlayTab {
+  try {
+    const raw = localStorage.getItem('overlay.activeTab');
+    if (raw && (VALID_TABS as readonly string[]).includes(raw)) return raw as OverlayTab;
+  } catch { /* private-browsing or corrupt — fall through */ }
+  return 'generation';
+}
+
 export function UnifiedOverlay(props: UnifiedOverlayProps) {
-  const [activeTab, setActiveTab] = useState<OverlayTab>('generation');
+  const [activeTab, setActiveTab] = useState<OverlayTab>(readStoredTab);
   const [collapsed, setCollapsed] = useState(false);
+
+  // Inject the focus-visible style on first render
+  useEffect(ensureFocusStyle, []);
+
+  // Persist active tab to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('overlay.activeTab', activeTab); } catch { /* ignore */ }
+  }, [activeTab]);
 
   const hasHistory = props.mapData?.history != null;
   const hasTechTimeline = props.mapData?.history?.techTimeline != null;
@@ -69,11 +95,29 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
     generation: true,
     events: hasHistory,
     hierarchy: hasHistory,
-    // Gate specifically on techTimeline presence — a truncated or
-    // country-less history can have `history` set without the per-field
-    // timeline, and Phase 3 acceptance requires the tab to be inert then.
     tech: hasTechTimeline,
   };
+
+  // Keyboard nav: Alt+1..4 to switch tabs
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const idx = ['1', '2', '3', '4'].indexOf(e.key);
+      if (idx === -1) return;
+      const target = VALID_TABS[idx];
+      if (!tabEnabled[target]) return;
+      e.preventDefault();
+      setActiveTab(target);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  // tabEnabled is derived from props and rebuilds every render, so we
+  // intentionally omit it from deps to avoid re-subscribing every render.
+  // The handler closure always sees the latest tabEnabled because the
+  // effect re-runs when hasHistory/hasTechTimeline change (which is when
+  // tabEnabled actually changes).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasHistory, hasTechTimeline]);
 
   const width = OVERLAY_WIDTHS[activeTab];
 
@@ -81,6 +125,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
     <Draggable
       defaultPosition={{ top: 16, right: 16 }}
       style={{ ...styles.panel, width }}
+      storageKey="overlay.position"
+      responsiveDock={{ breakpoint: 600 }}
     >
       <div style={styles.titleRow} data-drag-handle>
         <h2 style={styles.title}>Fantasy Map Generator</h2>
@@ -95,13 +141,18 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
 
       {!collapsed && (
         <>
-          <div style={styles.tabBar} data-drag-handle>
+          <div style={styles.tabBar} data-drag-handle role="tablist" aria-label="Overlay sections">
             {(Object.keys(TAB_LABELS) as OverlayTab[]).map(tab => {
               const isActive = activeTab === tab;
               const isEnabled = tabEnabled[tab];
               return (
                 <button
                   key={tab}
+                  role="tab"
+                  id={`overlay-tab-${tab}`}
+                  aria-selected={isActive}
+                  aria-controls={`overlay-panel-${tab}`}
+                  tabIndex={isActive ? 0 : -1}
                   style={{
                     ...styles.tabBtn,
                     ...(isActive ? styles.tabBtnActive : {}),
@@ -109,7 +160,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                   }}
                   onClick={() => isEnabled && setActiveTab(tab)}
                   disabled={!isEnabled}
-                  title={!isEnabled ? 'Generate history to enable' : TAB_LABELS[tab]}
+                  title={!isEnabled ? 'Generate history to enable' : `${TAB_LABELS[tab]} (Alt+${VALID_TABS.indexOf(tab) + 1})`}
                 >
                   {TAB_LABELS[tab]}
                 </button>
@@ -117,7 +168,12 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
             })}
           </div>
 
-          <div style={styles.tabContent}>
+          <div
+            style={styles.tabContent}
+            role="tabpanel"
+            id={`overlay-panel-${activeTab}`}
+            aria-labelledby={`overlay-tab-${activeTab}`}
+          >
             {activeTab === 'generation' && (
               <GenerationTab
                 seed={props.seed}
@@ -182,6 +238,7 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 10,
     userSelect: 'none',
+    transition: 'width 180ms ease-out',
   },
   titleRow: {
     display: 'flex',
