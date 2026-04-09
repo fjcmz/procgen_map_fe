@@ -1036,6 +1036,28 @@ function drawCurrentYearEvents(
   ctx.restore();
 }
 
+function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCells: number[]): void {
+  ctx.save();
+  // Fill pass
+  ctx.fillStyle = 'rgba(255, 220, 60, 0.35)';
+  for (const ci of highlightCells) {
+    const cell = cells[ci];
+    if (!cell || cell.vertices.length < 2) continue;
+    cellPath(ctx, cell);
+    ctx.fill();
+  }
+  // Stroke pass — thicker gold border on top
+  ctx.strokeStyle = '#ffd700';
+  ctx.lineWidth = 2;
+  for (const ci of highlightCells) {
+    const cell = cells[ci];
+    if (!cell || cell.vertices.length < 2) continue;
+    cellPath(ctx, cell);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 export function render(
   ctx: CanvasRenderingContext2D,
   data: MapData,
@@ -1045,6 +1067,7 @@ export function render(
   mapView: MapView = 'terrain',
   season: Season = 0,
   politicalMode: PoliticalMode = 'countries',
+  highlightCells?: number[],
 ): void {
   initNoisyEdges(seed);
 
@@ -1160,6 +1183,11 @@ export function render(
 
     // Layer 8: City labels
     if (layers.labels) drawLabels(ctx, data, selectedYear);
+
+    // Layer 9: Entity highlight (click-to-navigate)
+    if (highlightCells && highlightCells.length > 0) {
+      drawHighlight(ctx, data.cells, highlightCells);
+    }
 
     ctx.restore();
   }

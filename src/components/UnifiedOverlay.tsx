@@ -38,6 +38,8 @@ interface UnifiedOverlayProps {
   // and will feed data into EventsTab / HierarchyTab / TechTab in later phases.
   mapData: MapData | null;
   selectedYear: number;
+  ownershipAtYear?: Int16Array;
+  onEntityNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 /**
@@ -205,6 +207,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               <EventsTab
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
+                onNavigate={props.onEntityNavigate}
               />
             )}
             {activeTab === 'hierarchy' && props.mapData?.history && (
@@ -212,6 +215,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 historyData={props.mapData.history}
                 cities={props.mapData.cities}
                 selectedYear={props.selectedYear}
+                ownershipAtYear={props.ownershipAtYear}
+                onNavigate={props.onEntityNavigate}
               />
             )}
             {activeTab === 'tech' && props.mapData?.history?.techTimeline && (

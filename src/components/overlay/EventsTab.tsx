@@ -6,9 +6,10 @@ import { EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 interface EventsTabProps {
   historyData: HistoryData;
   selectedYear: number;
+  onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
-export function EventsTab({ historyData, selectedYear }: EventsTabProps) {
+export function EventsTab({ historyData, selectedYear, onNavigate }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Collect all events up to selectedYear, with a population summary at the end of each year
@@ -54,6 +55,7 @@ export function EventsTab({ historyData, selectedYear }: EventsTabProps) {
         ) : (
           cumulativeEvents.map((item, i) => {
             const color = EVENT_COLORS[item.event.type] ?? '#888888';
+            const locatable = onNavigate && item.event.locationCellIndex != null;
             return (
               <div
                 key={i}
@@ -63,7 +65,9 @@ export function EventsTab({ historyData, selectedYear }: EventsTabProps) {
                   background: item.year === selectedYear
                     ? `${color}22`
                     : `${color}0d`,
+                  ...(locatable ? styles.logEventClickable : {}),
                 }}
+                onClick={locatable ? () => onNavigate([item.event.locationCellIndex!], item.event.locationCellIndex!) : undefined}
               >
                 <span style={styles.logYear}>Y{item.year}</span>
                 <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
@@ -133,6 +137,9 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.4,
     padding: '2px 4px 2px 6px',
     borderRadius: 3,
+  },
+  logEventClickable: {
+    cursor: 'pointer',
   },
   logYear: {
     flexShrink: 0,

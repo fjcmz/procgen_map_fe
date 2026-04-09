@@ -10,7 +10,9 @@ interface MapCanvasProps {
   mapView?: MapView;
   politicalMode?: PoliticalMode;
   season?: Season;
+  highlightCells?: number[] | null;
   onTransformChange?: (transform: Transform) => void;
+  onInteraction?: () => void;
 }
 
 export interface Transform {
@@ -63,7 +65,7 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, onTransformChange }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, onTransformChange, onInteraction }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -141,9 +143,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode);
+    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined);
     ctx.resetTransform();
-  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season]);
+  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells]);
 
   // Wheel zoom centered on cursor
   useEffect(() => {
@@ -221,6 +223,8 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     if (!canvas) return;
 
     const handleMouseDown = (e: MouseEvent) => {
+      // Clear entity highlight on any canvas click
+      if (e.button === 0) onInteraction?.();
       if (e.button !== 1) return;
       e.preventDefault();
       isPanning.current = true;
@@ -251,7 +255,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [constrain]);
+  }, [constrain, onInteraction]);
 
   return (
     <canvas

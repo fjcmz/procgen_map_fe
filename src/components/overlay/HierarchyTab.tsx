@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { City, Country, EmpireSnapshotEntry, HistoryData } from '../../lib/types';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
   cities: City[];
   selectedYear: number;
+  ownershipAtYear?: Int16Array;
+  onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 /** Short label rendered after each city name. */
@@ -55,7 +57,7 @@ function lookupEmpireSnapshot(
   return [];
 }
 
-export function HierarchyTab({ historyData, cities, selectedYear }: HierarchyTabProps) {
+export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, onNavigate }: HierarchyTabProps) {
   // Empires default to expanded, countries and the stateless bucket to collapsed.
   // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless'.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -72,6 +74,46 @@ export function HierarchyTab({ historyData, cities, selectedYear }: HierarchyTab
       return next;
     });
   };
+
+  /** Collect all cell indices owned by a given country id. */
+  const getCellsForCountry = useCallback((countryId: number): number[] => {
+    if (!ownershipAtYear) return [];
+    const result: number[] = [];
+    for (let i = 0; i < ownershipAtYear.length; i++) {
+      if (ownershipAtYear[i] === countryId) result.push(i);
+    }
+    return result;
+  }, [ownershipAtYear]);
+
+  /** Collect all cell indices owned by any country in the given set. */
+  const getCellsForCountries = useCallback((countryIds: number[]): number[] => {
+    if (!ownershipAtYear) return [];
+    const idSet = new Set(countryIds);
+    const result: number[] = [];
+    for (let i = 0; i < ownershipAtYear.length; i++) {
+      if (idSet.has(ownershipAtYear[i])) result.push(i);
+    }
+    return result;
+  }, [ownershipAtYear]);
+
+  const handleLocateCity = useCallback((city: City) => {
+    onNavigate?.([city.cellIndex], city.cellIndex);
+  }, [onNavigate]);
+
+  const handleLocateCountry = useCallback((country: Country) => {
+    const cells = getCellsForCountry(country.id);
+    if (cells.length === 0) cells.push(country.capitalCellIndex);
+    onNavigate?.(cells, country.capitalCellIndex);
+  }, [onNavigate, getCellsForCountry]);
+
+  const handleLocateEmpire = useCallback((emp: EmpireNode) => {
+    const memberIds = emp.countries.map(c => c.country.id);
+    const cells = getCellsForCountries(memberIds);
+    const founderCountry = historyData.countries[emp.entry.founderCountryIndex];
+    const centerCell = founderCountry?.capitalCellIndex ?? emp.countries[0]?.country.capitalCellIndex ?? 0;
+    if (cells.length === 0) cells.push(centerCell);
+    onNavigate?.(cells, centerCell);
+  }, [onNavigate, getCellsForCountries, historyData.countries]);
 
   // Keep the empire tree defaulted-expanded even when the snapshot changes
   // as the user scrubs: seed any newly-seen empire ids into the expanded set.
@@ -172,6 +214,13 @@ export function HierarchyTab({ historyData, cities, selectedYear }: HierarchyTab
         <span style={styles.citySize}>
           {city.isCapital ? 'capital, ' : ''}{sizeLabel}
         </span>
+        {onNavigate && (
+          <button
+            style={styles.locateBtn}
+            onClick={(e) => { e.stopPropagation(); handleLocateCity(city); }}
+            title={`Locate ${city.name}`}
+          >{'\u25CE'}</button>
+        )}
       </div>
     );
   };
@@ -195,6 +244,13 @@ export function HierarchyTab({ historyData, cities, selectedYear }: HierarchyTab
           <span style={styles.countryMeta}>
             {node.cities.length} {node.cities.length === 1 ? 'city' : 'cities'}
           </span>
+          {onNavigate && (
+            <button
+              style={styles.locateBtn}
+              onClick={(e) => { e.stopPropagation(); handleLocateCountry(node.country); }}
+              title={`Locate ${node.country.name}`}
+            >{'\u25CE'}</button>
+          )}
         </button>
         {isOpen && (
           <div style={styles.cityList}>
@@ -224,6 +280,13 @@ export function HierarchyTab({ historyData, cities, selectedYear }: HierarchyTab
             {', '}
             {emp.totalCities} {emp.totalCities === 1 ? 'city' : 'cities'}
           </span>
+          {onNavigate && (
+            <button
+              style={styles.locateBtn}
+              onClick={(e) => { e.stopPropagation(); handleLocateEmpire(emp); }}
+              title={`Locate ${emp.entry.name}`}
+            >{'\u25CE'}</button>
+          )}
         </button>
         {isOpen && (
           <div style={styles.countryList}>
@@ -430,6 +493,17 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     color: '#8a6a30',
     fontStyle: 'italic',
+  },
+  locateBtn: {
+    flexShrink: 0,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 11,
+    color: '#7a5a30',
+    padding: '0 2px',
+    lineHeight: 1,
+    opacity: 0.7,
   },
   deadText: {
     textDecoration: 'line-through',
