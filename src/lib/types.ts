@@ -222,6 +222,8 @@ export type WorkerMessage =
 
 export type MapView = 'terrain' | 'political';
 
+export type PoliticalMode = 'countries' | 'empires';
+
 /** 0 = Spring (baseline), 1 = Summer, 2 = Autumn, 3 = Winter */
 export type Season = 0 | 1 | 2 | 3;
 

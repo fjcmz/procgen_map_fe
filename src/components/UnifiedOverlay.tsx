@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
@@ -20,6 +20,8 @@ interface UnifiedOverlayProps {
   onWaterRatioChange: (r: number) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
+  politicalMode: PoliticalMode;
+  onPoliticalModeChange: (mode: PoliticalMode) => void;
   season: Season;
   onSeasonChange: (s: Season) => void;
   layers: LayerVisibility;
@@ -184,6 +186,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onWaterRatioChange={props.onWaterRatioChange}
                 mapView={props.mapView}
                 onMapViewChange={props.onMapViewChange}
+                politicalMode={props.politicalMode}
+                onPoliticalModeChange={props.onPoliticalModeChange}
                 season={props.season}
                 onSeasonChange={props.onSeasonChange}
                 layers={props.layers}

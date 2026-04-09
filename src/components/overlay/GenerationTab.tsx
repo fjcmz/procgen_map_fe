@@ -1,5 +1,5 @@
 import type { ChangeEvent } from 'react';
-import type { MapView, LayerVisibility, Season } from '../../lib/types';
+import type { MapView, PoliticalMode, LayerVisibility, Season } from '../../lib/types';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
 
 export interface GenerationTabProps {
@@ -11,6 +11,8 @@ export interface GenerationTabProps {
   onWaterRatioChange: (r: number) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
+  politicalMode: PoliticalMode;
+  onPoliticalModeChange: (mode: PoliticalMode) => void;
   season: Season;
   onSeasonChange: (s: Season) => void;
   layers: LayerVisibility;
@@ -53,6 +55,8 @@ export function GenerationTab({
   onWaterRatioChange,
   mapView,
   onMapViewChange,
+  politicalMode,
+  onPoliticalModeChange,
   season,
   onSeasonChange,
   layers,
@@ -163,6 +167,28 @@ export function GenerationTab({
             Political
           </button>
         </div>
+        {mapView === 'political' && (
+          <div style={{ ...styles.viewToggleRow, marginTop: 4 }}>
+            <button
+              style={{
+                ...styles.viewBtn,
+                ...(politicalMode === 'countries' ? styles.viewBtnActive : {}),
+              }}
+              onClick={() => onPoliticalModeChange('countries')}
+            >
+              Countries
+            </button>
+            <button
+              style={{
+                ...styles.viewBtn,
+                ...(politicalMode === 'empires' ? styles.viewBtnActive : {}),
+              }}
+              onClick={() => onPoliticalModeChange('empires')}
+            >
+              Empires
+            </button>
+          </div>
+        )}
       </div>
 
       <div style={styles.label}>

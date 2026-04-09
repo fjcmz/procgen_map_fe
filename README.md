@@ -28,7 +28,7 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider; header shows year, world population, living/total nations, and event count
 - **Event log** — cumulative log of historical events lives in the **Events tab** of the unified overlay, with year labels, event-type icons, yearly population entries, and current-year highlighting; auto-scrolls to the latest events as the year advances
 - **Per-field tech chart** — a dedicated **Tech tab** in the unified overlay hosts a chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; the chart resizes responsively to the overlay width via a `ResizeObserver` and includes Y-axis peak-level labels and X-axis year labels, letting players see civilizational rise at a glance instead of scrolling through thousands of TECH events.
-- **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
+- **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with patterned country/empire fills). In political view a sub-toggle selects **Countries** (diagonal stripe patterns, two unique colors per country) or **Empires** (plaid/tartan patterns, two unique colors per empire; independent countries keep their diagonal stripes). Colors are deterministically generated from entity indices via golden-ratio hue spacing so every country and empire gets a visually distinct pair
 - **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
 - **Draggable UI panels** — the biome legend, minimap, timeline playback controls, and the unified overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
@@ -156,6 +156,7 @@ src/
 │   │   └── index.ts
 │   └── renderer/         # Canvas drawing logic
 │       ├── renderer.ts   # All rendering layers: biomes, borders, icons
+│       ├── patterns.ts   # Deterministic color pairs + diagonal stripe / plaid pattern generation + PatternCache
 │       ├── noisyEdges.ts # Recursive midpoint displacement for organic coastlines
 │       └── index.ts
 └── workers/
