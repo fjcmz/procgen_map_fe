@@ -103,8 +103,9 @@ export function TechTab({ historyData, selectedYear }: TechTabProps) {
       if (!arr || arr.length === 0) continue;
       ctx.strokeStyle = TECH_FIELD_COLORS[field];
       ctx.beginPath();
+      const end = Math.min(arr.length, selectedYear + 1);
       ctx.moveTo(xForYear(0), yForLevel(arr[0]));
-      for (let i = 1; i < arr.length; i++) {
+      for (let i = 1; i < end; i++) {
         ctx.lineTo(xForYear(i), yForLevel(arr[i]));
       }
       ctx.stroke();
@@ -145,10 +146,11 @@ export function TechTab({ historyData, selectedYear }: TechTabProps) {
     const timeline = historyData.techTimeline;
     if (!timeline) return 0;
     let peak = 0;
+    const idx = Math.min(selectedYear, historyData.numYears - 1);
     for (const field of Object.keys(timeline.byField) as TechField[]) {
       const arr = timeline.byField[field];
-      const last = arr.length > 0 ? arr[arr.length - 1] : 0;
-      if (last > peak) peak = last;
+      const val = idx >= 0 && idx < arr.length ? arr[idx] : 0;
+      if (val > peak) peak = val;
     }
     return peak;
   })();
