@@ -8,15 +8,17 @@ const GOLDEN_ANGLE = 137.508;
 
 /**
  * Generate a two-color pair for a given entity index.
- * Uses golden-ratio hue spacing so adjacent indices are visually distinct.
+ * Uses golden-ratio hue spacing; the two colors sit 40° apart in hue
+ * and differ in lightness so they're easy to tell apart within one stripe.
  */
 export function generateColorPair(
   index: number,
   alpha: number,
 ): [string, string] {
-  const hue = (index * GOLDEN_ANGLE) % 360;
-  const c1 = `hsla(${hue}, 55%, 45%, ${alpha})`;
-  const c2 = `hsla(${hue}, 55%, 72%, ${alpha})`;
+  const hue1 = (index * GOLDEN_ANGLE) % 360;
+  const hue2 = (hue1 + 40) % 360;
+  const c1 = `hsla(${hue1}, 65%, 42%, ${alpha})`;
+  const c2 = `hsla(${hue2}, 50%, 70%, ${alpha})`;
   return [c1, c2];
 }
 
@@ -25,13 +27,13 @@ export function generateColorPair(
  */
 export function strokeColorForIndex(index: number): string {
   const hue = (index * GOLDEN_ANGLE) % 360;
-  return `hsl(${hue}, 50%, 35%)`;
+  return `hsl(${hue}, 60%, 30%)`;
 }
 
 // ── Stripe pattern (diagonal, for countries) ────────────────────────
 
-const DEFAULT_TILE = 16;
-const STRIPE_WIDTH = 4;
+const STRIPE_TILE = 24;
+const STRIPE_WIDTH = 7;
 
 /**
  * Create a repeating diagonal-stripe CanvasPattern.
@@ -41,7 +43,7 @@ export function createStripePattern(
   ctx: CanvasRenderingContext2D,
   index: number,
   alpha: number,
-  tileSize: number = DEFAULT_TILE,
+  tileSize: number = STRIPE_TILE,
 ): CanvasPattern {
   const [c1, c2] = generateColorPair(index, alpha);
   const off = new OffscreenCanvas(tileSize, tileSize);
@@ -68,34 +70,38 @@ export function createStripePattern(
 
 // ── Plaid pattern (for empires) ─────────────────────────────────────
 
-const PLAID_BAND = 4;
+const PLAID_TILE = 24;
+const PLAID_BAND = 6;
 
 /**
  * Create a repeating plaid (tartan-like) CanvasPattern.
- * Horizontal and vertical bands overlap to form a cross-hatch grid.
+ * Color 1 runs as horizontal bands, color 2 as vertical bands,
+ * producing a distinctive cross-hatch grid.
  */
 export function createPlaidPattern(
   ctx: CanvasRenderingContext2D,
   index: number,
   alpha: number,
-  tileSize: number = DEFAULT_TILE,
+  tileSize: number = PLAID_TILE,
 ): CanvasPattern {
   const [c1, c2] = generateColorPair(index, alpha);
   const off = new OffscreenCanvas(tileSize, tileSize);
   const octx = off.getContext('2d')!;
 
-  // Fill background with color 1
-  octx.fillStyle = c1;
+  // Light neutral background so the two band colors pop
+  const bgHue = (index * GOLDEN_ANGLE) % 360;
+  octx.fillStyle = `hsla(${bgHue}, 20%, 85%, ${alpha})`;
   octx.fillRect(0, 0, tileSize, tileSize);
 
-  // Horizontal bands in color 2
-  octx.fillStyle = c2;
+  // Horizontal bands in color 1
+  octx.fillStyle = c1;
   for (let y = 0; y < tileSize; y += PLAID_BAND * 2) {
     octx.fillRect(0, y, tileSize, PLAID_BAND);
   }
 
-  // Vertical bands in color 2 with lighter blend (use globalAlpha for overlap)
-  octx.globalAlpha = 0.6;
+  // Vertical bands in color 2 (semi-transparent so overlaps create a third tone)
+  octx.globalAlpha = 0.7;
+  octx.fillStyle = c2;
   for (let x = 0; x < tileSize; x += PLAID_BAND * 2) {
     octx.fillRect(x, 0, PLAID_BAND, tileSize);
   }

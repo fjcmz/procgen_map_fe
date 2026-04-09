@@ -300,7 +300,7 @@ function drawPatternedBorders(
   selectedYear: number | undefined,
   patternCache: PatternCache,
 ): void {
-  const ALPHA = 0.35;
+  const ALPHA = 0.55;
 
   const getOwner = (cell: Cell): number | null => {
     if (ownershipOverride) {
