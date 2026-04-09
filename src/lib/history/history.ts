@@ -754,6 +754,7 @@ export function generateHistory(
     wonderSnapshots: {},
     religionSnapshots: {},
     empireSnapshots: {},
+    populationSnapshots: {},
   };
 
   return { cities, roads, historyData, regions: regionData, continents: continentData };
