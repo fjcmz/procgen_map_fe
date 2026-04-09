@@ -18,6 +18,7 @@ import type { TechField } from './timeline/Tech';
 import { getCountryTechLevel } from './timeline/Tech';
 import { nameForLevel } from './timeline/techNames';
 import type { IllustrateType } from './timeline/Illustrate';
+import { generateCountryName, generateEmpireName } from './nameGenerator';
 
 /** Statistics about the generated history, for optional introspection. */
 export interface HistoryStats {
@@ -139,16 +140,14 @@ interface CountryIndexMap {
  * Build a stable numeric index for all countries that formed during the timeline.
  * The old HistoryData format uses numeric country IDs for ownership arrays.
  */
-function buildCountryIndexMap(world: World): CountryIndexMap {
+function buildCountryIndexMap(world: World, rng: () => number): CountryIndexMap {
   const idToIndex = new Map<string, number>();
   const indexToCountry: { id: string; name: string; regionId: string }[] = [];
+  const usedCountryNames = new Set<string>();
   let idx = 0;
   for (const [countryId, country] of world.mapCountries) {
     idToIndex.set(countryId, idx);
-    const region = world.mapRegions.get(country.governingRegion);
-    // Use the first city's name as the country name, or the region ID
-    const firstCity = region?.cities[0];
-    const name = firstCity?.name ?? countryId;
+    const name = generateCountryName(rng, usedCountryNames);
     indexToCountry.push({ id: countryId, name, regionId: country.governingRegion });
     idx++;
   }
@@ -616,7 +615,7 @@ export class HistoryGenerator {
     const timeline = timelineGenerator.generate(rng, historyRoot, world);
 
     // Phase 2: Build country index map for ownership arrays
-    const countryMap = buildCountryIndexMap(world);
+    const countryMap = buildCountryIndexMap(world, rng);
 
     // Phase 3: Determine which years to serialize (sample up to numSimYears)
     // The timeline has 5000 years; we only expose numSimYears to the UI
@@ -663,6 +662,8 @@ export class HistoryGenerator {
     // Build an empire snapshot entry list from the current `liveEmpires` map.
     // Read-only iteration over world.mapCountries / world.mapRegions to resolve
     // a display name — no mutation of any World field.
+    // Empire names are cached so the same empire keeps its name across snapshot years.
+    const empireNameCache = new Map<string, string>();
     const buildEmpireSnapshot = (): EmpireSnapshotEntry[] => {
       const entries: EmpireSnapshotEntry[] = [];
       for (const [empireId, run] of liveEmpires) {
@@ -673,12 +674,16 @@ export class HistoryGenerator {
         }
         members.sort((a, b) => a - b);
         const founderIdx = countryMap.idToIndex.get(run.founderId) ?? -1;
-        const founder = world.mapCountries.get(run.founderId);
-        const region = founder ? world.mapRegions.get(founder.governingRegion) : undefined;
-        const capitalCityName = region?.cities[0]?.name ?? 'Unknown';
+        let name = empireNameCache.get(empireId);
+        if (!name) {
+          const founderEntry = countryMap.indexToCountry.find(c => c.id === run.founderId);
+          const founderCountryName = founderEntry?.name ?? 'Unknown';
+          name = generateEmpireName(rng, founderCountryName);
+          empireNameCache.set(empireId, name);
+        }
         entries.push({
           empireId,
-          name: `Empire of ${capitalCityName}`,
+          name,
           founderCountryIndex: founderIdx,
           memberCountryIndices: members,
         });
