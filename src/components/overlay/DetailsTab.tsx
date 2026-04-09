@@ -4,6 +4,7 @@ import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import type { City } from '../../lib/types';
+import { formatPopulation } from '../Timeline';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -27,6 +28,20 @@ function lookupEmpireSnapshot(
     if (snapshots[y]) return snapshots[y];
   }
   return [];
+}
+
+/** Look up the population snapshot at or before the given year. */
+function lookupPopulationSnapshot(
+  snapshots: Record<number, Record<number, number>>,
+  numYears: number,
+  year: number,
+): Record<number, number> {
+  if (year >= numYears && snapshots[numYears]) return snapshots[numYears];
+  const floored = Math.max(0, Math.floor(year / 20) * 20);
+  for (let y = floored; y >= 0; y -= 20) {
+    if (snapshots[y]) return snapshots[y];
+  }
+  return {};
 }
 
 /** Find the empire a country belongs to (if any). */
@@ -108,6 +123,11 @@ export function DetailsTab({
     [history, selectedYear],
   );
 
+  const popSnap = useMemo(
+    () => lookupPopulationSnapshot(history.populationSnapshots, history.numYears, selectedYear),
+    [history, selectedYear],
+  );
+
   // Compute the nearest 20-year snap key for empire selection
   const snapKey = useMemo(() => {
     if (selectedYear >= history.numYears && history.empireSnapshots[history.numYears]) return history.numYears;
@@ -142,6 +162,7 @@ export function DetailsTab({
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
         citySizesAtYear={citySizesAtYear}
+        popSnap={popSnap}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -159,6 +180,7 @@ export function DetailsTab({
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
         citySizesAtYear={citySizesAtYear}
+        popSnap={popSnap}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -176,6 +198,7 @@ export function DetailsTab({
       snapKey={snapKey}
       ownershipAtYear={ownershipAtYear}
       citySizesAtYear={citySizesAtYear}
+      popSnap={popSnap}
       onSelectEntity={onSelectEntity}
       onNavigate={onNavigate}
     />
@@ -199,12 +222,13 @@ interface SubProps {
   snapKey: number;
   citySizesAtYear?: Uint8Array;
   ownershipAtYear?: Int16Array;
+  popSnap: Record<number, number>;
   onSelectEntity: (entity: SelectedEntity | null) => void;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 // ── City Details ──
-function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, onSelectEntity }: SubProps & { cellIndex: number }) {
+function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity }: SubProps & { cellIndex: number }) {
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
@@ -252,6 +276,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
         <div style={styles.infoGrid}>
           {city && <InfoRow label="Size" value={resolveCitySize(city, mapData, citySizesAtYear)} />}
           {city && <InfoRow label="Founded" value={`Year ${city.foundedYear}`} />}
+          {popSnap[cellIndex] != null && <InfoRow label="Population" value={formatPopulation(popSnap[cellIndex])} />}
           {country && (
             <InfoRow label="Country">
               <button
@@ -292,7 +317,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
 }
 
 // ── Country Details ──
-function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, onSelectEntity }: SubProps & { countryIndex: number }) {
+function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity }: SubProps & { countryIndex: number }) {
   const country = history.countries[countryIndex];
   const empire = findEmpireForCountry(empireSnap, countryIndex);
 
@@ -300,6 +325,14 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
     () => mapData.cities.filter(c => c.kingdomId === countryIndex && c.foundedYear <= selectedYear),
     [mapData.cities, countryIndex, selectedYear],
   );
+
+  const countryPop = useMemo(() => {
+    let total = 0;
+    for (const city of cities) {
+      total += popSnap[city.cellIndex] ?? 0;
+    }
+    return total;
+  }, [cities, popSnap]);
 
   const territorySize = useMemo(() => {
     if (!ownershipAtYear) return 0;
@@ -354,6 +387,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
 
         <div style={styles.infoGrid}>
           <InfoRow label="Territory" value={`${territorySize} cells`} />
+          <InfoRow label="Population" value={formatPopulation(countryPop)} />
           <InfoRow label="Cities" value={String(cities.length)} />
           <InfoRow label="Wars" value={String(warCount)} />
           <InfoRow label="Conquests" value={`${conquestCount} won, ${conqueredCount} lost`} />
@@ -429,7 +463,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
 }
 
 // ── Empire Details ──
-function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, ownershipAtYear, onSelectEntity }: SubProps & { empireId: string }) {
+function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, ownershipAtYear, popSnap, onSelectEntity }: SubProps & { empireId: string }) {
   const empEntry = empireSnap.find(e => e.empireId === empireId);
 
   const founderCountry = empEntry ? history.countries[empEntry.founderCountryIndex] : undefined;
@@ -457,6 +491,18 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
     return mapData.cities.filter(c => memberSet.has(c.kingdomId) && c.foundedYear <= selectedYear).length;
   }, [empEntry, mapData.cities, selectedYear]);
 
+  const empirePop = useMemo(() => {
+    if (!empEntry) return 0;
+    const memberSet = new Set(empEntry.memberCountryIndices);
+    let total = 0;
+    for (const city of mapData.cities) {
+      if (memberSet.has(city.kingdomId) && city.foundedYear <= selectedYear) {
+        total += popSnap[city.cellIndex] ?? 0;
+      }
+    }
+    return total;
+  }, [empEntry, mapData.cities, selectedYear, popSnap]);
+
   if (!empEntry) {
     return (
       <div style={styles.root}>
@@ -481,6 +527,7 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
 
         <div style={styles.infoGrid}>
           <InfoRow label="Territory" value={`${totalTerritory} cells`} />
+          <InfoRow label="Population" value={formatPopulation(empirePop)} />
           <InfoRow label="Cities" value={String(totalCities)} />
           <InfoRow label="Members" value={`${memberCountries.length} countries`} />
           {founderCountry && (

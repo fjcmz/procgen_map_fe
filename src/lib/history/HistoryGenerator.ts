@@ -630,6 +630,15 @@ export class HistoryGenerator {
     const wonderSnapshots: Record<number, number[]> = {};
     const religionSnapshots: Record<number, number[]> = {};
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
+    const populationSnapshots: Record<number, Record<number, number>> = {};
+
+    const buildPopulationSnapshot = (): Record<number, number> => {
+      const snap: Record<number, number> = {};
+      for (const city of world.mapCities.values()) {
+        if (city.founded) snap[city.cellIndex] = city.currentPopulation;
+      }
+      return snap;
+    };
 
     // Dynamic city sizes: pre-build stable ordering of all city entities
     const allCityEntities: CityEntity[] = Array.from(world.mapCities.values());
@@ -817,6 +826,7 @@ export class HistoryGenerator {
           sizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
         }
         rawCitySizeSnapshots[i] = sizeArr;
+        populationSnapshots[i] = buildPopulationSnapshot();
       }
 
       prevOwnership = ownership;
@@ -836,12 +846,14 @@ export class HistoryGenerator {
         finalSizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
       }
       rawCitySizeSnapshots[yearsToSerialize] = finalSizeArr;
+      populationSnapshots[yearsToSerialize] = buildPopulationSnapshot();
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
       wonderSnapshots[0] = [];
       religionSnapshots[0] = [];
       empireSnapshots[0] = [];
+      populationSnapshots[0] = {};
     }
 
     // Phase 5: Build Country[] for UI
@@ -1072,6 +1084,7 @@ export class HistoryGenerator {
       wonderSnapshots,
       religionSnapshots,
       empireSnapshots,
+      populationSnapshots,
       techTimeline,
       citySizeSnapshots,
     };
