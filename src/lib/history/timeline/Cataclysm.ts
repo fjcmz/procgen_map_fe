@@ -2,6 +2,7 @@ import { IdUtil } from '../IdUtil';
 import type { World } from '../physical/World';
 import type { Year } from './Year';
 import { cityVisitor } from '../physical/CityVisitor';
+import { computeCitySize } from '../physical/CityEntity';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Illustrate } from './Illustrate';
 import type { Wonder } from './Wonder';
@@ -200,6 +201,10 @@ function applyCasualties(city: CityEntity, killRatio: number, world: World, miti
     return killed;
   }
   city.currentPopulation -= casualties;
+  // Shrink city tier if population dropped below thresholds
+  const govLevel = getCityTechLevel(world, city, 'government');
+  const indLevel = getCityTechLevel(world, city, 'industry');
+  city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
   return casualties;
 }
 

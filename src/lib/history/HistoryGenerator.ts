@@ -19,6 +19,8 @@ import { getCountryTechLevel } from './timeline/Tech';
 import { nameForLevel } from './timeline/techNames';
 import type { IllustrateType } from './timeline/Illustrate';
 import { generateCountryName, generateEmpireName } from './nameGenerator';
+import { CITY_SIZE_TO_INDEX } from './physical/CityEntity';
+import type { CityEntity } from './physical/CityEntity';
 
 /** Statistics about the generated history, for optional introspection. */
 export interface HistoryStats {
@@ -629,6 +631,10 @@ export class HistoryGenerator {
     const religionSnapshots: Record<number, number[]> = {};
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
 
+    // Dynamic city sizes: pre-build stable ordering of all city entities
+    const allCityEntities: CityEntity[] = Array.from(world.mapCities.values());
+    const rawCitySizeSnapshots: Record<number, Uint8Array> = {};
+
     // Phase 4 (overlays_tabs.md): pre-index empire dissolutions by absolute year.
     // `Empire.destroyedOn` captures both the shrink-to-≤1 path in
     // `_handleEmpireEffects` and the 15% `government`-tech dissolution rolled
@@ -805,6 +811,12 @@ export class HistoryGenerator {
         wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
+        // City sizes: store size tier index for all city entities
+        const sizeArr = new Uint8Array(allCityEntities.length);
+        for (let ci = 0; ci < allCityEntities.length; ci++) {
+          sizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
+        }
+        rawCitySizeSnapshots[i] = sizeArr;
       }
 
       prevOwnership = ownership;
@@ -818,6 +830,12 @@ export class HistoryGenerator {
       wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
+      // Final city size snapshot
+      const finalSizeArr = new Uint8Array(allCityEntities.length);
+      for (let ci = 0; ci < allCityEntities.length; ci++) {
+        finalSizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
+      }
+      rawCitySizeSnapshots[yearsToSerialize] = finalSizeArr;
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
@@ -859,6 +877,28 @@ export class HistoryGenerator {
         foundedYear: cityEntity.foundedOn - timeline.startOfTime,
         size: cityEntity.size,
       });
+    }
+
+    // Phase 6b: Remap raw city size snapshots to match cities[] array order.
+    // `allCityEntities` indexes ALL cities; `cities[]` only includes founded ones.
+    // Build a mapping from allCityEntities index → cities[] index.
+    const cityEntityIdxToFinalIdx = new Map<number, number>();
+    {
+      let finalIdx = 0;
+      for (let raw = 0; raw < allCityEntities.length; raw++) {
+        if (allCityEntities[raw].founded) {
+          cityEntityIdxToFinalIdx.set(raw, finalIdx++);
+        }
+      }
+    }
+    const citySizeSnapshots: Record<number, Uint8Array> = {};
+    for (const [snapYear, rawArr] of Object.entries(rawCitySizeSnapshots)) {
+      const mapped = new Uint8Array(cities.length);
+      for (let raw = 0; raw < rawArr.length; raw++) {
+        const final = cityEntityIdxToFinalIdx.get(raw);
+        if (final !== undefined) mapped[final] = rawArr[raw];
+      }
+      citySizeSnapshots[Number(snapYear)] = mapped;
     }
 
     // Phase 7: Apply final ownership to cell.kingdom for baseline rendering
@@ -1033,6 +1073,7 @@ export class HistoryGenerator {
       religionSnapshots,
       empireSnapshots,
       techTimeline,
+      citySizeSnapshots,
     };
 
     return {

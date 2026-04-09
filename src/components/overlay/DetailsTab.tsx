@@ -2,12 +2,15 @@ import { useMemo } from 'react';
 import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry } from '../../lib/types';
 import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
+import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
+import type { City } from '../../lib/types';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
   mapData: MapData;
   selectedYear: number;
   ownershipAtYear?: Int16Array;
+  citySizesAtYear?: Uint8Array;
   onSelectEntity: (entity: SelectedEntity | null) => void;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
@@ -94,6 +97,7 @@ export function DetailsTab({
   mapData,
   selectedYear,
   ownershipAtYear,
+  citySizesAtYear,
   onSelectEntity,
   onNavigate,
 }: DetailsTabProps) {
@@ -137,6 +141,7 @@ export function DetailsTab({
         empireSnap={empireSnap}
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
+        citySizesAtYear={citySizesAtYear}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -153,6 +158,7 @@ export function DetailsTab({
         empireSnap={empireSnap}
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
+        citySizesAtYear={citySizesAtYear}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -169,10 +175,19 @@ export function DetailsTab({
       empireSnap={empireSnap}
       snapKey={snapKey}
       ownershipAtYear={ownershipAtYear}
+      citySizesAtYear={citySizesAtYear}
       onSelectEntity={onSelectEntity}
       onNavigate={onNavigate}
     />
   );
+}
+
+/** Resolve dynamic city size from snapshot, falling back to static size. */
+function resolveCitySize(city: City, mapData: MapData, citySizesAtYear?: Uint8Array): City['size'] {
+  if (!citySizesAtYear) return city.size;
+  const idx = mapData.cities.indexOf(city);
+  if (idx < 0) return city.size;
+  return INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
 }
 
 // ── Shared sub-props ──
@@ -182,13 +197,14 @@ interface SubProps {
   selectedYear: number;
   empireSnap: EmpireSnapshotEntry[];
   snapKey: number;
+  citySizesAtYear?: Uint8Array;
   ownershipAtYear?: Int16Array;
   onSelectEntity: (entity: SelectedEntity | null) => void;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 // ── City Details ──
-function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, onSelectEntity }: SubProps & { cellIndex: number }) {
+function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, onSelectEntity }: SubProps & { cellIndex: number }) {
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
@@ -234,7 +250,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
         </div>
 
         <div style={styles.infoGrid}>
-          {city && <InfoRow label="Size" value={city.size} />}
+          {city && <InfoRow label="Size" value={resolveCitySize(city, mapData, citySizesAtYear)} />}
           {city && <InfoRow label="Founded" value={`Year ${city.foundedYear}`} />}
           {country && (
             <InfoRow label="Country">
@@ -276,7 +292,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
 }
 
 // ── Country Details ──
-function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, onSelectEntity }: SubProps & { countryIndex: number }) {
+function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, onSelectEntity }: SubProps & { countryIndex: number }) {
   const country = history.countries[countryIndex];
   const empire = findEmpireForCountry(empireSnap, countryIndex);
 
@@ -390,7 +406,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
                 >
                   {city.isCapital ? '\u2605 ' : '\u2022 '}
                   {city.name}
-                  <span style={styles.citySizeMeta}> ({city.size})</span>
+                  <span style={styles.citySizeMeta}> ({resolveCitySize(city, mapData, citySizesAtYear)})</span>
                 </button>
               ))}
             </div>

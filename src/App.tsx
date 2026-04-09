@@ -58,6 +58,13 @@ export default function App() {
     return getOwnershipAtYear(mapData.history, selectedYear);
   }, [mapData?.history, selectedYear]);
 
+  // Pre-compute city sizes at the current year from snapshots
+  const citySizesAtYear = useMemo(() => {
+    if (!mapData?.history?.citySizeSnapshots) return undefined;
+    const snapKey = Math.floor(selectedYear / 20) * 20;
+    return mapData.history.citySizeSnapshots[snapKey] ?? undefined;
+  }, [mapData?.history?.citySizeSnapshots, selectedYear]);
+
   const handleEntityNavigate = useCallback((cellIndices: number[], centerCellIndex: number) => {
     const cell = mapData?.cells[centerCellIndex];
     if (!cell) return;
@@ -237,6 +244,7 @@ export default function App() {
         politicalMode={politicalMode}
         season={season}
         highlightCells={highlightCells}
+        citySizesAtYear={citySizesAtYear}
         onTransformChange={setViewTransform}
         onCellClick={handleCellClick}
         onInteraction={handleMapInteraction}
@@ -271,6 +279,7 @@ export default function App() {
         mapData={mapData}
         selectedYear={selectedYear}
         ownershipAtYear={ownershipAtYear}
+        citySizesAtYear={citySizesAtYear}
         onEntityNavigate={handleEntityNavigate}
         selectedEntity={selectedEntity}
         onSelectEntity={handleSelectEntity}

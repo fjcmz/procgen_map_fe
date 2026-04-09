@@ -40,6 +40,7 @@ interface UnifiedOverlayProps {
   mapData: MapData | null;
   selectedYear: number;
   ownershipAtYear?: Int16Array;
+  citySizesAtYear?: Uint8Array;
   onEntityNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
   selectedEntity: SelectedEntity | null;
   onSelectEntity: (entity: SelectedEntity | null) => void;
@@ -232,6 +233,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 mapData={props.mapData}
                 selectedYear={props.selectedYear}
                 ownershipAtYear={props.ownershipAtYear}
+                citySizesAtYear={props.citySizesAtYear}
                 onSelectEntity={props.onSelectEntity}
                 onNavigate={props.onEntityNavigate}
               />
@@ -242,6 +244,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 cities={props.mapData.cities}
                 selectedYear={props.selectedYear}
                 ownershipAtYear={props.ownershipAtYear}
+                citySizesAtYear={props.citySizesAtYear}
                 onNavigate={props.onEntityNavigate}
                 onSelectEntity={props.onSelectEntity}
               />

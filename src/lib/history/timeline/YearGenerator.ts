@@ -2,6 +2,7 @@ import { Year } from './Year';
 import type { Timeline } from './Timeline';
 import type { World } from '../physical/World';
 import { REGION_BIOME_GROWTH, REGION_BIOME_CAPACITY } from '../physical/Region';
+import { computeCitySize } from '../physical/CityEntity';
 import { foundationGenerator } from './Foundation';
 import { contactGenerator } from './Contact';
 import { countryGenerator } from './Country';
@@ -72,6 +73,13 @@ export class YearGenerator {
           Math.floor(city.currentPopulation * (1 + growthRate * logisticFactor))
         );
       }
+    }
+
+    // Step 4b: Recompute dynamic city sizes from population + tech
+    for (const city of world.mapUsableCities.values()) {
+      const govLevel = getCityTechLevel(world, city, 'government');
+      const indLevel = getCityTechLevel(world, city, 'industry');
+      city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
     }
 
     // Step 5: Kill/retire illustrates
