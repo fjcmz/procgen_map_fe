@@ -29,10 +29,10 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Per-field tech chart** — the event log panel includes a collapsible inline chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; lets players see civilizational rise at a glance instead of scrolling through thousands of TECH events
 - **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
 - **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
-- **Draggable UI panels** — the biome legend, minimap, timeline controls, and event log can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
+- **Draggable UI panels** — the biome legend, minimap, timeline controls, event log, and the unified generation overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, resource icons, and relief shading
-- **Collapsible controls** — the generation parameters panel can be collapsed to a minimal title bar to free up screen space
+- **Unified tabbed overlay** — generation parameters live in the Generation tab of a single draggable, collapsible panel that will grow to host Events, Hierarchy, and Tech tabs in later phases; collapses to a minimal title bar to free up screen space
 
 ## Tech Stack
 
@@ -87,7 +87,9 @@ If history is **disabled**, steps 10–12 are skipped and the map shows terrain 
 ```
 src/
 ├── components/           # React UI components
-│   ├── Controls.tsx      # Generation parameters, layer toggles, history settings
+│   ├── UnifiedOverlay.tsx # Tabbed draggable overlay shell (Gen/Events/Realm/Tech tabs)
+│   ├── overlay/
+│   │   └── GenerationTab.tsx # Generation parameters, layer toggles, history settings
 │   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
 │   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle

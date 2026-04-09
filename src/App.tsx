@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import type { MapData, MapView, LayerVisibility, WorkerMessage, Season } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
-import { Controls } from './components/Controls';
+import { UnifiedOverlay } from './components/UnifiedOverlay';
 import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
@@ -132,7 +132,7 @@ export default function App() {
         onZoomOut={() => mapCanvasRef.current?.zoomOut()}
         onReset={() => mapCanvasRef.current?.reset()}
       />
-      <Controls
+      <UnifiedOverlay
         seed={seed}
         onSeedChange={setSeed}
         numCells={numCells}
@@ -152,6 +152,8 @@ export default function App() {
         onGenerate={handleGenerate}
         generating={generating}
         progress={progress}
+        mapData={mapData}
+        selectedYear={selectedYear}
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />
