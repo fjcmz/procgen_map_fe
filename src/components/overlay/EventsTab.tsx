@@ -1,51 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { HistoryData, HistoryEvent } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
+import { EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 
 interface EventsTabProps {
   historyData: HistoryData;
   selectedYear: number;
 }
-
-const EVENT_ICONS: Record<string, string> = {
-  WAR: '\u2694\uFE0F',
-  CONQUEST: '\uD83C\uDFF4',
-  MERGE: '\uD83E\uDD1D',
-  COLLAPSE: '\uD83D\uDC80',
-  EXPANSION: '\uD83D\uDCCD',
-  FOUNDATION: '\uD83C\uDFD7\uFE0F',
-  CONTACT: '\uD83D\uDCE8',
-  COUNTRY: '\uD83C\uDFDB\uFE0F',
-  ILLUSTRATE: '\u2B50',
-  WONDER: '\uD83C\uDFDB',
-  RELIGION: '\u2626\uFE0F',
-  TRADE: '\uD83D\uDCB0',
-  CATACLYSM: '\uD83C\uDF0B',
-  TECH: '\uD83D\uDD2C',
-  TECH_LOSS: '\uD83D\uDCDA',
-  EMPIRE: '\uD83D\uDC51',
-  POPULATION: '\uD83D\uDC65',
-};
-
-const EVENT_COLORS: Record<string, string> = {
-  WAR: '#c03020',
-  CONQUEST: '#803020',
-  MERGE: '#606060',
-  COLLAPSE: '#404040',
-  EXPANSION: '#407040',
-  FOUNDATION: '#c07820',
-  CONTACT: '#4080c0',
-  COUNTRY: '#6040b0',
-  ILLUSTRATE: '#a0a000',
-  WONDER: '#d4a800',
-  RELIGION: '#8040a0',
-  TRADE: '#20a040',
-  CATACLYSM: '#d03010',
-  TECH: '#208080',
-  TECH_LOSS: '#a04040',
-  EMPIRE: '#c08000',
-  POPULATION: '#5a7a5a',
-};
 
 export function EventsTab({ historyData, selectedYear }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);

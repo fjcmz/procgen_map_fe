@@ -1,39 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { HistoryData, TechField } from '../../lib/types';
+import { TECH_FIELD_COLORS, TECH_FIELD_LABELS } from './eventStyles';
 
 interface TechTabProps {
   historyData: HistoryData;
   selectedYear: number;
 }
-
-/**
- * Exhaustive over the `TechField` union — adding a new field to the union
- * becomes a compile-time error here (and in the `TECH_FIELDS` local constant
- * in `HistoryGenerator.ts`). Keep both sites in sync. (spec stretch §5)
- */
-const TECH_FIELD_COLORS: Record<TechField, string> = {
-  science: '#208080',     // teal (canonical tech color)
-  military: '#c03020',    // red
-  industry: '#d4a800',    // gold
-  energy: '#e07020',      // orange
-  growth: '#60a040',      // green
-  exploration: '#4080c0', // blue
-  biology: '#60c0a0',     // mint
-  art: '#b060a0',         // magenta
-  government: '#8060c0',  // purple
-};
-
-const TECH_FIELD_LABELS: Record<TechField, string> = {
-  science: 'Sci',
-  military: 'Mil',
-  industry: 'Ind',
-  energy: 'Eng',
-  growth: 'Grw',
-  exploration: 'Exp',
-  biology: 'Bio',
-  art: 'Art',
-  government: 'Gov',
-};
 
 // Fixed vertical real estate — the spec calls for 120–160 px; 140 leaves
 // room for the Y-axis labels without dominating the overlay.
