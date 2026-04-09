@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { City, Country, EmpireSnapshotEntry, HistoryData } from '../../lib/types';
+import type { City, Country, EmpireSnapshotEntry, HistoryData, SelectedEntity } from '../../lib/types';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
@@ -7,6 +7,7 @@ interface HierarchyTabProps {
   selectedYear: number;
   ownershipAtYear?: Int16Array;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
+  onSelectEntity?: (entity: SelectedEntity | null) => void;
 }
 
 /** Short label rendered after each city name. */
@@ -57,7 +58,7 @@ function lookupEmpireSnapshot(
   return [];
 }
 
-export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, onNavigate }: HierarchyTabProps) {
+export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
   // Empires default to expanded, countries and the stateless bucket to collapsed.
   // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless'.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -121,6 +122,17 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     () => lookupEmpireSnapshot(historyData, selectedYear),
     [historyData, selectedYear],
   );
+
+  // Compute nearest snapshot key for empire entity selection
+  const snapKey = useMemo(() => {
+    const finalKey = historyData.numYears;
+    if (selectedYear >= finalKey && historyData.empireSnapshots[finalKey]) return finalKey;
+    const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+    for (let y = floored; y >= 0; y -= 20) {
+      if (historyData.empireSnapshots[y]) return y;
+    }
+    return 0;
+  }, [historyData, selectedYear]);
 
   const tree = useMemo<Tree>(() => {
     const { countries } = historyData;
@@ -210,7 +222,17 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
         }}
       >
         <span style={styles.cityBullet}>{capitalMark}</span>
-        <span style={styles.cityName}>{city.name}</span>
+        {onSelectEntity ? (
+          <button
+            style={styles.nameLink}
+            onClick={(e) => { e.stopPropagation(); onSelectEntity({ type: 'city', cellIndex: city.cellIndex }); }}
+            title={`View ${city.name} details`}
+          >
+            {city.name}
+          </button>
+        ) : (
+          <span style={styles.cityName}>{city.name}</span>
+        )}
         <span style={styles.citySize}>
           {city.isCapital ? 'capital, ' : ''}{sizeLabel}
         </span>
@@ -237,9 +259,19 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           onClick={() => toggle(key)}
         >
           <span style={styles.chevron}>{isOpen ? '\u25BE' : '\u25B8'}</span>
-          <span style={{ ...styles.countryName, ...(dead ? styles.deadText : {}) }}>
-            {node.country.name}
-          </span>
+          {onSelectEntity ? (
+            <button
+              style={{ ...styles.nameLink, ...(dead ? styles.deadText : {}), flex: 1, fontSize: 11 }}
+              onClick={(e) => { e.stopPropagation(); onSelectEntity({ type: 'country', countryIndex: node.country.id }); }}
+              title={`View ${node.country.name} details`}
+            >
+              {node.country.name}
+            </button>
+          ) : (
+            <span style={{ ...styles.countryName, ...(dead ? styles.deadText : {}) }}>
+              {node.country.name}
+            </span>
+          )}
           {isFounder && <span style={styles.founderTag}>founder</span>}
           <span style={styles.countryMeta}>
             {node.cities.length} {node.cities.length === 1 ? 'city' : 'cities'}
@@ -274,7 +306,17 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           onClick={() => toggle(`emp:collapsed:${emp.entry.empireId}`)}
         >
           <span style={styles.chevron}>{isOpen ? '\u25BE' : '\u25B8'}</span>
-          <span style={styles.empireName}>{emp.entry.name}</span>
+          {onSelectEntity ? (
+            <button
+              style={{ ...styles.nameLink, flex: 1, fontWeight: 'bold', fontSize: 12 }}
+              onClick={(e) => { e.stopPropagation(); onSelectEntity({ type: 'empire', empireId: emp.entry.empireId, snapshotYear: snapKey }); }}
+              title={`View ${emp.entry.name} details`}
+            >
+              {emp.entry.name}
+            </button>
+          ) : (
+            <span style={styles.empireName}>{emp.entry.name}</span>
+          )}
           <span style={styles.empireMeta}>
             {emp.countries.length} {emp.countries.length === 1 ? 'country' : 'countries'}
             {', '}
@@ -493,6 +535,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     color: '#8a6a30',
     fontStyle: 'italic',
+  },
+  nameLink: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    color: '#2060a0',
+    textDecoration: 'none',
+    padding: 0,
+    textAlign: 'left',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   locateBtn: {
     flexShrink: 0,

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season } from './lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season, SelectedEntity } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { UnifiedOverlay } from './components/UnifiedOverlay';
@@ -47,6 +47,7 @@ export default function App() {
   const [season, setSeason] = useState<Season>(0);
   const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const [highlightCells, setHighlightCells] = useState<number[] | null>(null);
+  const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -66,7 +67,94 @@ export default function App() {
 
   const handleMapInteraction = useCallback(() => {
     setHighlightCells(null);
+    setSelectedEntity(null);
   }, []);
+
+  /** Resolve a clicked cell index into the best entity (city > country > nothing). */
+  const handleCellClick = useCallback((cellIndex: number) => {
+    if (!mapData) return;
+    const cell = mapData.cells[cellIndex];
+    if (!cell) return;
+
+    // No history → just clear
+    if (!mapData.history || !ownershipAtYear) {
+      setHighlightCells(null);
+      setSelectedEntity(null);
+      return;
+    }
+
+    // Check if a city sits on this cell
+    const city = mapData.cities.find(c => c.cellIndex === cellIndex);
+    if (city) {
+      setSelectedEntity({ type: 'city', cellIndex: city.cellIndex });
+      setHighlightCells([city.cellIndex]);
+      return;
+    }
+
+    // Check country ownership
+    const countryId = ownershipAtYear[cellIndex];
+    if (countryId >= 0) {
+      setSelectedEntity({ type: 'country', countryIndex: countryId });
+      // Highlight all cells owned by this country
+      const cells: number[] = [];
+      for (let i = 0; i < ownershipAtYear.length; i++) {
+        if (ownershipAtYear[i] === countryId) cells.push(i);
+      }
+      setHighlightCells(cells);
+      return;
+    }
+
+    // Clicked water or unclaimed land → clear
+    setHighlightCells(null);
+    setSelectedEntity(null);
+  }, [mapData, ownershipAtYear]);
+
+  /** Select an entity programmatically (from overlay tabs). */
+  const handleSelectEntity = useCallback((entity: SelectedEntity | null) => {
+    setSelectedEntity(entity);
+    if (!entity || !mapData) {
+      setHighlightCells(null);
+      return;
+    }
+    if (entity.type === 'city') {
+      const city = mapData.cities.find(c => c.cellIndex === entity.cellIndex);
+      if (city) {
+        setHighlightCells([city.cellIndex]);
+        const cell = mapData.cells[city.cellIndex];
+        if (cell) mapCanvasRef.current?.navigateTo(cell.x, cell.y);
+      }
+    } else if (entity.type === 'country') {
+      if (!ownershipAtYear) return;
+      const cells: number[] = [];
+      for (let i = 0; i < ownershipAtYear.length; i++) {
+        if (ownershipAtYear[i] === entity.countryIndex) cells.push(i);
+      }
+      setHighlightCells(cells);
+      const country = mapData.history?.countries[entity.countryIndex];
+      if (country) {
+        const cell = mapData.cells[country.capitalCellIndex];
+        if (cell) mapCanvasRef.current?.navigateTo(cell.x, cell.y);
+      }
+    } else if (entity.type === 'empire') {
+      if (!mapData.history || !ownershipAtYear) return;
+      // Find empire snapshot to get member countries
+      const snapYear = entity.snapshotYear;
+      const empSnap = mapData.history.empireSnapshots[snapYear];
+      const empEntry = empSnap?.find(e => e.empireId === entity.empireId);
+      if (!empEntry) return;
+      const memberSet = new Set(empEntry.memberCountryIndices);
+      const cells: number[] = [];
+      for (let i = 0; i < ownershipAtYear.length; i++) {
+        if (memberSet.has(ownershipAtYear[i])) cells.push(i);
+      }
+      setHighlightCells(cells);
+      const founderCountry = mapData.history.countries[empEntry.founderCountryIndex];
+      if (founderCountry) {
+        const cell = mapData.cells[founderCountry.capitalCellIndex];
+        if (cell) mapCanvasRef.current?.navigateTo(cell.x, cell.y);
+      }
+    }
+  }, [mapData, ownershipAtYear]);
 
   // Clean up worker on unmount
   useEffect(() => {
@@ -92,6 +180,8 @@ export default function App() {
 
     setGenerating(true);
     setProgress({ step: 'Starting…', pct: 0 });
+    setSelectedEntity(null);
+    setHighlightCells(null);
 
     worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
@@ -148,6 +238,7 @@ export default function App() {
         season={season}
         highlightCells={highlightCells}
         onTransformChange={setViewTransform}
+        onCellClick={handleCellClick}
         onInteraction={handleMapInteraction}
       />
       <ZoomControls
@@ -181,6 +272,8 @@ export default function App() {
         selectedYear={selectedYear}
         ownershipAtYear={ownershipAtYear}
         onEntityNavigate={handleEntityNavigate}
+        selectedEntity={selectedEntity}
+        onSelectEntity={handleSelectEntity}
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />

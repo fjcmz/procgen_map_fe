@@ -95,6 +95,12 @@ export interface Country {
   absorbedById?: number;
 }
 
+/** Discriminated union representing a user-selected entity on the map. */
+export type SelectedEntity =
+  | { type: 'city'; cellIndex: number }
+  | { type: 'country'; countryIndex: number }
+  | { type: 'empire'; empireId: string; snapshotYear: number };
+
 export type HistoryEventType =
   | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
