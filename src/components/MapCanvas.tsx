@@ -12,6 +12,7 @@ interface MapCanvasProps {
   season?: Season;
   highlightCells?: number[] | null;
   onTransformChange?: (transform: Transform) => void;
+  onCellClick?: (cellIndex: number) => void;
   onInteraction?: () => void;
 }
 
@@ -65,11 +66,13 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, onTransformChange, onInteraction }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, onTransformChange, onCellClick, onInteraction }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
+  const transformRef = useRef(transform);
+  transformRef.current = transform;
   const isPanning = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
   const rafRef = useRef<number | null>(null);
@@ -223,8 +226,27 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     if (!canvas) return;
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Clear entity highlight on any canvas click
-      if (e.button === 0) onInteraction?.();
+      // Left-click: resolve which cell was clicked and notify parent
+      if (e.button === 0) {
+        if (onCellClick && mapData) {
+          const t = transformRef.current;
+          const mapX = (e.clientX - t.x) / t.scale;
+          const mapY = (e.clientY - t.y) / t.scale;
+          // Brute-force nearest cell (fast for typical cell counts < 20K)
+          let bestIdx = -1;
+          let bestDist = Infinity;
+          for (let i = 0; i < mapData.cells.length; i++) {
+            const c = mapData.cells[i];
+            const dx = c.x - mapX;
+            const dy = c.y - mapY;
+            const d = dx * dx + dy * dy;
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+          }
+          if (bestIdx >= 0) onCellClick(bestIdx);
+        } else {
+          onInteraction?.();
+        }
+      }
       if (e.button !== 1) return;
       e.preventDefault();
       isPanning.current = true;
@@ -255,7 +277,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [constrain, onInteraction]);
+  }, [constrain, onInteraction, onCellClick, mapData]);
 
   return (
     <canvas

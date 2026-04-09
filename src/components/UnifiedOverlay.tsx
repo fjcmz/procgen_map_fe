@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, SelectedEntity } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
 import { HierarchyTab } from './overlay/HierarchyTab';
 import { TechTab } from './overlay/TechTab';
+import { DetailsTab } from './overlay/DetailsTab';
 
-export type OverlayTab = 'generation' | 'events' | 'hierarchy' | 'tech';
+export type OverlayTab = 'generation' | 'events' | 'details' | 'hierarchy' | 'tech';
 
-const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'hierarchy', 'tech'];
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'details', 'hierarchy', 'tech'];
 
 interface UnifiedOverlayProps {
   // Generation tab — same shape as the old ControlsProps
@@ -40,6 +41,8 @@ interface UnifiedOverlayProps {
   selectedYear: number;
   ownershipAtYear?: Int16Array;
   onEntityNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
+  selectedEntity: SelectedEntity | null;
+  onSelectEntity: (entity: SelectedEntity | null) => void;
 }
 
 /**
@@ -49,6 +52,7 @@ interface UnifiedOverlayProps {
 const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   generation: 280,
   events: 280,
+  details: 320,
   hierarchy: 280,
   tech: 360,
 };
@@ -56,6 +60,7 @@ const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
 const TAB_LABELS: Record<OverlayTab, string> = {
   generation: 'Gen',
   events: 'Events',
+  details: 'Details',
   hierarchy: 'Realm',
   tech: 'Tech',
 };
@@ -95,9 +100,18 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
 
   const hasHistory = props.mapData?.history != null;
   const hasTechTimeline = props.mapData?.history?.techTimeline != null;
+
+  // Auto-switch to details tab when an entity is selected
+  useEffect(() => {
+    if (props.selectedEntity && hasHistory) {
+      setActiveTab('details');
+      setCollapsed(false);
+    }
+  }, [props.selectedEntity, hasHistory]);
   const tabEnabled: Record<OverlayTab, boolean> = {
     generation: true,
     events: hasHistory,
+    details: hasHistory,
     hierarchy: hasHistory,
     tech: hasTechTimeline,
   };
@@ -106,7 +120,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
-      const idx = ['1', '2', '3', '4'].indexOf(e.key);
+      const idx = ['1', '2', '3', '4', '5'].indexOf(e.key);
       if (idx === -1) return;
       const target = VALID_TABS[idx];
       if (!tabEnabled[target]) return;
@@ -208,6 +222,18 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
                 onNavigate={props.onEntityNavigate}
+                selectedEntity={props.selectedEntity}
+                onSelectEntity={props.onSelectEntity}
+              />
+            )}
+            {activeTab === 'details' && props.mapData?.history && (
+              <DetailsTab
+                selectedEntity={props.selectedEntity}
+                mapData={props.mapData}
+                selectedYear={props.selectedYear}
+                ownershipAtYear={props.ownershipAtYear}
+                onSelectEntity={props.onSelectEntity}
+                onNavigate={props.onEntityNavigate}
               />
             )}
             {activeTab === 'hierarchy' && props.mapData?.history && (
@@ -217,6 +243,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 selectedYear={props.selectedYear}
                 ownershipAtYear={props.ownershipAtYear}
                 onNavigate={props.onEntityNavigate}
+                onSelectEntity={props.onSelectEntity}
               />
             )}
             {activeTab === 'tech' && props.mapData?.history?.techTimeline && (
