@@ -562,7 +562,8 @@ function drawIcons(
   ctx: CanvasRenderingContext2D,
   data: MapData,
   selectedYear?: number,
-  season: Season = 0
+  season: Season = 0,
+  highlightSet?: Set<number>,
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
@@ -612,14 +613,19 @@ function drawIcons(
   // City icons
   for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
+    if (highlightSet) {
+      ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
+    }
     drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[city.size] ?? 1.0);
   }
+  if (highlightSet) ctx.globalAlpha = 1.0;
 }
 
 function drawLabels(
   ctx: CanvasRenderingContext2D,
   data: MapData,
-  selectedYear?: number
+  selectedYear?: number,
+  highlightSet?: Set<number>,
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
@@ -629,6 +635,9 @@ function drawLabels(
 
   for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
+    if (highlightSet) {
+      ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
+    }
     const fontStyle = city.isCapital ? `bold ${fontSize + 1}px Georgia, serif` : `${fontSize}px Georgia, serif`;
     ctx.font = fontStyle;
 
@@ -643,6 +652,7 @@ function drawLabels(
     ctx.fillStyle = city.isCapital ? '#2a1a00' : '#3a2a10';
     ctx.fillText(city.name, cell.x + 10, cell.y + 5);
   }
+  if (highlightSet) ctx.globalAlpha = 1.0;
 }
 
 function drawRegionBorders(
@@ -808,6 +818,7 @@ function drawWonderBadges(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   wonderCells: number[],
+  highlightSet?: Set<number>,
 ): void {
   if (wonderCells.length === 0) return;
   ctx.save();
@@ -817,6 +828,9 @@ function drawWonderBadges(
   for (const ci of wonderCells) {
     const cell = cells[ci];
     if (!cell) continue;
+    if (highlightSet) {
+      ctx.globalAlpha = highlightSet.has(ci) ? 1.0 : 0.25;
+    }
     // Gold star above city
     ctx.fillStyle = '#d4a800';
     ctx.strokeStyle = '#7a5500';
@@ -832,6 +846,7 @@ function drawReligionMarkers(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   religionCells: number[],
+  highlightSet?: Set<number>,
 ): void {
   if (religionCells.length === 0) return;
   ctx.save();
@@ -841,6 +856,9 @@ function drawReligionMarkers(
   for (const ci of religionCells) {
     const cell = cells[ci];
     if (!cell) continue;
+    if (highlightSet) {
+      ctx.globalAlpha = highlightSet.has(ci) ? 1.0 : 0.25;
+    }
     ctx.fillStyle = '#8040a0';
     ctx.strokeStyle = '#400060';
     ctx.lineWidth = 0.5;
@@ -1094,6 +1112,10 @@ export function render(
   // Pattern cache for patterned political fills (shared across all offset copies)
   const patternCache = mapView === 'political' ? new PatternCache() : undefined;
 
+  // Pre-compute highlight set for label/icon focus dimming
+  const highlightSet = highlightCells && highlightCells.length > 0
+    ? new Set(highlightCells) : undefined;
+
   // Draw the map at three horizontal offsets for seamless east-west wrapping.
   // The canvas clip region (set by the caller's transform) hides invisible copies.
   const offsets = [-width, 0, width];
@@ -1163,16 +1185,16 @@ export function render(
     if (layers.roads) drawRoads(ctx, data);
 
     // Layer 7: Icons (biome + cities)
-    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason);
+    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet);
 
     // Layer 7b: Wonder badges
     if (wonderCells) {
-      drawWonderBadges(ctx, data.cells, wonderCells);
+      drawWonderBadges(ctx, data.cells, wonderCells, highlightSet);
     }
 
     // Layer 7c: Religion markers
     if (religionCells) {
-      drawReligionMarkers(ctx, data.cells, religionCells);
+      drawReligionMarkers(ctx, data.cells, religionCells, highlightSet);
     }
 
     // Layer 7d: Current-year event overlays
@@ -1182,7 +1204,7 @@ export function render(
     }
 
     // Layer 8: City labels
-    if (layers.labels) drawLabels(ctx, data, selectedYear);
+    if (layers.labels) drawLabels(ctx, data, selectedYear, highlightSet);
 
     // Layer 9: Entity highlight (click-to-navigate)
     if (highlightCells && highlightCells.length > 0) {
