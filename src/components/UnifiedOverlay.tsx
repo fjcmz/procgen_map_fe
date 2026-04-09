@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
+import { EventsTab } from './overlay/EventsTab';
 
 export type OverlayTab = 'generation' | 'events' | 'hierarchy' | 'tech';
 
@@ -40,7 +41,10 @@ interface UnifiedOverlayProps {
  */
 const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   generation: 280,
-  events: 280,
+  // Bumped to 320 in Phase 2 so the parked tech sub-panel's 240px canvas
+  // and 9-swatch legend have enough breathing room inside the overlay's
+  // ~30px horizontal padding.
+  events: 320,
   hierarchy: 280,
   tech: 280,
 };
@@ -130,7 +134,12 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 progress={props.progress}
               />
             )}
-            {activeTab === 'events' && <div style={styles.placeholder}>Coming soon</div>}
+            {activeTab === 'events' && props.mapData?.history && (
+              <EventsTab
+                historyData={props.mapData.history}
+                selectedYear={props.selectedYear}
+              />
+            )}
             {activeTab === 'hierarchy' && <div style={styles.placeholder}>Coming soon</div>}
             {activeTab === 'tech' && <div style={styles.placeholder}>Coming soon</div>}
           </div>

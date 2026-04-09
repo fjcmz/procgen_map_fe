@@ -25,14 +25,14 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Kingdoms** — territory assignment with color-coded borders, driven by historical simulation
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
 - **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider; header shows year, world population, living/total nations, and event count
-- **Event log panel** — right-side panel showing a cumulative log of all historical events up to the selected year, with year labels, event-type icons, yearly population entries, and current-year highlighting; collapsible to header-only
-- **Per-field tech chart** — the event log panel includes a collapsible inline chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; lets players see civilizational rise at a glance instead of scrolling through thousands of TECH events
+- **Event log** — cumulative log of historical events lives in the **Events tab** of the unified overlay, with year labels, event-type icons, yearly population entries, and current-year highlighting; auto-scrolls to the latest events as the year advances
+- **Per-field tech chart** — the Events tab also hosts an inline chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; lets players see civilizational rise at a glance instead of scrolling through thousands of TECH events. (Will move to its own dedicated Tech tab in Phase 3.)
 - **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
 - **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
-- **Draggable UI panels** — the biome legend, minimap, timeline controls, event log, and the unified generation overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
+- **Draggable UI panels** — the biome legend, minimap, timeline playback controls, and the unified overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, resource icons, and relief shading
-- **Unified tabbed overlay** — generation parameters live in the Generation tab of a single draggable, collapsible panel that will grow to host Events, Hierarchy, and Tech tabs in later phases; collapses to a minimal title bar to free up screen space
+- **Unified tabbed overlay** — generation parameters and the cumulative event log live in the Generation and Events tabs of a single draggable, collapsible panel; the Hierarchy and Tech tabs are still placeholders pending Phase 3–4. The overlay collapses to a minimal title bar to free up screen space
 
 ## Tech Stack
 
@@ -89,12 +89,13 @@ src/
 ├── components/           # React UI components
 │   ├── UnifiedOverlay.tsx # Tabbed draggable overlay shell (Gen/Events/Realm/Tech tabs)
 │   ├── overlay/
-│   │   └── GenerationTab.tsx # Generation parameters, layer toggles, history settings
+│   │   ├── GenerationTab.tsx # Generation parameters, layer toggles, history settings
+│   │   └── EventsTab.tsx     # Cumulative event log + (temporarily) the per-field tech chart
 │   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
 │   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle
 │   ├── Minimap.tsx       # Draggable minimap with viewport indicator and click-to-navigate
-│   ├── Timeline.tsx      # Draggable playback controls + draggable/collapsible event log side panel
+│   ├── Timeline.tsx      # Draggable bottom playback controls (year slider, play/pause, step buttons)
 │   └── ZoomControls.tsx
 ├── lib/                  # Core generation modules
 │   ├── types.ts          # All shared TypeScript type definitions
@@ -172,4 +173,4 @@ scripts/
 - Cities and kingdoms are **only generated when history is enabled** — they are outputs of the history simulation, not independent pipeline steps.
 - The **HistoryGenerator** (Phase 6) is the top-level orchestrator: it calls `buildPhysicalWorld` then `TimelineGenerator`, and serializes the rich simulation state into the flat `HistoryData` format the renderer and timeline UI consume.
 - **Seasonal rendering** is a pure render-time concept — the generation pipeline is unchanged. `getSeasonalBiome()` applies per-season temperature threshold offsets with spatial-hash dither to shift polar biome boundaries organically. `getPermafrostAlpha()` returns a blue-gray overlay intensity for sub-polar land cells. Season defaults to Spring (0), which produces no visual change.
-- The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in a side panel shows all events up to the selected year, with icons for 15 event types (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquests, empires, and legacy types).
+- The Timeline reconstructs cell ownership at any year using decade snapshots + sparse annual deltas, avoiding full replay on every drag. It starts at year 0 and can auto-play forward, step by 1 or 10 years, or be scrubbed via slider. A cumulative event log in the **Events tab** of the unified overlay shows all events up to the selected year, with icons for 15 event types (foundations, contacts, countries, illustrates, wonders, religions, trades, cataclysms, wars, techs, conquests, empires, and legacy types).
