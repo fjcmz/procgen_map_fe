@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
@@ -7,6 +7,7 @@ import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
+import { getOwnershipAtYear } from './lib/history';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -45,9 +46,27 @@ export default function App() {
   const [selectedYear, setSelectedYear] = useState(0);
   const [season, setSeason] = useState<Season>(0);
   const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
+  const [highlightCells, setHighlightCells] = useState<number[] | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
+
+  // Pre-compute ownership array for the current year (shared by renderer and HierarchyTab)
+  const ownershipAtYear = useMemo(() => {
+    if (!mapData?.history || selectedYear === undefined) return undefined;
+    return getOwnershipAtYear(mapData.history, selectedYear);
+  }, [mapData?.history, selectedYear]);
+
+  const handleEntityNavigate = useCallback((cellIndices: number[], centerCellIndex: number) => {
+    const cell = mapData?.cells[centerCellIndex];
+    if (!cell) return;
+    mapCanvasRef.current?.navigateTo(cell.x, cell.y);
+    setHighlightCells(cellIndices);
+  }, [mapData]);
+
+  const handleMapInteraction = useCallback(() => {
+    setHighlightCells(null);
+  }, []);
 
   // Clean up worker on unmount
   useEffect(() => {
@@ -127,7 +146,9 @@ export default function App() {
         mapView={mapView}
         politicalMode={politicalMode}
         season={season}
+        highlightCells={highlightCells}
         onTransformChange={setViewTransform}
+        onInteraction={handleMapInteraction}
       />
       <ZoomControls
         onZoomIn={() => mapCanvasRef.current?.zoomIn()}
@@ -158,6 +179,8 @@ export default function App() {
         progress={progress}
         mapData={mapData}
         selectedYear={selectedYear}
+        ownershipAtYear={ownershipAtYear}
+        onEntityNavigate={handleEntityNavigate}
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />
