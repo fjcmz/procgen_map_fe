@@ -628,6 +628,15 @@ export class HistoryGenerator {
     const wonderSnapshots: Record<number, number[]> = {};
     const religionSnapshots: Record<number, number[]> = {};
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
+    const populationSnapshots: Record<number, Record<number, number>> = {};
+
+    const buildPopulationSnapshot = (): Record<number, number> => {
+      const snap: Record<number, number> = {};
+      for (const city of world.mapCities.values()) {
+        if (city.founded) snap[city.cellIndex] = city.currentPopulation;
+      }
+      return snap;
+    };
 
     // Phase 4 (overlays_tabs.md): pre-index empire dissolutions by absolute year.
     // `Empire.destroyedOn` captures both the shrink-to-≤1 path in
@@ -805,6 +814,7 @@ export class HistoryGenerator {
         wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
+        populationSnapshots[i] = buildPopulationSnapshot();
       }
 
       prevOwnership = ownership;
@@ -818,12 +828,14 @@ export class HistoryGenerator {
       wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
+      populationSnapshots[yearsToSerialize] = buildPopulationSnapshot();
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
       wonderSnapshots[0] = [];
       religionSnapshots[0] = [];
       empireSnapshots[0] = [];
+      populationSnapshots[0] = {};
     }
 
     // Phase 5: Build Country[] for UI
@@ -1032,6 +1044,7 @@ export class HistoryGenerator {
       wonderSnapshots,
       religionSnapshots,
       empireSnapshots,
+      populationSnapshots,
       techTimeline,
     };
 

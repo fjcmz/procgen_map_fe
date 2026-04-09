@@ -192,6 +192,8 @@ export interface HistoryData {
   religionSnapshots: Record<number, number[]>;
   /** Phase 4: empire membership at every 20th year, aligned with `snapshots`. */
   empireSnapshots: Record<number, EmpireSnapshotEntry[]>;
+  /** Per-city population at every 20th year + final year. Key: year index, value: cellIndex → population. */
+  populationSnapshots: Record<number, Record<number, number>>;
   /** Spec stretch §5: per-field running-max tech level, indexed by year offset. */
   techTimeline?: TechTimeline;
 }
