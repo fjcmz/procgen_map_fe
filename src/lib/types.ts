@@ -156,6 +156,23 @@ export interface TradeRouteEntry {
   path?: number[];
 }
 
+/**
+ * Phase 4 (spec: overlays_tabs.md): empire membership at a given snapshot year.
+ * One entry per empire alive at that year. Used by the Hierarchy (Realm) tab
+ * to render the Empire → Country → City tree without replaying thousands of
+ * events on the main thread.
+ */
+export interface EmpireSnapshotEntry {
+  /** Internal empire id (stable across snapshots). */
+  empireId: string;
+  /** Display name, e.g. "Empire of <founder-capital>". */
+  name: string;
+  /** Index into HistoryData.countries (founder country). */
+  founderCountryIndex: number;
+  /** Indices into HistoryData.countries; includes the founder; sorted ascending. */
+  memberCountryIndices: number[];
+}
+
 export interface HistoryData {
   countries: Country[];
   years: HistoryYear[];
@@ -167,6 +184,8 @@ export interface HistoryData {
   wonderSnapshots: Record<number, number[]>;
   /** Cell indices of cities with active religions, snapshotted every 20 years. */
   religionSnapshots: Record<number, number[]>;
+  /** Phase 4: empire membership at every 20th year, aligned with `snapshots`. */
+  empireSnapshots: Record<number, EmpireSnapshotEntry[]>;
   /** Spec stretch §5: per-field running-max tech level, indexed by year offset. */
   techTimeline?: TechTimeline;
 }

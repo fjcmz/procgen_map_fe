@@ -5,7 +5,7 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { generateRoads, computeDistanceFromLand, generateTradeRoutePath } from './roads';
@@ -628,6 +628,29 @@ export class HistoryGenerator {
     const tradeSnapshots: Record<number, TradeRouteEntry[]> = {};
     const wonderSnapshots: Record<number, number[]> = {};
     const religionSnapshots: Record<number, number[]> = {};
+    const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
+
+    // Phase 4 (overlays_tabs.md): pre-index empire dissolutions by absolute year.
+    // `Empire.destroyedOn` captures both the shrink-to-≤1 path in
+    // `_handleEmpireEffects` and the 15% `government`-tech dissolution rolled
+    // inside `ConquerGenerator.generate`. The latter is not visible in any
+    // event collection, so we look it up directly off the Empire object.
+    const dissolvedByAbsYear = new Map<number, Set<string>>();
+    for (const y of timeline.years) {
+      for (const emp of y.empires) {
+        if (emp.destroyedOn !== null) {
+          let set = dissolvedByAbsYear.get(emp.destroyedOn);
+          if (!set) { set = new Set(); dissolvedByAbsYear.set(emp.destroyedOn, set); }
+          set.add(emp.id);
+        }
+      }
+    }
+
+    // Phase 4: running empire-membership state, replayed chronologically
+    // during the year loop below by mirroring Conquer._handleEmpireEffects.
+    type EmpireRun = { founderId: string; foundedOn: number; members: Set<string> };
+    const liveEmpires = new Map<string, EmpireRun>();
+    const countryToEmpire = new Map<string, string>(); // countryId → empireId
 
     // Active trade tracking: trade objects are mutated (ended field set) as simulation runs
     const activeTrades = new Map<string, Trade>();
@@ -636,6 +659,32 @@ export class HistoryGenerator {
     // Precompute distance-from-land for trade route pathfinding (coastal-hugging A*)
     const distFromLand = computeDistanceFromLand(cells);
     const tradePathCache = new Map<string, number[]>();
+
+    // Build an empire snapshot entry list from the current `liveEmpires` map.
+    // Read-only iteration over world.mapCountries / world.mapRegions to resolve
+    // a display name — no mutation of any World field.
+    const buildEmpireSnapshot = (): EmpireSnapshotEntry[] => {
+      const entries: EmpireSnapshotEntry[] = [];
+      for (const [empireId, run] of liveEmpires) {
+        const members: number[] = [];
+        for (const cid of run.members) {
+          const idx = countryMap.idToIndex.get(cid);
+          if (idx !== undefined && idx >= 0) members.push(idx);
+        }
+        members.sort((a, b) => a - b);
+        const founderIdx = countryMap.idToIndex.get(run.founderId) ?? -1;
+        const founder = world.mapCountries.get(run.founderId);
+        const region = founder ? world.mapRegions.get(founder.governingRegion) : undefined;
+        const capitalCityName = region?.cities[0]?.name ?? 'Unknown';
+        entries.push({
+          empireId,
+          name: `Empire of ${capitalCityName}`,
+          founderCountryIndex: founderIdx,
+          memberCountryIndices: members,
+        });
+      }
+      return entries;
+    };
 
     // Compute ownership at year 0 (before any events)
     let prevOwnership: Int16Array | null = null;
@@ -668,6 +717,62 @@ export class HistoryGenerator {
         }
       }
 
+      // Phase 4: replay empire membership transitions for this year. We mirror
+      // `ConquerGenerator._handleEmpireEffects` using only the recorded events —
+      // we CANNOT read `CountryEvent.memberOf` here because it reflects the
+      // FINAL simulation state, not year-i state. Order matches the simulation:
+      // conquers first (may shrink/dissolve), then newly-founded empires, then
+      // government-tech dissolutions flagged by `Empire.destroyedOn`.
+      for (const conquer of yearObj.conquers) {
+        // Remove conquered from its current empire (if any).
+        const conqueredEmpireId = countryToEmpire.get(conquer.conquered);
+        if (conqueredEmpireId) {
+          const run = liveEmpires.get(conqueredEmpireId);
+          if (run) {
+            run.members.delete(conquer.conquered);
+            if (run.members.size <= 1) {
+              // Shrunk to a single member: empire dissolves, release the last member.
+              for (const m of run.members) countryToEmpire.delete(m);
+              liveEmpires.delete(conqueredEmpireId);
+            }
+          }
+          countryToEmpire.delete(conquer.conquered);
+        }
+        // Add conquered to conqueror's empire (if conqueror is in one).
+        const conquerorEmpireId = countryToEmpire.get(conquer.conqueror);
+        if (conquerorEmpireId) {
+          const run = liveEmpires.get(conquerorEmpireId);
+          if (run) {
+            run.members.add(conquer.conquered);
+            countryToEmpire.set(conquer.conquered, conquerorEmpireId);
+          }
+        }
+      }
+      // New empires founded this year (conqueror was NOT already in an empire).
+      for (const empEvent of yearObj.empires) {
+        const triggering = yearObj.conquers.find(c => c.conqueror === empEvent.foundedBy);
+        const members = new Set<string>();
+        members.add(empEvent.foundedBy);
+        if (triggering) members.add(triggering.conquered);
+        liveEmpires.set(empEvent.id, {
+          founderId: empEvent.foundedBy,
+          foundedOn: empEvent.foundedOn,
+          members,
+        });
+        for (const m of members) countryToEmpire.set(m, empEvent.id);
+      }
+      // Government-tech dissolutions (15% roll in ConquerGenerator) have no
+      // explicit event — pick them up from the pre-indexed `destroyedOn`.
+      const dissolvedThisYear = dissolvedByAbsYear.get(yearObj.year);
+      if (dissolvedThisYear) {
+        for (const empireId of dissolvedThisYear) {
+          const run = liveEmpires.get(empireId);
+          if (!run) continue;
+          for (const m of run.members) countryToEmpire.delete(m);
+          liveEmpires.delete(empireId);
+        }
+      }
+
       // Compute ownership for this year
       const ownership = computeOwnership(cells, world, yearObj, countryMap);
 
@@ -694,6 +799,7 @@ export class HistoryGenerator {
         tradeSnapshots[i] = Array.from(activeTradeEntries.values());
         wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
+        empireSnapshots[i] = buildEmpireSnapshot();
       }
 
       prevOwnership = ownership;
@@ -706,11 +812,13 @@ export class HistoryGenerator {
       tradeSnapshots[yearsToSerialize] = Array.from(activeTradeEntries.values());
       wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
+      empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
       wonderSnapshots[0] = [];
       religionSnapshots[0] = [];
+      empireSnapshots[0] = [];
     }
 
     // Phase 5: Build Country[] for UI
@@ -918,6 +1026,7 @@ export class HistoryGenerator {
       tradeSnapshots,
       wonderSnapshots,
       religionSnapshots,
+      empireSnapshots,
       techTimeline,
     };
 

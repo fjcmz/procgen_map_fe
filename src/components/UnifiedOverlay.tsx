@@ -3,6 +3,7 @@ import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
+import { HierarchyTab } from './overlay/HierarchyTab';
 import { TechTab } from './overlay/TechTab';
 
 export type OverlayTab = 'generation' | 'events' | 'hierarchy' | 'tech';
@@ -146,7 +147,13 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 selectedYear={props.selectedYear}
               />
             )}
-            {activeTab === 'hierarchy' && <div style={styles.placeholder}>Coming soon</div>}
+            {activeTab === 'hierarchy' && props.mapData?.history && (
+              <HierarchyTab
+                historyData={props.mapData.history}
+                cities={props.mapData.cities}
+                selectedYear={props.selectedYear}
+              />
+            )}
             {activeTab === 'tech' && props.mapData?.history?.techTimeline && (
               <TechTab
                 historyData={props.mapData.history}
