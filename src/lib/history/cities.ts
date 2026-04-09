@@ -1,12 +1,6 @@
 import type { Cell, City } from '../types';
-
-const CITY_NAMES = [
-  'Ironhold', 'Ashenvale', 'Stormgate', 'Rivenmoor', 'Coldhaven',
-  'Embercrest', 'Thornwall', 'Silverpeak', 'Duskwood', 'Brightwater',
-  'Frostmark', 'Grimstone', 'Oakhaven', 'Shadowmere', 'Goldmere',
-  'Irondale', 'Wolfspire', 'Aldenmoor', 'Sunwatch', 'Bleakhaven',
-  'Coppergate', 'Nightfall', 'Dawnrock', 'Stonehearth', 'Harrowfen',
-];
+import { generateCityName } from './nameGenerator';
+import { seededPRNG } from '../terrain/noise';
 
 function dist2(ax: number, ay: number, bx: number, by: number): number {
   return (ax - bx) ** 2 + (ay - by) ** 2;
@@ -43,6 +37,8 @@ export function placeCities(cells: Cell[], width: number): City[] {
   const numKingdoms = Math.min(5, Math.max(3, Math.floor(chosen.length / 3)));
   const kingdomCenters = chosen.slice(0, numKingdoms);
 
+  const nameRng = seededPRNG('legacy-cities');
+  const usedNames = new Set<string>();
   const cities: City[] = chosen.map((cell, idx) => {
     // Find nearest kingdom center
     let kingdomId = 0;
@@ -57,7 +53,7 @@ export function placeCities(cells: Cell[], width: number): City[] {
     const isCapital = idx < numKingdoms && idx === kingdomId;
     return {
       cellIndex: cell.index,
-      name: CITY_NAMES[idx % CITY_NAMES.length],
+      name: generateCityName(nameRng, usedNames),
       isCapital,
       kingdomId,
       foundedYear: 0,

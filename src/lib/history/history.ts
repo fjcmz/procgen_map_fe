@@ -7,25 +7,9 @@ import { continentGenerator } from './physical/ContinentGenerator';
 import { regionGenerator } from './physical/RegionGenerator';
 import { resourceGenerator } from './physical/ResourceGenerator';
 import { cityGenerator } from './physical/CityGenerator';
+import { generateCityName, generateCountryName } from './nameGenerator';
 
 const MOUNTAIN_THRESHOLD = 0.72;
-
-const NAME_PREFIXES = [
-  'Iron', 'Ash', 'Storm', 'Riven', 'Cold', 'Ember', 'Thorn', 'Silver', 'Dusk', 'Bright',
-  'Frost', 'Grim', 'Oak', 'Shadow', 'Gold', 'Wolf', 'Alden', 'Sun', 'Bleak', 'Copper',
-  'Night', 'Dawn', 'Stone', 'Harrow', 'Steel', 'Dark', 'Green', 'Red', 'Black', 'White',
-];
-
-const NAME_SUFFIXES = [
-  'hold', 'vale', 'gate', 'moor', 'haven', 'crest', 'wall', 'peak', 'wood', 'water',
-  'mark', 'stone', 'dale', 'mere', 'spire', 'fen', 'ford', 'burg', 'reach', 'land',
-];
-
-function randomName(rng: () => number): string {
-  const prefix = NAME_PREFIXES[Math.floor(rng() * NAME_PREFIXES.length)];
-  const suffix = NAME_SUFFIXES[Math.floor(rng() * NAME_SUFFIXES.length)];
-  return prefix + suffix;
-}
 
 function dist2(ax: number, ay: number, bx: number, by: number): number {
   return (ax - bx) ** 2 + (ay - by) ** 2;
@@ -73,22 +57,6 @@ function bfsTerritory(
   }
 }
 
-const PHYSICAL_CITY_NAMES = [
-  'Ironhold', 'Ashenvale', 'Stormgate', 'Rivenmoor', 'Coldhaven',
-  'Embercrest', 'Thornwall', 'Silverpeak', 'Duskwood', 'Brightwater',
-  'Frostmark', 'Grimstone', 'Oakhaven', 'Shadowmere', 'Goldmere',
-  'Irondale', 'Wolfspire', 'Aldenmoor', 'Sunwatch', 'Bleakhaven',
-  'Coppergate', 'Nightfall', 'Dawnrock', 'Stonehearth', 'Harrowfen',
-  'Saltmere', 'Ravenwall', 'Duskreach', 'Brightford', 'Coldstone',
-  'Ambervale', 'Thorngate', 'Ironwater', 'Ashmark', 'Stormvale',
-  'Goldspire', 'Silvermoor', 'Frostwood', 'Grimhaven', 'Oakdale',
-];
-
-let _physicalCityNameIdx = 0;
-
-function nextPhysicalCityName(): string {
-  return PHYSICAL_CITY_NAMES[_physicalCityNameIdx++ % PHYSICAL_CITY_NAMES.length];
-}
 
 function scoreCellForCity(cell: Cell, cells: Cell[]): number {
   if (cell.isWater || cell.elevation > 0.75) return -Infinity;
@@ -264,7 +232,7 @@ export function buildPhysicalWorld(
   width: number,
   rng: () => number
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[] } {
-  _physicalCityNameIdx = 0;
+  const usedCityNames = new Set<string>();
   const numCells = cells.length;
   const world = worldGenerator.generate(rng);
 
@@ -425,7 +393,7 @@ export function buildPhysicalWorld(
         });
         if (tooClose) continue;
 
-        const cityEntity = cityGenerator.generate(ci, nextPhysicalCityName(), rng, region, world);
+        const cityEntity = cityGenerator.generate(ci, generateCityName(rng, usedCityNames), rng, region, world);
         region.cities.push(cityEntity);
         globalPlacedCityCells.push(ci);
         placed++;
@@ -561,13 +529,7 @@ export function generateHistory(
   // Generate unique country names
   const usedNames = new Set<string>();
   const countries: Country[] = capitalCells.map((cell, i) => {
-    let name = randomName(rng);
-    let attempts = 0;
-    while (usedNames.has(name) && attempts < 50) {
-      name = randomName(rng);
-      attempts++;
-    }
-    usedNames.add(name);
+    const name = generateCountryName(rng, usedNames);
     return { id: i, name, capitalCellIndex: cell.index, isAlive: true };
   });
 
