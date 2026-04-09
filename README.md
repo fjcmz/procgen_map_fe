@@ -26,13 +26,13 @@ Deployed at: [https://fjcmz.github.io/procgen_map_fe/](https://fjcmz.github.io/p
 - **Physical world** — terrain is always partitioned into geographic regions (BFS-clustered Voronoi cells) and continents (connected landmasses); each region has a biome classification and natural resources (strategic, agricultural, luxury)
 - **Timeline playback** — auto-plays from year 0 with play/pause, step forward/backward by 1 or 10 years, plus a draggable year slider; header shows year, world population, living/total nations, and event count
 - **Event log** — cumulative log of historical events lives in the **Events tab** of the unified overlay, with year labels, event-type icons, yearly population entries, and current-year highlighting; auto-scrolls to the latest events as the year advances
-- **Per-field tech chart** — the Events tab also hosts an inline chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; lets players see civilizational rise at a glance instead of scrolling through thousands of TECH events. (Will move to its own dedicated Tech tab in Phase 3.)
+- **Per-field tech chart** — a dedicated **Tech tab** in the unified overlay hosts a chart that plots the world's highest country tech level for each of the 9 tech fields over the full simulated history as nine colored polylines, with a vertical cursor that tracks the currently-selected year; the chart resizes responsively to the overlay width via a `ResizeObserver` and includes Y-axis peak-level labels and X-axis year labels, letting players see civilizational rise at a glance instead of scrolling through thousands of TECH events.
 - **Terrain/Political view toggle** — switch between terrain view (biome detail) and political view (parchment overlay with bold kingdom color fills)
 - **Minimap** — toggleable minimap overlay showing the full map with a viewport indicator; click to navigate; uses offscreen canvas caching for performance
 - **Draggable UI panels** — the biome legend, minimap, timeline playback controls, and the unified overlay can all be repositioned by dragging their title bars; panels are clamped to stay visible within the viewport
 - **Interactive viewport** — zoom/pan via mouse wheel, touch pinch, or middle-click drag
 - **Layer toggles** — show/hide rivers, roads, kingdom borders, city icons, labels, biome legend, minimap, region borders, resource icons, and relief shading
-- **Unified tabbed overlay** — generation parameters and the cumulative event log live in the Generation and Events tabs of a single draggable, collapsible panel; the Hierarchy and Tech tabs are still placeholders pending Phase 3–4. The overlay collapses to a minimal title bar to free up screen space
+- **Unified tabbed overlay** — generation parameters, the cumulative event log, and the per-field tech chart live in the Generation, Events, and Tech tabs of a single draggable, collapsible panel; the Hierarchy tab is still a placeholder pending Phase 4. The overlay collapses to a minimal title bar to free up screen space
 
 ## Tech Stack
 
@@ -90,7 +90,8 @@ src/
 │   ├── UnifiedOverlay.tsx # Tabbed draggable overlay shell (Gen/Events/Realm/Tech tabs)
 │   ├── overlay/
 │   │   ├── GenerationTab.tsx # Generation parameters, layer toggles, history settings
-│   │   └── EventsTab.tsx     # Cumulative event log + (temporarily) the per-field tech chart
+│   │   ├── EventsTab.tsx     # Cumulative event log
+│   │   └── TechTab.tsx       # Per-field tech polyline chart with ResizeObserver-driven dynamic width
 │   ├── Draggable.tsx     # Reusable drag-to-reposition wrapper (pointer events + viewport clamping)
 │   ├── Legend.tsx        # Draggable biome legend (React overlay, replaces canvas-drawn legend)
 │   ├── MapCanvas.tsx     # Zoom/pan interaction and canvas lifecycle

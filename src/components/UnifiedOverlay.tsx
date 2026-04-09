@@ -3,6 +3,7 @@ import type { MapData, MapView, LayerVisibility, Season } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
+import { TechTab } from './overlay/TechTab';
 
 export type OverlayTab = 'generation' | 'events' | 'hierarchy' | 'tech';
 
@@ -41,12 +42,13 @@ interface UnifiedOverlayProps {
  */
 const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   generation: 280,
-  // Bumped to 320 in Phase 2 so the parked tech sub-panel's 240px canvas
-  // and 9-swatch legend have enough breathing room inside the overlay's
-  // ~30px horizontal padding.
-  events: 320,
+  // Phase 3: the tech chart moved out of EventsTab into its own tab, so
+  // events can shrink back to the default. The Tech tab gets the wider
+  // real estate the chart was cramped for under the parked layout —
+  // `TechTab.tsx` uses a ResizeObserver to fill whatever width is given.
+  events: 280,
   hierarchy: 280,
-  tech: 280,
+  tech: 360,
 };
 
 const TAB_LABELS: Record<OverlayTab, string> = {
@@ -61,11 +63,15 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   const hasHistory = props.mapData?.history != null;
+  const hasTechTimeline = props.mapData?.history?.techTimeline != null;
   const tabEnabled: Record<OverlayTab, boolean> = {
     generation: true,
     events: hasHistory,
     hierarchy: hasHistory,
-    tech: hasHistory,
+    // Gate specifically on techTimeline presence — a truncated or
+    // country-less history can have `history` set without the per-field
+    // timeline, and Phase 3 acceptance requires the tab to be inert then.
+    tech: hasTechTimeline,
   };
 
   const width = OVERLAY_WIDTHS[activeTab];
@@ -141,7 +147,12 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               />
             )}
             {activeTab === 'hierarchy' && <div style={styles.placeholder}>Coming soon</div>}
-            {activeTab === 'tech' && <div style={styles.placeholder}>Coming soon</div>}
+            {activeTab === 'tech' && props.mapData?.history?.techTimeline && (
+              <TechTab
+                historyData={props.mapData.history}
+                selectedYear={props.selectedYear}
+              />
+            )}
           </div>
         </>
       )}
