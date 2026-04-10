@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
-import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry } from '../../lib/types';
+import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry, Cell, TradeRouteEntry } from '../../lib/types';
 import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import type { City } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
+import { BIOME_INFO } from '../../lib/terrain/biomes';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -102,6 +103,97 @@ function getCountryTechLevels(
         const cur = techs.get(ev.field) ?? 0;
         if (ev.level > cur) techs.set(ev.field, ev.level);
       }
+    }
+  }
+  return techs;
+}
+
+/** Compute terrain (biome) distribution for cells owned by any of the given countries. */
+function getTerrainDistribution(
+  ownershipAtYear: Int16Array | undefined,
+  cells: Cell[],
+  countryIndices: Set<number>,
+): [string, number][] {
+  if (!ownershipAtYear) return [];
+  const counts = new Map<string, number>();
+  for (let i = 0; i < ownershipAtYear.length; i++) {
+    if (countryIndices.has(ownershipAtYear[i])) {
+      const biome = cells[i]?.biome;
+      if (biome && biome !== 'OCEAN' && biome !== 'COAST') {
+        counts.set(biome, (counts.get(biome) ?? 0) + 1);
+      }
+    }
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+}
+
+/** Count illustrates, wonders, contacts, and techs for an entity's cities/countries. */
+function getEntityEventCounts(
+  years: { year: number; events: HistoryEvent[] }[],
+  cityCellSet: Set<number>,
+  countryIndices: Set<number>,
+  upToYear: number,
+): { illustrates: number; wonders: number; contacts: number; techs: number } {
+  let illustrates = 0, wonders = 0, contacts = 0, techs = 0;
+  for (const yd of years) {
+    if (yd.year > upToYear) break;
+    for (const ev of yd.events) {
+      switch (ev.type) {
+        case 'ILLUSTRATE':
+          if (ev.locationCellIndex != null && cityCellSet.has(ev.locationCellIndex)) illustrates++;
+          break;
+        case 'WONDER':
+          if (ev.locationCellIndex != null && cityCellSet.has(ev.locationCellIndex)) wonders++;
+          break;
+        case 'CONTACT':
+          if ((ev.locationCellIndex != null && cityCellSet.has(ev.locationCellIndex)) ||
+              (ev.targetCellIndex != null && cityCellSet.has(ev.targetCellIndex))) contacts++;
+          break;
+        case 'TECH':
+          if (countryIndices.has(ev.initiatorId)) techs++;
+          break;
+      }
+    }
+  }
+  return { illustrates, wonders, contacts, techs };
+}
+
+/** Count active trade routes involving the entity's cities at the given year. */
+function getActiveTradeCount(
+  tradeSnapshots: Record<number, TradeRouteEntry[]>,
+  cityCellSet: Set<number>,
+  numYears: number,
+  selectedYear: number,
+): number {
+  let snap: TradeRouteEntry[] | undefined;
+  if (selectedYear >= numYears && tradeSnapshots[numYears]) {
+    snap = tradeSnapshots[numYears];
+  } else {
+    const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+    for (let y = floored; y >= 0; y -= 20) {
+      if (tradeSnapshots[y]) { snap = tradeSnapshots[y]; break; }
+    }
+  }
+  if (!snap) return 0;
+  let count = 0;
+  for (const route of snap) {
+    if (cityCellSet.has(route.cell1) || cityCellSet.has(route.cell2)) count++;
+  }
+  return count;
+}
+
+/** Aggregate tech levels across multiple countries (max per field). */
+function getEmpireTechLevels(
+  years: { year: number; events: HistoryEvent[] }[],
+  countryIndices: Set<number>,
+  upToYear: number,
+): Map<string, number> {
+  const techs = new Map<string, number>();
+  for (const idx of countryIndices) {
+    const countryTechs = getCountryTechLevels(years, idx, upToYear);
+    for (const [field, level] of countryTechs) {
+      const cur = techs.get(field) ?? 0;
+      if (level > cur) techs.set(field, level);
     }
   }
   return techs;
@@ -356,7 +448,28 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
   const warCount = events.filter(e => e.type === 'WAR').length;
   const conquestCount = events.filter(e => e.type === 'CONQUEST' && e.initiatorId === countryIndex).length;
   const conqueredCount = events.filter(e => e.type === 'CONQUEST' && e.targetId === countryIndex).length;
-  const techCount = events.filter(e => e.type === 'TECH').length;
+
+  const countrySet = useMemo(() => new Set([countryIndex]), [countryIndex]);
+
+  const cityCellSet = useMemo(
+    () => new Set(cities.map(c => c.cellIndex)),
+    [cities],
+  );
+
+  const terrainDist = useMemo(
+    () => getTerrainDistribution(ownershipAtYear, mapData.cells, countrySet),
+    [ownershipAtYear, mapData.cells, countrySet],
+  );
+
+  const eventCounts = useMemo(
+    () => getEntityEventCounts(history.years, cityCellSet, countrySet, selectedYear),
+    [history.years, cityCellSet, countrySet, selectedYear],
+  );
+
+  const activeTradeCount = useMemo(
+    () => getActiveTradeCount(history.tradeSnapshots, cityCellSet, history.numYears, selectedYear),
+    [history.tradeSnapshots, cityCellSet, history.numYears, selectedYear],
+  );
 
   const recentEvents = events.slice(-15);
 
@@ -389,9 +502,13 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
           <InfoRow label="Territory" value={`${territorySize} cells`} />
           <InfoRow label="Population" value={formatPopulation(countryPop)} />
           <InfoRow label="Cities" value={String(cities.length)} />
+          <InfoRow label="Illustrates" value={String(eventCounts.illustrates)} />
+          <InfoRow label="Wonders" value={String(eventCounts.wonders)} />
+          <InfoRow label="Techs" value={String(eventCounts.techs)} />
+          <InfoRow label="Contacts" value={String(eventCounts.contacts)} />
+          <InfoRow label="Trades" value={String(activeTradeCount)} />
           <InfoRow label="Wars" value={String(warCount)} />
           <InfoRow label="Conquests" value={`${conquestCount} won, ${conqueredCount} lost`} />
-          <InfoRow label="Techs" value={String(techCount)} />
           {empire && (
             <InfoRow label="Empire">
               <button
@@ -403,6 +520,13 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
             </InfoRow>
           )}
         </div>
+
+        {terrainDist.length > 0 && (
+          <>
+            <div style={styles.sectionLabel}>Terrain</div>
+            <TerrainBar distribution={terrainDist} />
+          </>
+        )}
 
         {techLevels.size > 0 && (
           <>
@@ -475,33 +599,58 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
       .filter(Boolean) as Country[];
   }, [empEntry, history.countries]);
 
+  const memberSet = useMemo(
+    () => empEntry ? new Set(empEntry.memberCountryIndices) : new Set<number>(),
+    [empEntry],
+  );
+
+  const empireCities = useMemo(
+    () => empEntry ? mapData.cities.filter(c => memberSet.has(c.kingdomId) && c.foundedYear <= selectedYear) : [],
+    [empEntry, mapData.cities, memberSet, selectedYear],
+  );
+
+  const cityCellSet = useMemo(
+    () => new Set(empireCities.map(c => c.cellIndex)),
+    [empireCities],
+  );
+
   const totalTerritory = useMemo(() => {
     if (!ownershipAtYear || !empEntry) return 0;
-    const memberSet = new Set(empEntry.memberCountryIndices);
     let count = 0;
     for (let i = 0; i < ownershipAtYear.length; i++) {
       if (memberSet.has(ownershipAtYear[i])) count++;
     }
     return count;
-  }, [ownershipAtYear, empEntry]);
-
-  const totalCities = useMemo(() => {
-    if (!empEntry) return 0;
-    const memberSet = new Set(empEntry.memberCountryIndices);
-    return mapData.cities.filter(c => memberSet.has(c.kingdomId) && c.foundedYear <= selectedYear).length;
-  }, [empEntry, mapData.cities, selectedYear]);
+  }, [ownershipAtYear, empEntry, memberSet]);
 
   const empirePop = useMemo(() => {
     if (!empEntry) return 0;
-    const memberSet = new Set(empEntry.memberCountryIndices);
     let total = 0;
-    for (const city of mapData.cities) {
-      if (memberSet.has(city.kingdomId) && city.foundedYear <= selectedYear) {
-        total += popSnap[city.cellIndex] ?? 0;
-      }
+    for (const city of empireCities) {
+      total += popSnap[city.cellIndex] ?? 0;
     }
     return total;
-  }, [empEntry, mapData.cities, selectedYear, popSnap]);
+  }, [empEntry, empireCities, popSnap]);
+
+  const terrainDist = useMemo(
+    () => getTerrainDistribution(ownershipAtYear, mapData.cells, memberSet),
+    [ownershipAtYear, mapData.cells, memberSet],
+  );
+
+  const eventCounts = useMemo(
+    () => getEntityEventCounts(history.years, cityCellSet, memberSet, selectedYear),
+    [history.years, cityCellSet, memberSet, selectedYear],
+  );
+
+  const activeTradeCount = useMemo(
+    () => getActiveTradeCount(history.tradeSnapshots, cityCellSet, history.numYears, selectedYear),
+    [history.tradeSnapshots, cityCellSet, history.numYears, selectedYear],
+  );
+
+  const techLevels = useMemo(
+    () => getEmpireTechLevels(history.years, memberSet, selectedYear),
+    [history.years, memberSet, selectedYear],
+  );
 
   if (!empEntry) {
     return (
@@ -528,8 +677,13 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
         <div style={styles.infoGrid}>
           <InfoRow label="Territory" value={`${totalTerritory} cells`} />
           <InfoRow label="Population" value={formatPopulation(empirePop)} />
-          <InfoRow label="Cities" value={String(totalCities)} />
+          <InfoRow label="Cities" value={String(empireCities.length)} />
           <InfoRow label="Members" value={`${memberCountries.length} countries`} />
+          <InfoRow label="Illustrates" value={String(eventCounts.illustrates)} />
+          <InfoRow label="Wonders" value={String(eventCounts.wonders)} />
+          <InfoRow label="Techs" value={String(eventCounts.techs)} />
+          <InfoRow label="Contacts" value={String(eventCounts.contacts)} />
+          <InfoRow label="Trades" value={String(activeTradeCount)} />
           {founderCountry && (
             <InfoRow label="Founder">
               <button
@@ -541,6 +695,37 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
             </InfoRow>
           )}
         </div>
+
+        {terrainDist.length > 0 && (
+          <>
+            <div style={styles.sectionLabel}>Terrain</div>
+            <TerrainBar distribution={terrainDist} />
+          </>
+        )}
+
+        {techLevels.size > 0 && (
+          <>
+            <div style={styles.sectionLabel}>Technology</div>
+            <div style={styles.techGrid}>
+              {Array.from(techLevels.entries())
+                .sort((a, b) => b[1] - a[1])
+                .map(([field, level]) => (
+                  <div key={field} style={styles.techRow}>
+                    <span
+                      style={{
+                        ...styles.techDot,
+                        background: TECH_FIELD_COLORS[field as TechField] ?? '#888',
+                      }}
+                    />
+                    <span style={styles.techLabel}>
+                      {TECH_FIELD_LABELS[field as TechField] ?? field}
+                    </span>
+                    <span style={styles.techLevel}>L{level}</span>
+                  </div>
+                ))}
+            </div>
+          </>
+        )}
 
         <div style={styles.sectionLabel}>Member Countries</div>
         <div style={styles.cityList}>
@@ -580,6 +765,53 @@ function EventRow({ event }: { event: HistoryEvent }) {
       <span style={styles.eventYear}>Y{event.year}</span>
       <span style={styles.eventIcon}>{icon}</span>
       <span style={styles.eventDesc}>{event.description}</span>
+    </div>
+  );
+}
+
+// ── Terrain Bar ──
+
+function TerrainBar({ distribution }: { distribution: [string, number][] }) {
+  if (distribution.length === 0) return null;
+  const total = distribution.reduce((s, [, c]) => s + c, 0);
+  const TOP_N = 4;
+  const topBiomes = distribution.slice(0, TOP_N);
+  const otherCount = distribution.slice(TOP_N).reduce((s, [, c]) => s + c, 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div style={styles.terrainBar}>
+        {distribution.map(([biome, count]) => (
+          <div
+            key={biome}
+            title={`${(BIOME_INFO as Record<string, { label: string }>)[biome]?.label ?? biome}: ${count}`}
+            style={{
+              width: `${(count / total) * 100}%`,
+              height: '100%',
+              background: (BIOME_INFO as Record<string, { fillColor: string }>)[biome]?.fillColor ?? '#888',
+            }}
+          />
+        ))}
+      </div>
+      <div style={styles.terrainLegend}>
+        {topBiomes.map(([biome, count]) => (
+          <span key={biome} style={styles.terrainLegendItem}>
+            <span
+              style={{
+                ...styles.terrainDot,
+                background: (BIOME_INFO as Record<string, { fillColor: string }>)[biome]?.fillColor ?? '#888',
+              }}
+            />
+            {(BIOME_INFO as Record<string, { label: string }>)[biome]?.label ?? biome}: {count}
+          </span>
+        ))}
+        {otherCount > 0 && (
+          <span style={styles.terrainLegendItem}>
+            <span style={{ ...styles.terrainDot, background: '#aaa' }} />
+            Other: {otherCount}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -768,5 +1000,31 @@ const styles: Record<string, React.CSSProperties> = {
   },
   eventDesc: {
     flex: 1,
+  },
+  terrainBar: {
+    height: 12,
+    borderRadius: 3,
+    overflow: 'hidden',
+    display: 'flex',
+    border: '1px solid #d4b896',
+  },
+  terrainLegend: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '2px 8px',
+    fontSize: 9,
+    color: '#3a2a10',
+  },
+  terrainLegendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3,
+  },
+  terrainDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 2,
+    flexShrink: 0,
+    border: '1px solid rgba(0,0,0,0.15)',
   },
 };
