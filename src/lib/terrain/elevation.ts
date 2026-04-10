@@ -477,6 +477,13 @@ export function assignElevation(
     }
   }
 
+  // --- Step 4b: Elevation power curve ---
+  if (profile.elevationPower !== 1.0) {
+    for (const cell of cells) {
+      cell.elevation = Math.pow(cell.elevation, profile.elevationPower);
+    }
+  }
+
   // --- Step 5: Mark water cells by elevation rank ---
   const targetWaterCount = Math.round(waterRatio * cells.length);
   const byElevation = [...cells].sort((a, b) => a.elevation - b.elevation);

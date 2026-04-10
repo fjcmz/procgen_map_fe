@@ -122,6 +122,13 @@ export function hydraulicErosion(cells: Cell[], profile: TerrainProfile): void {
     }
   }
 
+  // --- Elevation power curve ---
+  if (profile.elevationPower !== 1.0) {
+    for (const cell of cells) {
+      cell.elevation = Math.pow(cell.elevation, profile.elevationPower);
+    }
+  }
+
   // --- Re-mark coast cells ---
   for (const cell of cells) {
     if (cell.isWater) {

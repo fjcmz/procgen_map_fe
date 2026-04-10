@@ -107,6 +107,27 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
     ));
 
     cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(effMoisture)];
+
+    // Profile-driven marsh override: convert low-elevation, high-moisture
+    // forest/grassland biomes to MARSH. Same dithering pattern as polar biomes.
+    if (profile.marshOverride
+        && cell.elevation < 0.4
+        && effMoisture >= 0.5) {
+      const b = cell.biome;
+      if (b === 'TROPICAL_RAIN_FOREST'
+          || b === 'TEMPERATE_RAIN_FOREST'
+          || b === 'TROPICAL_SEASONAL_FOREST'
+          || b === 'TEMPERATE_DECIDUOUS_FOREST'
+          || b === 'GRASSLAND') {
+        const marshNoise = fbmCylindrical(
+          noise.moisture, cell.x * 1.4, cell.y * 1.4, width, height, 3, 2.0
+        );
+        const marshScore = (0.4 - cell.elevation) + (effMoisture - 0.5) + (marshNoise - 0.5) * 0.15;
+        if (marshScore > 0.05) {
+          cell.biome = 'MARSH';
+        }
+      }
+    }
   }
 }
 
@@ -272,7 +293,7 @@ export const BIOME_INFO: Record<BiomeType, BiomeInfo> = {
   BARE:                        { fillColor: '#b0a890', label: 'Rocky',                     iconType: 'mountain' },
   SCORCHED:                    { fillColor: '#9a8878', label: 'Scorched',                  iconType: 'mountain' },
   SNOW:                        { fillColor: '#e8e8f0', label: 'Snow',                      iconType: 'snow' },
-  MARSH:                       { fillColor: '#7a9a70', label: 'Marsh',                     iconType: null },
+  MARSH:                       { fillColor: '#5a8a5a', label: 'Marsh',                     iconType: null },
   ICE:                         { fillColor: '#d8e8f0', label: 'Ice',                       iconType: 'snow' },
   ALPINE_MEADOW:               { fillColor: '#98b86a', label: 'Alpine Meadow',             iconType: null },
 };

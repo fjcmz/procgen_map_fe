@@ -285,6 +285,16 @@ export interface TerrainProfile {
   // --- River control ---
   suppressRivers: boolean;
   riverFlowThreshold: number;
+
+  // --- Elevation shaping ---
+  /** Power curve applied to normalized elevation. >1 flattens terrain
+   *  (pushes elevations toward 0). Default: 1.0 (no effect). */
+  elevationPower: number;
+
+  // --- Biome overrides ---
+  /** When true, low-elevation high-moisture forest biomes are converted
+   *  to MARSH in assignBiomes(). Default: false. */
+  marshOverride: boolean;
 }
 
 export interface GenerateRequest {

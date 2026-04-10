@@ -65,6 +65,12 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   // --- River control ---
   suppressRivers: false,
   riverFlowThreshold: 4,
+
+  // --- Elevation shaping ---
+  elevationPower: 1.0,
+
+  // --- Biome overrides ---
+  marshOverride: false,
 };
 
 /** Recommended water ratios per profile (not part of TerrainProfile — passed separately on GenerateRequest). */
@@ -145,20 +151,29 @@ export const PROFILES: Record<string, TerrainProfile> = {
   /** Humid, flat, waterlogged world. Marshes, mangroves, and shallow seas. */
   swamp: {
     ...DEFAULT_PROFILE,
-    convergentCCBoost: 0.10,
-    convergentOCBoost: 0.05,
-    seamBoostMin: 0.02,
-    seamBoostMax: 0.04,
-    latAmplitude: 0.12,
-    latBias: 0.10,
-    continentalityStrength: 0.10,
-    globalMoistureOffset: 0.20,
-    shadowStrength: 0.05,
-    erosionK: 0.008,
-    erosionIterations: 8,
-    thermalErosionIters: 6,
-    thermalErosionTalus: 0.03,
-    globalTempOffset: 0.03,
+    // Aggressive tectonic flattening — minimal mountain-building forces
+    convergentCCBoost: 0.04,
+    convergentOCBoost: 0.02,
+    seamBoostMin: 0.01,
+    seamBoostMax: 0.02,
+    seamSpreadRings: 2,
+    // Power curve to flatten elevation distribution
+    elevationPower: 2.5,
+    // High moisture everywhere
+    latAmplitude: 0.10,
+    latBias: 0.12,
+    continentalityStrength: 0.08,
+    globalMoistureOffset: 0.25,
+    shadowStrength: 0.03,
+    // More erosion to further flatten
+    erosionK: 0.010,
+    erosionIterations: 10,
+    thermalErosionIters: 8,
+    thermalErosionTalus: 0.02,
+    // Warm, humid climate
+    globalTempOffset: 0.05,
+    // Enable marsh biome assignment
+    marshOverride: true,
   },
 
   /** Young, tectonically violent world. Towering ranges, deep valleys, thin atmosphere on peaks. */
