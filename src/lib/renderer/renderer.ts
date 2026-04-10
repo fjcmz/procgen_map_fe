@@ -216,7 +216,8 @@ function drawKingdomBorders(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   ownershipOverride?: Int16Array,
-  colors: KingdomColor[] = KINGDOM_COLORS_TERRAIN
+  colors: KingdomColor[] = KINGDOM_COLORS_TERRAIN,
+  expansionFlags?: Uint8Array,
 ): void {
   const getOwner = (cell: Cell): number | null => {
     if (ownershipOverride) {
@@ -235,6 +236,12 @@ function drawKingdomBorders(
     ctx.fillStyle = kc.fill;
     cellPath(ctx, cell);
     ctx.fill();
+    // Darken expansion territory
+    if (expansionFlags && expansionFlags[cell.index] === 1) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      cellPath(ctx, cell);
+      ctx.fill();
+    }
   }
 
   // Draw border edges
@@ -300,6 +307,7 @@ function drawPatternedBorders(
   historyData: HistoryData | undefined,
   selectedYear: number | undefined,
   patternCache: PatternCache,
+  expansionFlags?: Uint8Array,
 ): void {
   const ALPHA = 0.55;
 
@@ -349,6 +357,12 @@ function drawPatternedBorders(
     ctx.fillStyle = pattern;
     cellPath(ctx, cell);
     ctx.fill();
+    // Darken expansion territory
+    if (expansionFlags && expansionFlags[cell.index] === 1) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      cellPath(ctx, cell);
+      ctx.fill();
+    }
   }
 
   // Draw border edges (same logic as drawKingdomBorders but with pattern-derived strokes)
@@ -1161,6 +1175,7 @@ export function render(
   politicalMode: PoliticalMode = 'countries',
   highlightCells?: number[],
   citySizesAtYear?: Uint8Array,
+  expansionFlags?: Uint8Array,
 ): void {
   initNoisyEdges(seed);
 
@@ -1249,9 +1264,10 @@ export function render(
         drawPatternedBorders(
           ctx, data.cells, ownershipAtYear,
           politicalMode, data.history, selectedYear, patternCache,
+          expansionFlags,
         );
       } else {
-        drawKingdomBorders(ctx, data.cells, ownershipAtYear, KINGDOM_COLORS_TERRAIN);
+        drawKingdomBorders(ctx, data.cells, ownershipAtYear, KINGDOM_COLORS_TERRAIN, expansionFlags);
       }
     }
 

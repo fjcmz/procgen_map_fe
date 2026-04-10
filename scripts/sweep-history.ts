@@ -170,6 +170,8 @@ interface SweepReport {
     peakTechLevelByField: Record<TechField, Aggregate>;
     peakCountryTechLevelByField: Record<TechField, Aggregate>;
     medianCountryTechLevelByField: Record<TechField, Aggregate>;
+    totalExpansions: Aggregate;
+    totalSettlements: Aggregate;
     // Sum of tech events per century across all seeds, per field. Length
     // matches the century count of the longest run; shorter runs pad with 0.
     techEventsPerCenturyByFieldSum: Record<TechField, number[]>;
@@ -216,6 +218,8 @@ function buildReport(args: CliArgs, results: SeedResult[], elapsedMs: number): S
       totalCountries: aggregate(results.map(r => r.stats.totalCountries)),
       totalEmpires: aggregate(results.map(r => r.stats.totalEmpires)),
       worldEndedCount: results.filter(r => r.stats.worldEnded).length,
+      totalExpansions: aggregate(results.map(r => r.stats.totalExpansions)),
+      totalSettlements: aggregate(results.map(r => r.stats.totalSettlements)),
       peakTechLevelByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,

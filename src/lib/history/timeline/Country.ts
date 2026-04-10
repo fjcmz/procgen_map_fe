@@ -53,6 +53,8 @@ export class CountryGenerator {
       world, 5,
       (r: Region) => {
         if (r.isCountry) return false;
+        // Exclude regions already claimed by expansion or another country
+        if (r.countryId !== null || r.expansionOwnerId !== null) return false;
         if (r.cities.length === 0) return false;
         return r.cities.every(c => c.founded && c.contacted && !c.isRuin);
       },

@@ -12,6 +12,7 @@ interface MapCanvasProps {
   season?: Season;
   highlightCells?: number[] | null;
   citySizesAtYear?: Uint8Array;
+  expansionFlags?: Uint8Array;
   onTransformChange?: (transform: Transform) => void;
   onCellClick?: (cellIndex: number) => void;
   onInteraction?: () => void;
@@ -67,7 +68,7 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, citySizesAtYear, onTransformChange, onCellClick, onInteraction }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, citySizesAtYear, expansionFlags, onTransformChange, onCellClick, onInteraction }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -147,9 +148,9 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear);
+    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear, expansionFlags);
     ctx.resetTransform();
-  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells, citySizesAtYear]);
+  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells, citySizesAtYear, expansionFlags]);
 
   // Wheel zoom centered on cursor
   useEffect(() => {

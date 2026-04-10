@@ -1,7 +1,7 @@
 // Event types
 export type {
   Foundation, Contact, CountryEvent, Illustrate, Wonder, Religion,
-  Trade, Cataclysm, War, Tech, Conquer, Empire, Merge,
+  Trade, Cataclysm, War, Tech, Conquer, Empire, Merge, Expand, Settle,
 } from './events';
 
 // Entity modules (types + generators)
@@ -22,6 +22,7 @@ export { TechGenerator, techGenerator, mergeAllTechs, getNewTechs, TRADE_TECHS }
 export type { TechField } from './Tech';
 export { ConquerGenerator, conquerGenerator } from './Conquer';
 export { EmpireGenerator, empireGenerator } from './Empire';
+export { ExpandGenerator, expandGenerator } from './Expand';
 
 // Core timeline classes
 export { Timeline } from './Timeline';

@@ -107,7 +107,8 @@ export type HistoryEventType =
   | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
   | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
-  | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN';
+  | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN'
+  | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT';
 
 export interface HistoryEvent {
   type: HistoryEventType;
@@ -147,6 +148,10 @@ export interface HistoryEvent {
   };
   /** RELIGION-only (spec stretch §4): which origin-country tech bonuses are boosting this religion's propagation (art ×0.02 adherence drift, government up to ×0.03 drift + Path 2 outward-expansion weighting). `'none'` is omitted rather than stored. */
   propagationReason?: 'art' | 'government' | 'both';
+  /** TERRITORIAL_EXPANSION-only: number of cells claimed in this expansion event. */
+  expansionCellCount?: number;
+  /** SETTLEMENT-only: name of the city settled in expansion territory. */
+  settlementCityName?: string;
 }
 
 export interface HistoryYear {
@@ -202,6 +207,8 @@ export interface HistoryData {
   techTimeline?: TechTimeline;
   /** Per-city size tier (0–4) snapshotted every 20 years, aligned with `snapshots`. */
   citySizeSnapshots?: Record<number, Uint8Array>;
+  /** Expansion flags: 1 = expansion territory, 0 = core/unclaimed. Snapshotted every 20 years + final year. */
+  expansionSnapshots?: Record<number, Uint8Array>;
 }
 
 export interface MapData {

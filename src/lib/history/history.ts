@@ -58,7 +58,7 @@ function bfsTerritory(
 }
 
 
-function scoreCellForCity(cell: Cell, cells: Cell[]): number {
+export function scoreCellForCity(cell: Cell, cells: Cell[]): number {
   if (cell.isWater || cell.elevation > 0.75) return -Infinity;
 
   let score = 0;
@@ -231,7 +231,7 @@ export function buildPhysicalWorld(
   cells: Cell[],
   width: number,
   rng: () => number
-): { world: World; regionData: RegionData[]; continentData: ContinentData[] } {
+): { world: World; regionData: RegionData[]; continentData: ContinentData[]; usedCityNames: Set<string> } {
   const usedCityNames = new Set<string>();
   const numCells = cells.length;
   const world = worldGenerator.generate(rng);
@@ -424,7 +424,7 @@ export function buildPhysicalWorld(
     world.addContinent(continent);
   }
 
-  return { world, regionData, continentData };
+  return { world, regionData, continentData, usedCityNames };
 }
 
 /**
@@ -452,6 +452,23 @@ export function getOwnershipAtYear(
   }
 
   return ownership;
+}
+
+/**
+ * Return expansion flags at a given year, using the nearest snapshot.
+ * 1 = expansion territory, 0 = core/unclaimed.
+ */
+export function getExpansionFlagsAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): Uint8Array | undefined {
+  if (!historyData.expansionSnapshots) return undefined;
+  const snapshotYears = Object.keys(historyData.expansionSnapshots)
+    .map(Number)
+    .filter(y => y <= targetYear)
+    .sort((a, b) => b - a);
+  const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
+  return historyData.expansionSnapshots[baseYear];
 }
 
 /**
