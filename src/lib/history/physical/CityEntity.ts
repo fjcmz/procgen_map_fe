@@ -82,6 +82,9 @@ export class CityEntity {
   foundedOn: number = 0;
   destroyedOn: number = 0;
   destroyCause: string = '';
+  isRuin: boolean = false;
+  ruinYear: number = 0;
+  ruinCause: string = '';  // 'cataclysm' | 'depopulation'
   size: CitySize;
   initialPopulation: number;
   currentPopulation: number;

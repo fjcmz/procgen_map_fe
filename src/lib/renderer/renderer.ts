@@ -558,6 +558,32 @@ function drawCityIcon(
   }
 }
 
+function drawRuinIcon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+): void {
+  // Crumbled walls — two broken pillars with rubble
+  ctx.fillStyle = '#999';
+  ctx.strokeStyle = '#666';
+  ctx.lineWidth = 0.8;
+  // Left pillar (broken top)
+  ctx.fillRect(x - s * 0.7, y - s * 0.2, s * 0.3, s * 0.9);
+  ctx.strokeRect(x - s * 0.7, y - s * 0.2, s * 0.3, s * 0.9);
+  // Right pillar (shorter, more broken)
+  ctx.fillRect(x + s * 0.3, y + 0, s * 0.3, s * 0.7);
+  ctx.strokeRect(x + s * 0.3, y + 0, s * 0.3, s * 0.7);
+  // Rubble dots
+  ctx.fillStyle = '#888';
+  ctx.beginPath();
+  ctx.arc(x - s * 0.1, y + s * 0.5, s * 0.15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + s * 0.15, y + s * 0.6, s * 0.12, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawIcons(
   ctx: CanvasRenderingContext2D,
   data: MapData,
@@ -612,11 +638,19 @@ function drawIcons(
   }
 
   // City icons — resolve dynamic size from snapshot when available
+  // Split into active cities and ruins
+  const activeCities = visibleCities.filter(c =>
+    !c.isRuin || (selectedYear !== undefined && c.ruinYear > selectedYear)
+  );
+  const ruinCities = visibleCities.filter(c =>
+    c.isRuin && (selectedYear === undefined || c.ruinYear <= selectedYear)
+  );
+
   // Build a cellIndex → cities[] array index map for snapshot lookup
   const cityIdxMap = citySizesAtYear
     ? new Map(data.cities.map((c, i) => [c.cellIndex, i]))
     : undefined;
-  for (const city of visibleCities) {
+  for (const city of activeCities) {
     const cell = cells[city.cellIndex];
     if (highlightSet) {
       ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
@@ -627,6 +661,15 @@ function drawIcons(
       if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
     }
     drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 1.0);
+  }
+
+  // Ruin icons
+  for (const city of ruinCities) {
+    const cell = cells[city.cellIndex];
+    if (highlightSet) {
+      ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
+    }
+    drawRuinIcon(ctx, cell.x, cell.y, iconSize * 1.2);
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
 }
@@ -648,19 +691,40 @@ function drawLabels(
     if (highlightSet) {
       ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
     }
-    const fontStyle = city.isCapital ? `bold ${fontSize + 1}px Georgia, serif` : `${fontSize}px Georgia, serif`;
-    ctx.font = fontStyle;
 
-    // Shadow
-    ctx.fillStyle = 'rgba(255,248,230,0.85)';
-    ctx.fillText(city.name, cell.x + 9, cell.y + 4);
-    ctx.fillText(city.name, cell.x + 11, cell.y + 4);
-    ctx.fillText(city.name, cell.x + 9, cell.y + 6);
-    ctx.fillText(city.name, cell.x + 11, cell.y + 6);
+    const isRuinNow = city.isRuin && (selectedYear === undefined || city.ruinYear <= selectedYear);
 
-    // Text
-    ctx.fillStyle = city.isCapital ? '#2a1a00' : '#3a2a10';
-    ctx.fillText(city.name, cell.x + 10, cell.y + 5);
+    if (isRuinNow) {
+      // Ruins: italic, gray, dimmed
+      ctx.font = `italic ${fontSize}px Georgia, serif`;
+      const baseAlpha = highlightSet ? (highlightSet.has(city.cellIndex) ? 1.0 : 0.25) : 1.0;
+      ctx.globalAlpha = baseAlpha * 0.6;
+
+      // Shadow
+      ctx.fillStyle = 'rgba(200,200,200,0.7)';
+      ctx.fillText(city.name, cell.x + 9, cell.y + 4);
+      ctx.fillText(city.name, cell.x + 11, cell.y + 4);
+      ctx.fillText(city.name, cell.x + 9, cell.y + 6);
+      ctx.fillText(city.name, cell.x + 11, cell.y + 6);
+
+      // Text
+      ctx.fillStyle = '#777';
+      ctx.fillText(city.name, cell.x + 10, cell.y + 5);
+    } else {
+      const fontStyle = city.isCapital ? `bold ${fontSize + 1}px Georgia, serif` : `${fontSize}px Georgia, serif`;
+      ctx.font = fontStyle;
+
+      // Shadow
+      ctx.fillStyle = 'rgba(255,248,230,0.85)';
+      ctx.fillText(city.name, cell.x + 9, cell.y + 4);
+      ctx.fillText(city.name, cell.x + 11, cell.y + 4);
+      ctx.fillText(city.name, cell.x + 9, cell.y + 6);
+      ctx.fillText(city.name, cell.x + 11, cell.y + 6);
+
+      // Text
+      ctx.fillStyle = city.isCapital ? '#2a1a00' : '#3a2a10';
+      ctx.fillText(city.name, cell.x + 10, cell.y + 5);
+    }
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
 }

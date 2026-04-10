@@ -756,6 +756,8 @@ export function generateHistory(
       kingdomId: finalOwner >= 0 ? finalOwner : country.id,
       foundedYear: 0,
       size: 'small' as const,
+      isRuin: false,
+      ruinYear: 0,
     };
   });
 

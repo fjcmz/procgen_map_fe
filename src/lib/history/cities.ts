@@ -58,6 +58,8 @@ export function placeCities(cells: Cell[], width: number): City[] {
       kingdomId,
       foundedYear: 0,
       size: 'small' as const,
+      isRuin: false,
+      ruinYear: 0,
     };
   });
 

@@ -9,6 +9,7 @@ import type { Wonder } from './Wonder';
 import type { CountryEvent } from './Country';
 import type { TechField } from './Tech';
 import { getCityTechLevel, getCountryTechLevel, getCountryEffectiveTechs } from './Tech';
+import { ruinifyCity } from './Ruin';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -189,23 +190,28 @@ function applyTechLoss(
   }
 }
 
-function applyCasualties(city: CityEntity, killRatio: number, world: World, mitigation = 0): number {
+interface CasualtyResult {
+  killed: number;
+  shouldRuin: boolean;
+}
+
+function applyCasualties(city: CityEntity, killRatio: number, world: World, mitigation = 0): CasualtyResult {
   const effectiveRatio = killRatio * (1 - mitigation);
-  const casualties = Math.round(city.currentPopulation * effectiveRatio);
-  if (casualties >= city.currentPopulation) {
-    const killed = city.currentPopulation;
-    city.currentPopulation = 0;
-    city.destroyedOn = 1; // will be set properly by caller
-    city.destroyCause = 'cataclysm';
-    world.mapUsableCities.delete(city.id);
-    return killed;
+  const prePop = city.currentPopulation;
+  const casualties = Math.round(prePop * effectiveRatio);
+
+  // ≥90% population loss → city becomes a ruin (handled by caller via ruinifyCity)
+  if (prePop > 0 && casualties / prePop >= 0.9) {
+    city.currentPopulation = Math.max(0, prePop - casualties);
+    return { killed: Math.min(casualties, prePop), shouldRuin: true };
   }
+
   city.currentPopulation -= casualties;
   // Shrink city tier if population dropped below thresholds
   const govLevel = getCityTechLevel(world, city, 'government');
   const indLevel = getCityTechLevel(world, city, 'industry');
   city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
-  return casualties;
+  return { killed: casualties, shouldRuin: false };
 }
 
 export class CataclysmGenerator {
@@ -271,20 +277,26 @@ export class CataclysmGenerator {
     // Apply casualties (Phase 1: `biology` tech mitigates slow-onset disasters)
     const biologyApplies = BIOLOGY_MITIGATED.has(type);
     let totalKilled = 0;
+    const citiesToRuin: CityEntity[] = [];
     for (const city of affectedCities) {
       if (!world.mapUsableCities.has(city.id) && city !== epicenterCity) continue;
-      city.destroyedOn = 0; // reset
       let mitigation = 0;
       if (biologyApplies) {
         const bioLevel = getCityTechLevel(world, city, 'biology');
         mitigation = Math.min(0.5, 0.1 * bioLevel);
       }
-      const killed = applyCasualties(city, killRatio, world, mitigation);
-      if (city.destroyedOn === 1) city.destroyedOn = absYear;
-      totalKilled += killed;
+      const result = applyCasualties(city, killRatio, world, mitigation);
+      totalKilled += result.killed;
       city.cataclysms.push(cataclysm.id);
+      if (result.shouldRuin) citiesToRuin.push(city);
     }
     cataclysm.killed = totalKilled;
+
+    // Turn cities that lost ≥90% of population into ruins
+    for (const city of citiesToRuin) {
+      const ruin = ruinifyCity(city, world, year, 'cataclysm', rng);
+      year.ruins.push(ruin);
+    }
 
     // Spec stretch §1: knowledge-destroying disasters degrade country techs.
     // Resolve affected countries from affected cities (region.countryId), then

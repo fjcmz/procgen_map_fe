@@ -19,6 +19,8 @@ import { techGenerator, getCityTechLevel, getCountryTechLevel } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
 import type { CountryEvent } from './Country';
+import { ruinifyCity } from './Ruin';
+import type { CityEntity } from '../physical/CityEntity';
 
 export class YearGenerator {
   generate(rng: () => number, timeline: Timeline, world: World): Year {
@@ -258,6 +260,18 @@ export class YearGenerator {
     for (let i = 0; i < cataclysmCount; i++) {
       const c = cataclysmGenerator.generate(rng, year, world);
       if (c) year.cataclysms.push(c); else break;
+    }
+
+    // 8b. Post-cataclysm ruin check: cities with pop < 100 become ruins
+    {
+      const citiesToRuin: CityEntity[] = [];
+      for (const city of world.mapUsableCities.values()) {
+        if (city.currentPopulation < 100) citiesToRuin.push(city);
+      }
+      for (const city of citiesToRuin) {
+        const ruin = ruinifyCity(city, world, year, 'depopulation', rng);
+        year.ruins.push(ruin);
+      }
     }
 
     // 9. Wars: random [0, max(2, countries/50)-1]
