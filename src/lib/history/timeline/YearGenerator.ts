@@ -2,7 +2,7 @@ import { Year } from './Year';
 import type { Timeline } from './Timeline';
 import type { World } from '../physical/World';
 import { REGION_BIOME_GROWTH, REGION_BIOME_CAPACITY } from '../physical/Region';
-import { computeCitySize } from '../physical/CityEntity';
+import { computeCitySize, CITY_SIZE_TO_INDEX } from '../physical/CityEntity';
 import { foundationGenerator } from './Foundation';
 import { contactGenerator } from './Contact';
 import { countryGenerator } from './Country';
@@ -283,6 +283,14 @@ export class YearGenerator {
     for (const conquer of year.conquers) {
       const empire = empireGenerator.generate(rng, year, conquer);
       if (empire) year.empires.push(empire);
+    }
+
+    // Capture per-city population and size at end of year for snapshot serialization
+    for (const city of world.mapCities.values()) {
+      if (city.founded) {
+        year.cityPopulations[city.cellIndex] = city.currentPopulation;
+        year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
+      }
     }
 
     return year;
