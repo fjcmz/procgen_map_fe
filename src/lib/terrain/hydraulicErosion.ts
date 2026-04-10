@@ -1,12 +1,8 @@
-import type { Cell } from '../types';
+import type { Cell, TerrainProfile } from '../types';
 
 // ---------------------------------------------------------------------------
 // Stream-power hydraulic erosion — carves river valleys into terrain
 // ---------------------------------------------------------------------------
-
-// Erosion constants
-const ITERATIONS = 5;
-const EROSION_K = 0.003;       // base erosion rate
 const FLOW_EXPONENT = 0.5;     // sqrt(flow) — big rivers erode more, not linearly
 const SLOPE_EXPONENT = 1.0;    // linear with slope
 const DEPOSITION_RATE = 0.3;   // fraction deposited on downstream cell (floodplains)
@@ -44,13 +40,13 @@ function buildDrainageMap(cells: Cell[]): (number | null)[] {
  *
  * Call this AFTER generateRivers() and BEFORE re-running temperature/biomes.
  */
-export function hydraulicErosion(cells: Cell[]): void {
+export function hydraulicErosion(cells: Cell[], profile: TerrainProfile): void {
   const n = cells.length;
 
   // Track cumulative erosion per cell for the valley-widening pass
   const cumulativeErosion = new Float64Array(n);
 
-  for (let iter = 0; iter < ITERATIONS; iter++) {
+  for (let iter = 0; iter < profile.erosionIterations; iter++) {
     const drainage = buildDrainageMap(cells);
 
     // Topological sort: process high cells first so upstream erosion
@@ -68,7 +64,7 @@ export function hydraulicErosion(cells: Cell[]): void {
       if (slope <= 0) continue; // no downhill gradient
 
       // Stream power law: erosion ~ K * Q^m * S^n
-      const erosion = EROSION_K
+      const erosion = profile.erosionK
         * Math.pow(cell.riverFlow, FLOW_EXPONENT)
         * Math.pow(slope, SLOPE_EXPONENT);
 

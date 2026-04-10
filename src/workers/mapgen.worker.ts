@@ -1,5 +1,5 @@
-import type { GenerateRequest, WorkerMessage, RegionData, ContinentData } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion } from '../lib/terrain';
+import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, TerrainProfile } from '../lib/types';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, PROFILES, DEFAULT_PROFILE } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 import { CityEntity, CITY_SIZE_TRADE_CAP, type CitySize } from '../lib/history/physical/CityEntity';
@@ -39,38 +39,44 @@ _assertTradeCapMonotonic();
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
   const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = e.data;
 
+  // Resolve terrain profile from request
+  const profileBase = PROFILES[e.data.profileName ?? 'default'] ?? DEFAULT_PROFILE;
+  const profile: TerrainProfile = e.data.profileOverrides
+    ? { ...profileBase, ...e.data.profileOverrides }
+    : profileBase;
+
   try {
     post({ type: 'PROGRESS', step: 'Building Voronoi diagram\u2026', pct: 5 });
     const { cells } = buildCellGraph(seed, numCells, width, height);
 
     post({ type: 'PROGRESS', step: 'Shaping terrain\u2026', pct: 20 });
     const noise = createNoiseSamplers3D(seed);
-    assignElevation(cells, width, height, noise, waterRatio, seed);
+    assignElevation(cells, width, height, noise, waterRatio, seed, profile);
 
     post({ type: 'PROGRESS', step: 'Computing ocean currents\u2026', pct: 25 });
-    const { sstAnomaly } = computeOceanCurrents(cells, width, height);
+    const { sstAnomaly } = computeOceanCurrents(cells, width, height, profile);
 
     post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 32 });
-    const distFromOcean = assignMoisture(cells, width, height, noise, sstAnomaly);
+    const distFromOcean = assignMoisture(cells, width, height, noise, sstAnomaly, profile);
 
     post({ type: 'PROGRESS', step: 'Computing temperature\u2026', pct: 42 });
-    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly);
+    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
 
     post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 48 });
-    assignBiomes(cells, width, height, noise);
+    assignBiomes(cells, width, height, noise, profile);
 
     post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
     generateRivers(cells); // initial pass — computes riverFlow for erosion
 
     post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
-    hydraulicErosion(cells);
+    hydraulicErosion(cells, profile);
 
     post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
     const rivers = generateRivers(cells); // final pass — follows carved terrain
 
     // Refresh elevation-dependent properties after erosion
-    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly);
-    assignBiomes(cells, width, height, noise);
+    assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
+    assignBiomes(cells, width, height, noise, profile);
 
     let cities: ReturnType<typeof historyGenerator.generate>['cities'] = [];
     let roads: ReturnType<typeof historyGenerator.generate>['roads'] = [];

@@ -225,6 +225,64 @@ export interface MapData {
   historyStats?: import('./history/HistoryGenerator').HistoryStats;
 }
 
+export interface TerrainProfile {
+  // --- Elevation / tectonics ---
+  numContinentalMin: number;
+  numContinentalMax: number;
+  numOceanicMin: number;
+  numOceanicMax: number;
+  continentalGrowthMin: number;
+  continentalGrowthMax: number;
+  seamBoostMin: number;
+  seamBoostMax: number;
+  seamSpreadRings: number;
+  convergentCCBoost: number;
+  convergentOCBoost: number;
+  polarIceStart: number;
+  polarIceEnd: number;
+  polarNoiseAmplitude: number;
+  thermalErosionIters: number;
+  thermalErosionTalus: number;
+
+  // --- Moisture ---
+  latAmplitude: number;
+  latPolarDamping: number;
+  latFrequency: number;
+  latBias: number;
+  coastalMoistureSensitivity: number;
+  continentalityStrength: number;
+  continentalityMidpoint: number;
+  shadowStrength: number;
+  mountainThreshold: number;
+  elevationScale: number;
+
+  // --- Temperature ---
+  contStrength: number;
+  maritimeStrength: number;
+  windwardBonus: number;
+  lapseRate: number;
+  currentLandInfluence: number;
+  tempNoiseAmplitude: number;
+
+  // --- Biomes ---
+  iceTempThreshold: number;
+  snowTempThreshold: number;
+  tundraTempThreshold: number;
+  tempMoistureShift: number;
+
+  // --- Ocean currents ---
+  warmCurrentStrength: number;
+  coldCurrentStrength: number;
+
+  // --- Hydraulic erosion ---
+  erosionK: number;
+  erosionIterations: number;
+
+  // --- Global modifiers (Phase 3) ---
+  globalMoistureOffset: number;
+  globalTempOffset: number;
+}
+
 export interface GenerateRequest {
   type: 'GENERATE';
   seed: string;
@@ -234,6 +292,8 @@ export interface GenerateRequest {
   waterRatio: number;
   generateHistory?: boolean;
   numSimYears?: number;
+  profileName?: string;
+  profileOverrides?: Partial<TerrainProfile>;
 }
 
 export type WorkerMessage =

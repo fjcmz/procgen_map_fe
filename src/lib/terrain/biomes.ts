@@ -1,4 +1,4 @@
-import type { Cell, BiomeType, BiomeInfo, Season } from '../types';
+import type { Cell, BiomeType, BiomeInfo, Season, TerrainProfile } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical } from './noise';
 
@@ -44,43 +44,40 @@ const ICE_TEMP_THRESHOLD = 0.15;
 const SNOW_TEMP_THRESHOLD = 0.10;
 const TUNDRA_TEMP_THRESHOLD = 0.20;
 
-// How much temperature shifts effective moisture for Whittaker lookup
-const TEMP_MOISTURE_SHIFT = 0.05;
-
-export function assignBiomes(cells: Cell[], width: number, height: number, noise: NoiseSampler3D): void {
+export function assignBiomes(cells: Cell[], width: number, height: number, noise: NoiseSampler3D, profile: TerrainProfile): void {
   for (const cell of cells) {
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
     const temp = cell.temperature;
 
     // Polar ice caps on water — temperature-based with noise dithering
-    if (cell.isWater && temp < ICE_TEMP_THRESHOLD) {
+    if (cell.isWater && temp < profile.iceTempThreshold) {
       const iceNoise = fbmCylindrical(
         noise.continent, cell.x * 1.3, cell.y * 1.3, width, height, 3, 2.0
       );
-      const iceThreshold = ICE_TEMP_THRESHOLD - iceNoise * 0.06;
+      const iceThreshold = profile.iceTempThreshold - iceNoise * 0.06;
       if (temp < iceThreshold) {
         cell.biome = 'ICE';
         continue;
       }
     }
     // Polar land: snow — temperature-based with noise dithering
-    if (!cell.isWater && temp < SNOW_TEMP_THRESHOLD) {
+    if (!cell.isWater && temp < profile.snowTempThreshold) {
       const snowNoise = fbmCylindrical(
         noise.elevation, cell.x * 1.5, cell.y * 1.5, width, height, 3, 2.0
       );
-      const snowThreshold = SNOW_TEMP_THRESHOLD - snowNoise * 0.05;
+      const snowThreshold = profile.snowTempThreshold - snowNoise * 0.05;
       if (temp < snowThreshold) {
         cell.biome = 'SNOW';
         continue;
       }
     }
     // Polar land: tundra — temperature-based with noise dithering
-    if (!cell.isWater && temp < TUNDRA_TEMP_THRESHOLD) {
+    if (!cell.isWater && temp < profile.tundraTempThreshold) {
       const tundraNoise = fbmCylindrical(
         noise.elevation, cell.x * 1.2, cell.y * 1.2, width, height, 3, 1.8
       );
-      const tundraThreshold = TUNDRA_TEMP_THRESHOLD - tundraNoise * 0.05;
+      const tundraThreshold = profile.tundraTempThreshold - tundraNoise * 0.05;
       if (temp < tundraThreshold) {
         cell.biome = 'TUNDRA';
         continue;
@@ -106,7 +103,7 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
     const baselineTemp = 1.0 - polarDist;
     const tempDelta = temp - baselineTemp;
     const effMoisture = Math.max(0, Math.min(1,
-      cell.moisture + TEMP_MOISTURE_SHIFT * tempDelta
+      cell.moisture + profile.tempMoistureShift * tempDelta
     ));
 
     cell.biome = WHITTAKER[elevBand(cell.elevation)][moistBand(effMoisture)];

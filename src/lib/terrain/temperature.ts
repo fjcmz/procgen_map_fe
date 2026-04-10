@@ -1,24 +1,9 @@
-import type { Cell } from '../types';
+import type { Cell, TerrainProfile } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical } from './noise';
 import { getWindDirection } from './moisture';
 
-// --- Continentality constants ---
-const CONT_STRENGTH = 0.15;        // how much continental interiors deviate from maritime norm
-const MARITIME_STRENGTH = 0.08;    // how much coasts pull temperature toward moderate (0.5)
-
-// --- Windward ocean proximity ---
 const WINDWARD_HOPS = 15;          // how far upwind to march looking for ocean
-const WINDWARD_BONUS = 0.5;        // extra maritime effect for windward coasts
-
-// --- Elevation lapse rate ---
-const LAPSE_RATE = 0.10;           // temperature reduction per unit elevation
-
-// --- Ocean current land influence ---
-const CURRENT_LAND_INFLUENCE = 0.6; // attenuation of SST anomaly effect on nearby land
-
-// --- Noise ---
-const NOISE_AMPLITUDE = 0.03;      // small perturbation for organic boundaries
 
 /**
  * Computes a windward ocean proximity factor for a land cell.
@@ -93,7 +78,8 @@ export function assignTemperature(
   height: number,
   distFromOcean: Float32Array,
   noise: NoiseSampler3D,
-  sstAnomaly?: Float32Array
+  sstAnomaly: Float32Array | undefined,
+  profile: TerrainProfile
 ): void {
   for (let i = 0; i < cells.length; i++) {
     const cell = cells[i];
@@ -107,7 +93,7 @@ export function assignTemperature(
     if (cell.isWater) {
       const n = fbmCylindrical(noise.continent, cell.x * 0.8, cell.y * 0.8, width, height, 2, 2.0);
       const currentAnomaly = sstAnomaly ? sstAnomaly[i] : 0;
-      cell.temperature = Math.max(0, Math.min(1, baseTemp + currentAnomaly + n * NOISE_AMPLITUDE));
+      cell.temperature = Math.max(0, Math.min(1, baseTemp + currentAnomaly + n * profile.tempNoiseAmplitude));
       continue;
     }
 
@@ -116,24 +102,24 @@ export function assignTemperature(
     // Maritime cells: pulled toward 0.5 (milder)
     const d = distFromOcean[i];
     const sign = baseTemp > 0.5 ? 1 : -1;
-    const contMod = sign * d * CONT_STRENGTH;
+    const contMod = sign * d * profile.contStrength;
 
     // Maritime modifier: pull toward 0.5 (opposite of continentality)
-    const maritimeMod = -sign * (1 - d) * MARITIME_STRENGTH;
+    const maritimeMod = -sign * (1 - d) * profile.maritimeStrength;
 
     // 3. Windward ocean proximity — strengthens maritime effect on windward coasts
     const { factor: windwardFactor, oceanAnomaly } = computeWindwardFactor(cells, i, width, height, sstAnomaly);
-    const windwardMod = -sign * windwardFactor * WINDWARD_BONUS * MARITIME_STRENGTH;
+    const windwardMod = -sign * windwardFactor * profile.windwardBonus * profile.maritimeStrength;
 
     // 3b. Ocean current influence on land — warm/cold currents modify coastal temps
-    const currentMod = windwardFactor * oceanAnomaly * CURRENT_LAND_INFLUENCE;
+    const currentMod = windwardFactor * oceanAnomaly * profile.currentLandInfluence;
 
     // 4. Elevation lapse rate: higher elevation = colder
-    const elevCooling = cell.elevation * LAPSE_RATE;
+    const elevCooling = cell.elevation * profile.lapseRate;
 
     // 5. Small noise perturbation
     const n = fbmCylindrical(noise.continent, cell.x * 0.8, cell.y * 0.8, width, height, 2, 2.0);
-    const noiseMod = n * NOISE_AMPLITUDE;
+    const noiseMod = n * profile.tempNoiseAmplitude;
 
     cell.temperature = Math.max(0, Math.min(1,
       baseTemp + contMod + maritimeMod + windwardMod + currentMod - elevCooling + noiseMod

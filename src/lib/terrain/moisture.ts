@@ -1,25 +1,8 @@
-import type { Cell } from '../types';
+import type { Cell, TerrainProfile } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical } from './noise';
 
-// --- Rain shadow constants ---
 const MAX_HOPS = 30;              // how far upwind to march through the neighbor graph
-const MOUNTAIN_THRESHOLD = 0.55;  // elevation above which terrain blocks moisture
-const SHADOW_STRENGTH = 0.40;     // maximum moisture reduction from rain shadow
-const ELEVATION_SCALE = 1.8;      // amplifies barrier effect (sharper from tall mountains)
-
-// --- Continentality constants ---
-const CONTINENTALITY_STRENGTH = 0.40;  // max moisture reduction for most inland cells
-const CONTINENTALITY_MIDPOINT = 0.40;  // normalized distance at which decay reaches 50%
-
-// --- Ocean current moisture effect ---
-const COASTAL_MOISTURE_SENSITIVITY = 1.5; // how strongly cold currents reduce coastal moisture
-
-// --- Latitude / Hadley cell constants ---
-const LAT_AMPLITUDE = 0.28;       // base amplitude of latitude moisture curve
-const LAT_POLAR_DAMPING = 0.5;    // how much amplitude decreases toward poles
-const LAT_FREQUENCY = 3.0;        // cosine cycles across latitude range (3 Hadley cells)
-const LAT_BIAS = -0.02;           // slight global drying bias
 
 /**
  * Returns the prevailing wind direction vector at a given normalized latitude.
@@ -115,7 +98,8 @@ function computeDistanceFromOcean(cells: Cell[]): Float32Array {
 function computeRainShadow(
   cells: Cell[],
   width: number,
-  height: number
+  height: number,
+  profile: TerrainProfile
 ): Float32Array {
   const n = cells.length;
   const shadow = new Float32Array(n);
@@ -168,14 +152,14 @@ function computeRainShadow(
 
       // Track the maximum elevation barrier, decayed by distance
       const elev = cells[current].elevation;
-      if (elev > MOUNTAIN_THRESHOLD) {
-        const barrier = (elev - MOUNTAIN_THRESHOLD) / (1.0 - MOUNTAIN_THRESHOLD);
+      if (elev > profile.mountainThreshold) {
+        const barrier = (elev - profile.mountainThreshold) / (1.0 - profile.mountainThreshold);
         const distDecay = 1.0 - (hop / MAX_HOPS) * 0.5;
         maxBarrier = Math.max(maxBarrier, barrier * distDecay);
       }
     }
 
-    shadow[i] = Math.min(1, maxBarrier * ELEVATION_SCALE) * SHADOW_STRENGTH;
+    shadow[i] = Math.min(1, maxBarrier * profile.elevationScale) * profile.shadowStrength;
   }
 
   return shadow;
@@ -186,7 +170,8 @@ export function assignMoisture(
   width: number,
   height: number,
   noise: NoiseSampler3D,
-  sstAnomaly?: Float32Array
+  sstAnomaly: Float32Array | undefined,
+  profile: TerrainProfile
 ): Float32Array {
   // Pass 1: Base moisture from noise + latitude + coastal boost
   for (const cell of cells) {
@@ -197,8 +182,8 @@ export function assignMoisture(
     // moderate midlatitudes (+0.17), dry poles (-0.16) with smooth transitions
     const ny = (cell.y / height) * 2 - 1; // -1 (top) to 1 (bottom)
     const absLat = Math.abs(ny);
-    const damping = LAT_AMPLITUDE * (1.0 - LAT_POLAR_DAMPING * absLat);
-    const latMod = damping * Math.cos(absLat * Math.PI * LAT_FREQUENCY) + LAT_BIAS;
+    const damping = profile.latAmplitude * (1.0 - profile.latPolarDamping * absLat);
+    const latMod = damping * Math.cos(absLat * Math.PI * profile.latFrequency) + profile.latBias;
     m += latMod;
 
     // Coastal cells are wetter (compensates for stronger subtropical penalty)
@@ -219,7 +204,7 @@ export function assignMoisture(
           const avgAnomaly = totalAnomaly / waterNeighbors;
           // Negative anomaly (cold current) reduces the coastal boost
           const coldFactor = Math.max(0, -avgAnomaly);
-          coastBoost *= Math.max(0, 1.0 - coldFactor * COASTAL_MOISTURE_SENSITIVITY);
+          coastBoost *= Math.max(0, 1.0 - coldFactor * profile.coastalMoistureSensitivity);
         }
       }
       m = Math.min(1, m + coastBoost);
@@ -233,13 +218,13 @@ export function assignMoisture(
   for (let i = 0; i < cells.length; i++) {
     if (!cells[i].isWater && distFromOcean[i] > 0) {
       const d = distFromOcean[i];
-      const decay = CONTINENTALITY_STRENGTH * (d / (d + CONTINENTALITY_MIDPOINT));
+      const decay = profile.continentalityStrength * (d / (d + profile.continentalityMidpoint));
       cells[i].moisture = Math.max(0, cells[i].moisture - decay);
     }
   }
 
   // Pass 2: Rain shadow — reduce moisture behind mountain ranges
-  const shadow = computeRainShadow(cells, width, height);
+  const shadow = computeRainShadow(cells, width, height, profile);
   for (let i = 0; i < cells.length; i++) {
     if (!cells[i].isWater && shadow[i] > 0) {
       cells[i].moisture = Math.max(0, cells[i].moisture - shadow[i]);

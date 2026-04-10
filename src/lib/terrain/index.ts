@@ -10,3 +10,4 @@ export type { OceanCurrentData } from './oceanCurrents';
 export { assignBiomes, BIOME_INFO } from './biomes';
 export { generateRivers } from './rivers';
 export { hydraulicErosion } from './hydraulicErosion';
+export { DEFAULT_PROFILE, PROFILES } from './profiles';
