@@ -54,7 +54,7 @@ export class CountryGenerator {
       (r: Region) => {
         if (r.isCountry) return false;
         if (r.cities.length === 0) return false;
-        return r.cities.every(c => c.founded && c.contacted);
+        return r.cities.every(c => c.founded && c.contacted && !c.isRuin);
       },
       rng
     );

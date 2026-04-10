@@ -226,20 +226,22 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
   }, [citySizesAtYear, cityIdxMap]);
 
   const renderCity = (city: City, dead: boolean) => {
-    const sizeLabel = SIZE_LABELS[resolveCitySize(city)];
-    const capitalMark = city.isCapital ? '\u2605 ' : '\u2022 ';
+    const isRuinNow = city.isRuin && city.ruinYear <= selectedYear;
+    const sizeLabel = isRuinNow ? 'ruin' : SIZE_LABELS[resolveCitySize(city)];
+    const capitalMark = isRuinNow ? '\u2022 ' : city.isCapital ? '\u2605 ' : '\u2022 ';
     return (
       <div
         key={city.cellIndex}
         style={{
           ...styles.cityRow,
-          ...(dead ? styles.deadText : {}),
+          ...(dead || isRuinNow ? styles.deadText : {}),
+          ...(isRuinNow ? { fontStyle: 'italic' } : {}),
         }}
       >
         <span style={styles.cityBullet}>{capitalMark}</span>
         {onSelectEntity ? (
           <button
-            style={styles.nameLink}
+            style={{ ...styles.nameLink, ...(isRuinNow ? { fontStyle: 'italic', color: '#888' } : {}) }}
             onClick={(e) => { e.stopPropagation(); onSelectEntity({ type: 'city', cellIndex: city.cellIndex }); }}
             title={`View ${city.name} details`}
           >
@@ -249,7 +251,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           <span style={styles.cityName}>{city.name}</span>
         )}
         <span style={styles.citySize}>
-          {city.isCapital ? 'capital, ' : ''}{sizeLabel}
+          {!isRuinNow && city.isCapital ? 'capital, ' : ''}{sizeLabel}
         </span>
         {onNavigate && (
           <button

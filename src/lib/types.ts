@@ -81,6 +81,8 @@ export interface City {
   kingdomId: number;
   foundedYear: number;
   size: 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
+  isRuin: boolean;
+  ruinYear: number;
 }
 
 export interface Road {
@@ -105,7 +107,7 @@ export type HistoryEventType =
   | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
   | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
-  | 'TECH' | 'TECH_LOSS' | 'EMPIRE';
+  | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN';
 
 export interface HistoryEvent {
   type: HistoryEventType;

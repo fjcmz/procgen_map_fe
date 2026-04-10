@@ -52,6 +52,8 @@ export interface HistoryStats {
   totalTechLossesAbsorbed: number;
   /** Spec stretch §2: total trade-driven tech-diffusion events across the timeline. */
   totalTechDiffusions: number;
+  /** Total cities that became ruins across the timeline. */
+  totalRuins: number;
   /**
    * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
    * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
@@ -480,6 +482,22 @@ function serializeYearEvents(
       initiatorId: countryMap.idToIndex.get(emp.foundedBy) ?? -1,
       description: `${founderName} proclaims an empire.`,
       locationCellIndex: founderRegion?.cities[0]?.cellIndex,
+    });
+  }
+
+  // Ruins
+  for (const ruin of year.ruins) {
+    const city = world.mapCities.get(ruin.city);
+    let description = `${city?.name ?? 'A city'} fell to ruin (${ruin.cause}).`;
+    if (ruin.dissolvedCountry) {
+      description += ` Its nation dissolved.`;
+    }
+    events.push({
+      type: 'RUIN',
+      year: absYear,
+      initiatorId: -1,
+      description,
+      locationCellIndex: city?.cellIndex,
     });
   }
 
@@ -937,6 +955,8 @@ export class HistoryGenerator {
         kingdomId,
         foundedYear: cityEntity.foundedOn - timeline.startOfTime,
         size: cityEntity.size,
+        isRuin: cityEntity.isRuin,
+        ruinYear: cityEntity.isRuin ? cityEntity.ruinYear - timeline.startOfTime : 0,
       });
     }
 
@@ -1120,6 +1140,7 @@ export class HistoryGenerator {
       totalTechLosses,
       totalTechLossesAbsorbed,
       totalTechDiffusions,
+      totalRuins: timeline.years.reduce((sum, y) => sum + y.ruins.length, 0),
       techEventsPerCenturyByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,

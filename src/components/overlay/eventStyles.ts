@@ -28,6 +28,7 @@ export const EVENT_ICONS: Record<string, string> = {
   TECH: '\uD83D\uDD2C',
   TECH_LOSS: '\uD83D\uDCDA',
   EMPIRE: '\uD83D\uDC51',
+  RUIN: '\uD83C\uDFDA\uFE0F',
   POPULATION: '\uD83D\uDC65',
 };
 
@@ -48,6 +49,7 @@ export const EVENT_COLORS: Record<string, string> = {
   TECH: '#208080',
   TECH_LOSS: '#a04040',
   EMPIRE: '#c08000',
+  RUIN: '#888888',
   POPULATION: '#5a7a5a',
 };
 

@@ -2,7 +2,7 @@ import { IdUtil } from '../IdUtil';
 import type { Timeline } from './Timeline';
 import type {
   Foundation, Contact, CountryEvent, Illustrate, Wonder, Religion,
-  Trade, Cataclysm, War, Tech, Conquer, Empire,
+  Trade, Cataclysm, War, Tech, Conquer, Empire, Ruin,
 } from './events';
 
 function rngHex(rng: () => number): string {
@@ -29,6 +29,7 @@ export class Year {
   techs: Tech[] = [];
   conquers: Conquer[] = [];
   empires: Empire[] = [];
+  ruins: Ruin[] = [];
 
   // Per-city snapshots captured at end of year (after all events applied)
   cityPopulations: Record<number, number> = {};  // cellIndex → population

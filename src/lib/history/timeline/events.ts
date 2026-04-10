@@ -18,3 +18,4 @@ export type { Tech } from './Tech';
 export type { Conquer } from './Conquer';
 export type { Empire } from './Empire';
 export type { Merge } from './Merge';
+export type { Ruin } from './Ruin';
