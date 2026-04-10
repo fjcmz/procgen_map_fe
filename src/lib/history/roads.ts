@@ -12,7 +12,7 @@ function dist2(ax: number, ay: number, bx: number, by: number): number {
 }
 
 /** A* pathfinding between two cell indices. Returns cell index path or null. */
-function aStar(
+export function aStar(
   cells: Cell[],
   startIdx: number,
   goalIdx: number

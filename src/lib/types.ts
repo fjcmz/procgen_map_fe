@@ -186,6 +186,8 @@ export interface HistoryData {
   snapshots: Record<number, Int16Array>;
   /** Active trade route cell-index pairs, snapshotted every 20 years. */
   tradeSnapshots: Record<number, TradeRouteEntry[]>;
+  /** Roads built so far, snapshotted every 20 years. Monotonically growing. */
+  roadSnapshots: Record<number, Road[]>;
   /** Cell indices of cities with standing wonders, snapshotted every 20 years. */
   wonderSnapshots: Record<number, number[]>;
   /** Cell indices of cities with active religions, snapshotted every 20 years. */

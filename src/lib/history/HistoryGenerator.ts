@@ -8,7 +8,7 @@
 import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
-import { generateRoads, computeDistanceFromLand, generateTradeRoutePath } from './roads';
+import { aStar, computeDistanceFromLand, generateTradeRoutePath } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
 import { HistoryRoot } from './HistoryRoot';
 import type { World } from './physical/World';
@@ -674,6 +674,27 @@ export class HistoryGenerator {
     const distFromLand = computeDistanceFromLand(cells);
     const tradePathCache = new Map<string, number[]>();
 
+    // Dynamic road tracking: roads are built incrementally as contacts, countries,
+    // and conquests occur. Monotonically growing — roads never disappear.
+    const activeRoads: Road[] = [];
+    const roadPairKeys = new Set<string>();
+    const roadPathCache = new Map<string, number[] | null>();
+    const roadSnapshots: Record<number, Road[]> = {};
+
+    const tryBuildRoad = (cell1: number, cell2: number): void => {
+      const key = [cell1, cell2].sort((a, b) => a - b).join('-');
+      if (roadPairKeys.has(key)) return;
+      roadPairKeys.add(key);
+      let path = roadPathCache.get(key);
+      if (path === undefined) {
+        path = aStar(cells, cell1, cell2);
+        roadPathCache.set(key, path);
+      }
+      if (path && path.length >= 2) {
+        activeRoads.push({ path });
+      }
+    };
+
     // Build an empire snapshot entry list from the current `liveEmpires` map.
     // Read-only iteration over world.mapCountries / world.mapRegions to resolve
     // a display name — no mutation of any World field.
@@ -734,6 +755,35 @@ export class HistoryGenerator {
         if (trade.ended !== null && trade.ended <= yearObj.year) {
           activeTrades.delete(id);
           activeTradeEntries.delete(id);
+        }
+      }
+
+      // Dynamic road construction: contacts → country formation → conquests
+      for (const contact of yearObj.contacts) {
+        const c1 = world.mapCities.get(contact.contactFrom);
+        const c2 = world.mapCities.get(contact.contactTo);
+        if (c1 && c2) tryBuildRoad(c1.cellIndex, c2.cellIndex);
+      }
+      for (const country of yearObj.countries) {
+        const region = country.region ?? world.mapRegions.get(country.governingRegion);
+        if (region && region.cities.length > 1) {
+          const capital = region.cities[0];
+          for (let ci = 1; ci < region.cities.length; ci++) {
+            if (region.cities[ci].founded) {
+              tryBuildRoad(capital.cellIndex, region.cities[ci].cellIndex);
+            }
+          }
+        }
+      }
+      for (const conquer of yearObj.conquers) {
+        const conquerorCountry = conquer.conquerorCountry ?? world.mapCountries.get(conquer.conqueror);
+        const conqueredCountry = conquer.conqueredCountry ?? world.mapCountries.get(conquer.conquered);
+        if (conquerorCountry && conqueredCountry) {
+          const conquerorRegion = world.mapRegions.get(conquerorCountry.governingRegion);
+          const conqueredRegion = world.mapRegions.get(conqueredCountry.governingRegion);
+          if (conquerorRegion?.cities[0] && conqueredRegion?.cities[0]) {
+            tryBuildRoad(conquerorRegion.cities[0].cellIndex, conqueredRegion.cities[0].cellIndex);
+          }
         }
       }
 
@@ -817,6 +867,7 @@ export class HistoryGenerator {
       if (i % 20 === 0) {
         snapshots[i] = new Int16Array(ownership);
         tradeSnapshots[i] = Array.from(activeTradeEntries.values());
+        roadSnapshots[i] = [...activeRoads];
         wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
@@ -837,6 +888,7 @@ export class HistoryGenerator {
     if (prevOwnership) {
       snapshots[yearsToSerialize] = prevOwnership;
       tradeSnapshots[yearsToSerialize] = Array.from(activeTradeEntries.values());
+      roadSnapshots[yearsToSerialize] = [...activeRoads];
       wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
@@ -850,6 +902,7 @@ export class HistoryGenerator {
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
+      roadSnapshots[0] = [];
       wonderSnapshots[0] = [];
       religionSnapshots[0] = [];
       empireSnapshots[0] = [];
@@ -921,8 +974,9 @@ export class HistoryGenerator {
       }
     }
 
-    // Phase 8: Generate roads between founded cities
-    const roads = generateRoads(cells, cities);
+    // Phase 8: Roads are built dynamically during the year loop above.
+    // The final set of roads is the accumulated activeRoads array.
+    const roads = activeRoads;
 
     // Phase 9: Compute statistics
     let peakPop = 0;
@@ -1081,6 +1135,7 @@ export class HistoryGenerator {
       numYears: yearsToSerialize,
       snapshots,
       tradeSnapshots,
+      roadSnapshots,
       wonderSnapshots,
       religionSnapshots,
       empireSnapshots,
