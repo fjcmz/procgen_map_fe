@@ -65,16 +65,19 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 48 });
     assignBiomes(cells, width, height, noise, profile);
 
-    post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
-    generateRivers(cells); // initial pass — computes riverFlow for erosion
+    let rivers: ReturnType<typeof generateRivers> = [];
+    if (!profile.suppressRivers) {
+      post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
+      generateRivers(cells); // initial pass — computes riverFlow for erosion
 
-    post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
-    hydraulicErosion(cells, profile);
+      post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
+      hydraulicErosion(cells, profile);
 
-    post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
-    const rivers = generateRivers(cells); // final pass — follows carved terrain
+      post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
+      rivers = generateRivers(cells); // final pass — follows carved terrain
+    }
 
-    // Refresh elevation-dependent properties after erosion
+    // Refresh elevation-dependent properties after erosion (or for profile-based overrides)
     assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
     assignBiomes(cells, width, height, noise, profile);
 
