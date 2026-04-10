@@ -17,12 +17,12 @@ export const REGION_BIOME_GROWTH: Record<RegionBiome, number> = {
 
 /** Carrying capacity per city for logistic growth, by region biome. */
 export const REGION_BIOME_CAPACITY: Record<RegionBiome, number> = {
-  temperate: 50_000,
-  arid:      20_000,
-  tropical:  15_000,
-  swamp:      8_000,
-  desert:     5_000,
-  tundra:     5_000,
+  temperate: 2_500_000,
+  arid:      1_000_000,
+  tropical:    750_000,
+  swamp:       400_000,
+  desert:      250_000,
+  tundra:      250_000,
 };
 
 export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
