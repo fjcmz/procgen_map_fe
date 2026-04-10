@@ -455,6 +455,22 @@ export function getOwnershipAtYear(
 }
 
 /**
+ * Return roads built by a given year, using the nearest snapshot.
+ * Roads are monotonically growing — no delta replay needed.
+ */
+export function getRoadsAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): Road[] {
+  const snapshotYears = Object.keys(historyData.roadSnapshots)
+    .map(Number)
+    .filter(y => y <= targetYear)
+    .sort((a, b) => b - a);
+  const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
+  return historyData.roadSnapshots[baseYear] ?? [];
+}
+
+/**
  * Return active trade route cell-index pairs at a given year, using the nearest snapshot.
  * No delta replay needed — trade snapshots are full arrays.
  */
@@ -751,6 +767,7 @@ export function generateHistory(
     numYears,
     snapshots,
     tradeSnapshots: {},
+    roadSnapshots: {},
     wonderSnapshots: {},
     religionSnapshots: {},
     empireSnapshots: {},

@@ -1,7 +1,7 @@
-import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, EmpireSnapshotEntry, Season } from '../types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, Road, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, EmpireSnapshotEntry, Season } from '../types';
 import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
-import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
+import { getOwnershipAtYear, getTradesAtYear, getRoadsAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
@@ -391,8 +391,7 @@ function drawPatternedBorders(
   ctx.setLineDash([]);
 }
 
-function drawRoads(ctx: CanvasRenderingContext2D, data: MapData): void {
-  const { cells, roads } = data;
+function drawRoads(ctx: CanvasRenderingContext2D, cells: Cell[], roads: Road[]): void {
   ctx.strokeStyle = '#8b6040';
   ctx.lineWidth = 1.2;
   ctx.lineCap = 'round';
@@ -1112,6 +1111,10 @@ export function render(
     layers.tradeRoutes && data.history && selectedYear !== undefined
       ? getTradesAtYear(data.history, selectedYear)
       : undefined;
+  const roadsAtYear =
+    layers.roads && data.history && selectedYear !== undefined
+      ? getRoadsAtYear(data.history, selectedYear)
+      : undefined;
   const wonderCells =
     layers.wonderMarkers && data.history && selectedYear !== undefined
       ? getWondersAtYear(data.history, selectedYear)
@@ -1193,8 +1196,11 @@ export function render(
       drawTradeRoutes(ctx, data.cells, tradeRoutes);
     }
 
-    // Layer 6: Roads
-    if (layers.roads) drawRoads(ctx, data);
+    // Layer 6: Roads (year-aware when history exists, else static fallback)
+    if (layers.roads) {
+      const roads = roadsAtYear ?? data.roads;
+      if (roads.length > 0) drawRoads(ctx, data.cells, roads);
+    }
 
     // Layer 7: Icons (biome + cities)
     if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet, citySizesAtYear);
