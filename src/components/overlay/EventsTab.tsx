@@ -130,6 +130,23 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
         </button>
         {filterExpanded && (
           <div style={styles.typeFilterIcons}>
+            <span style={styles.typeFilterActions}>
+              <button
+                style={styles.typeFilterActionBtn}
+                onClick={() => setHiddenTypes(new Set())}
+                title="Show all event types"
+              >
+                All
+              </button>
+              <button
+                style={styles.typeFilterActionBtn}
+                onClick={() => setHiddenTypes(new Set(EVENT_TYPE_GROUPS.flatMap(g => g.types)))}
+                title="Hide all event types"
+              >
+                None
+              </button>
+              <span style={styles.typeFilterSep} />
+            </span>
             {EVENT_TYPE_GROUPS.map((group, gi) => (
               <span key={group.label} style={styles.typeFilterGroup}>
                 {gi > 0 && <span style={styles.typeFilterSep} />}
@@ -273,6 +290,21 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 2,
     marginTop: 3,
     padding: '3px 0',
+  },
+  typeFilterActions: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+  },
+  typeFilterActionBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: 9,
+    color: '#2060a0',
+    textDecoration: 'underline',
+    padding: '2px 0',
   },
   typeFilterGroup: {
     display: 'inline-flex',
