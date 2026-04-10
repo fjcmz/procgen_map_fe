@@ -110,6 +110,13 @@ export class ConquerGenerator {
       }
     }
 
+    // Transfer expansion regions from conquered to conqueror
+    for (const region of world.mapRegions.values()) {
+      if (region.expansionOwnerId === conqueredCountry.id) {
+        region.expansionOwnerId = conquerorCountry.id;
+      }
+    }
+
     return conquer;
   }
 

@@ -55,6 +55,10 @@ export class Region {
   neighboursCount: number = 0;
   isCountry: boolean = false;
   countryId: string | null = null;
+  /** True when this region was claimed via territorial expansion (not country formation). */
+  isExpansion: boolean = false;
+  /** Country ID of the country that claimed this region via expansion. */
+  expansionOwnerId: string | null = null;
   hasResources: boolean = false;
   neighbourRegions: Region[] = [];
   potentialNeighbours: Region[][] = [];

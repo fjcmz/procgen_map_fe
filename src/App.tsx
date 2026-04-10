@@ -7,7 +7,7 @@ import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
-import { getOwnershipAtYear } from './lib/history';
+import { getOwnershipAtYear, getExpansionFlagsAtYear } from './lib/history';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 2000;
@@ -64,6 +64,12 @@ export default function App() {
     const snapKey = Math.floor(selectedYear / 20) * 20;
     return mapData.history.citySizeSnapshots[snapKey] ?? undefined;
   }, [mapData?.history?.citySizeSnapshots, selectedYear]);
+
+  // Pre-compute expansion flags at the current year from snapshots
+  const expansionFlagsAtYear = useMemo(() => {
+    if (!mapData?.history || selectedYear === undefined) return undefined;
+    return getExpansionFlagsAtYear(mapData.history, selectedYear);
+  }, [mapData?.history, selectedYear]);
 
   const handleEntityNavigate = useCallback((cellIndices: number[], centerCellIndex: number) => {
     const cell = mapData?.cells[centerCellIndex];
@@ -245,6 +251,7 @@ export default function App() {
         season={season}
         highlightCells={highlightCells}
         citySizesAtYear={citySizesAtYear}
+        expansionFlags={expansionFlagsAtYear}
         onTransformChange={setViewTransform}
         onCellClick={handleCellClick}
         onInteraction={handleMapInteraction}

@@ -18,12 +18,14 @@ import type { War } from './War';
 import { techGenerator, getCityTechLevel, getCountryTechLevel } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
+import { expandGenerator } from './Expand';
 import type { CountryEvent } from './Country';
 import { ruinifyCity } from './Ruin';
 import type { CityEntity } from '../physical/CityEntity';
+import type { Cell } from '../../types';
 
 export class YearGenerator {
-  generate(rng: () => number, timeline: Timeline, world: World): Year {
+  generate(rng: () => number, timeline: Timeline, world: World, cells?: Cell[], usedCityNames?: Set<string>): Year {
     const year = new Year(rng);
     year.timeline = timeline;
 
@@ -215,6 +217,13 @@ export class YearGenerator {
     for (let i = 0; i < countryCount; i++) {
       const c = countryGenerator.generate(rng, year, world);
       if (c) year.countries.push(c); else break;
+    }
+
+    // 3b. Territorial expansion: countries expand into unclaimed neighboring regions
+    if (cells && usedCityNames) {
+      const { expansions, settlements } = expandGenerator.generate(rng, year, world, cells, usedCityNames);
+      year.expansions.push(...expansions);
+      year.settlements.push(...settlements);
     }
 
     // 4. Illustrates: random [0, max(2, usableCities/500)-1]

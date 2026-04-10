@@ -19,3 +19,4 @@ export type { Conquer } from './Conquer';
 export type { Empire } from './Empire';
 export type { Merge } from './Merge';
 export type { Ruin } from './Ruin';
+export type { Expand, Settle } from './Expand';

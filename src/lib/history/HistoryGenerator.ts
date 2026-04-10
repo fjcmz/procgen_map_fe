@@ -54,6 +54,10 @@ export interface HistoryStats {
   totalTechDiffusions: number;
   /** Total cities that became ruins across the timeline. */
   totalRuins: number;
+  /** Total territorial expansion events across the timeline. */
+  totalExpansions: number;
+  /** Total settlement events (cities founded in expansion territory) across the timeline. */
+  totalSettlements: number;
   /**
    * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
    * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
@@ -501,6 +505,35 @@ function serializeYearEvents(
     });
   }
 
+  // Territorial expansions
+  for (const exp of year.expansions) {
+    const numIdx = countryMap.idToIndex.get(exp.countryId) ?? -1;
+    const cName = resolveCountryName(countryMap, exp.countryId);
+    const region = world.mapRegions.get(exp.regionId);
+    events.push({
+      type: 'TERRITORIAL_EXPANSION',
+      year: absYear,
+      initiatorId: numIdx,
+      description: `${cName} expands into unclaimed territory (${region?.biome ?? 'unknown'} region, ${exp.cellIndices.length} cells).`,
+      expansionCellCount: exp.cellIndices.length,
+    });
+  }
+
+  // Settlements
+  for (const settle of year.settlements) {
+    const numIdx = countryMap.idToIndex.get(settle.countryId) ?? -1;
+    const cName = resolveCountryName(countryMap, settle.countryId);
+    const city = world.mapCities.get(settle.cityId);
+    events.push({
+      type: 'SETTLEMENT',
+      year: absYear,
+      initiatorId: numIdx,
+      description: `${cName} settles ${city?.name ?? 'a city'} in its expansion territory, consolidating ${settle.cellIndices.length} cells.`,
+      settlementCityName: city?.name,
+      locationCellIndex: city?.cellIndex,
+    });
+  }
+
   return events;
 }
 
@@ -579,7 +612,95 @@ function computeOwnership(
     }
   }
 
+  // Overlay expansion territory: replay expansion events up to this year
+  for (const y of timeline.years) {
+    if (y.year > yearObj.year) break;
+    for (const exp of y.expansions) {
+      const numIdx = countryMap.idToIndex.get(exp.countryId);
+      if (numIdx === undefined) continue;
+      for (const ci of exp.cellIndices) {
+        if (ownership[ci] !== -2) {
+          ownership[ci] = numIdx;
+        }
+      }
+    }
+    // Conquests transfer expansion regions: the conqueror inherits expansion cells
+    for (const conquer of y.conquers) {
+      const conqueredCountry = world.mapCountries.get(conquer.conquered) as CountryEvent | undefined;
+      if (!conqueredCountry) continue;
+      const conquerorIdx = countryMap.idToIndex.get(conquer.conqueror);
+      if (conquerorIdx === undefined) continue;
+      // Find expansion regions that belonged to conquered and reassign
+      for (const prevY of timeline.years) {
+        if (prevY.year > y.year) break;
+        for (const prevExp of prevY.expansions) {
+          if (prevExp.countryId === conquer.conquered) {
+            for (const ci of prevExp.cellIndices) {
+              if (ownership[ci] !== -2) {
+                ownership[ci] = conquerorIdx;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   return ownership;
+}
+
+/**
+ * Compute expansion flags: which cells are expansion territory at a given year.
+ * Returns a Uint8Array where 1 = expansion territory, 0 = core/unclaimed.
+ */
+function computeExpansionFlags(
+  cells: Cell[],
+  yearObj: Year,
+  _countryMap: CountryIndexMap,
+): Uint8Array {
+  const n = cells.length;
+  const flags = new Uint8Array(n); // all 0
+
+  // Track which cells are expansion territory and who owns them
+  // We need to handle: expansions add cells, settlements clear them, conquests transfer them
+  const expansionOwner = new Map<number, string>(); // cellIndex → countryId
+
+  const timeline = yearObj.timeline;
+  for (const y of timeline.years) {
+    if (y.year > yearObj.year) break;
+
+    // Expansions: mark cells as expansion territory
+    for (const exp of y.expansions) {
+      for (const ci of exp.cellIndices) {
+        expansionOwner.set(ci, exp.countryId);
+      }
+    }
+
+    // Settlements: clear expansion flags for consolidated cells
+    for (const settle of y.settlements) {
+      for (const ci of settle.cellIndices) {
+        expansionOwner.delete(ci);
+      }
+    }
+
+    // Conquests: transfer expansion ownership
+    for (const conquer of y.conquers) {
+      for (const [ci, owner] of expansionOwner) {
+        if (owner === conquer.conquered) {
+          expansionOwner.set(ci, conquer.conqueror);
+        }
+      }
+    }
+  }
+
+  // Write flags
+  for (const ci of expansionOwner.keys()) {
+    if (ci >= 0 && ci < n) {
+      flags[ci] = 1;
+    }
+  }
+
+  return flags;
 }
 
 /**
@@ -627,11 +748,11 @@ export class HistoryGenerator {
     stats: HistoryStats;
   } {
     // Phase 0: Build physical world
-    const { world, regionData, continentData } = buildPhysicalWorld(cells, width, rng);
+    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng);
 
     // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
     const historyRoot = HistoryRoot.INSTANCE;
-    const timeline = timelineGenerator.generate(rng, historyRoot, world);
+    const timeline = timelineGenerator.generate(rng, historyRoot, world, cells, usedCityNames);
 
     // Phase 2: Build country index map for ownership arrays
     const countryMap = buildCountryIndexMap(world, rng);
@@ -648,6 +769,7 @@ export class HistoryGenerator {
     const religionSnapshots: Record<number, number[]> = {};
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
     const populationSnapshots: Record<number, Record<number, number>> = {};
+    const expansionSnapshots: Record<number, Uint8Array> = {};
 
     const buildPopulationSnapshot = (yearObj: Year): Record<number, number> => {
       return { ...yearObj.cityPopulations };
@@ -876,6 +998,9 @@ export class HistoryGenerator {
         worldPopulation: yearObj.worldPopulation,
       });
 
+      // Compute expansion flags for this year
+      const expFlags = computeExpansionFlags(cells, yearObj, countryMap);
+
       // Snapshot every 20 years
       if (i % 20 === 0) {
         snapshots[i] = new Int16Array(ownership);
@@ -884,6 +1009,7 @@ export class HistoryGenerator {
         wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
+        expansionSnapshots[i] = new Uint8Array(expFlags);
         // City sizes: store size tier index for all city entities
         const sizeArr = new Uint8Array(allCityEntities.length);
         for (let ci = 0; ci < allCityEntities.length; ci++) {
@@ -905,6 +1031,10 @@ export class HistoryGenerator {
       wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
+      const finalYearObj = timeline.years[yearsToSerialize - 1];
+      if (finalYearObj) {
+        expansionSnapshots[yearsToSerialize] = computeExpansionFlags(cells, finalYearObj, countryMap);
+      }
       // Final city size snapshot
       const finalYear = timeline.years[yearsToSerialize - 1];
       const finalSizeArr = new Uint8Array(allCityEntities.length);
@@ -921,6 +1051,7 @@ export class HistoryGenerator {
       religionSnapshots[0] = [];
       empireSnapshots[0] = [];
       populationSnapshots[0] = {};
+      expansionSnapshots[0] = new Uint8Array(cells.length);
     }
 
     // Phase 5: Build Country[] for UI
@@ -1141,6 +1272,8 @@ export class HistoryGenerator {
       totalTechLossesAbsorbed,
       totalTechDiffusions,
       totalRuins: timeline.years.reduce((sum, y) => sum + y.ruins.length, 0),
+      totalExpansions: timeline.years.reduce((sum, y) => sum + y.expansions.length, 0),
+      totalSettlements: timeline.years.reduce((sum, y) => sum + y.settlements.length, 0),
       techEventsPerCenturyByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,
@@ -1159,6 +1292,7 @@ export class HistoryGenerator {
       populationSnapshots,
       techTimeline,
       citySizeSnapshots,
+      expansionSnapshots,
     };
 
     return {

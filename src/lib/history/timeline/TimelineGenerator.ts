@@ -2,18 +2,19 @@ import { Timeline } from './Timeline';
 import { yearGenerator } from './YearGenerator';
 import type { HistoryRoot } from '../HistoryRoot';
 import type { World } from '../physical/World';
+import type { Cell } from '../../types';
 
 const NUM_YEARS = 5000;
 
 export class TimelineGenerator {
-  generate(rng: () => number, history: HistoryRoot, world: World): Timeline {
+  generate(rng: () => number, history: HistoryRoot, world: World, cells?: Cell[], usedCityNames?: Set<string>): Timeline {
     const timeline = new Timeline(rng);
     timeline.history = history;
     // Range: [-3000, -1001]
     timeline.startOfTime = Math.floor(rng() * 2000) - 3000;
 
     for (let i = 0; i < NUM_YEARS; i++) {
-      const year = yearGenerator.generate(rng, timeline, world);
+      const year = yearGenerator.generate(rng, timeline, world, cells, usedCityNames);
       timeline.years.push(year);
     }
 
