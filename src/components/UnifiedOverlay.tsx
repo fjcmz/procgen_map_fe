@@ -19,6 +19,8 @@ interface UnifiedOverlayProps {
   onNumCellsChange: (n: number) => void;
   waterRatio: number;
   onWaterRatioChange: (r: number) => void;
+  profileName: string;
+  onProfileChange: (name: string) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
   politicalMode: PoliticalMode;
@@ -201,6 +203,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onNumCellsChange={props.onNumCellsChange}
                 waterRatio={props.waterRatio}
                 onWaterRatioChange={props.onWaterRatioChange}
+                profileName={props.profileName}
+                onProfileChange={props.onProfileChange}
                 mapView={props.mapView}
                 onMapViewChange={props.onMapViewChange}
                 politicalMode={props.politicalMode}
