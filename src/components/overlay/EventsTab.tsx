@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef } from 'react';
-import type { HistoryData, HistoryEvent, SelectedEntity } from '../../lib/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { HistoryData, HistoryEvent, HistoryEventType, SelectedEntity } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
-import { EVENT_ICONS, EVENT_COLORS } from './eventStyles';
+import { EVENT_ICONS, EVENT_COLORS, EVENT_TYPE_GROUPS } from './eventStyles';
 
 interface EventsTabProps {
   historyData: HistoryData;
@@ -26,6 +26,17 @@ function eventMatchesEntity(ev: HistoryEvent, entity: SelectedEntity, empireMemb
 
 export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntity, onSelectEntity }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
+  const [hiddenTypes, setHiddenTypes] = useState<Set<HistoryEventType>>(new Set());
+  const [filterExpanded, setFilterExpanded] = useState(false);
+
+  const toggleType = (type: HistoryEventType) => {
+    setHiddenTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
 
   // Resolve empire members for filtering (if entity is an empire)
   const empireMembers = useMemo(() => {
@@ -43,6 +54,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
     for (const yearData of historyData.years) {
       if (yearData.year > selectedYear) break;
       for (const ev of yearData.events) {
+        if (hiddenTypes.size > 0 && hiddenTypes.has(ev.type)) continue;
         if (selectedEntity && !eventMatchesEntity(ev, selectedEntity, empireMembers)) continue;
         result.push({ year: yearData.year, event: ev });
       }
@@ -60,7 +72,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
       }
     }
     return result;
-  }, [historyData.years, selectedYear, selectedEntity, empireMembers]);
+  }, [historyData.years, selectedYear, selectedEntity, empireMembers, hiddenTypes]);
 
   // Scroll event list to bottom when year changes. `block: 'nearest'` keeps
   // the scroll contained to the inner list — without it the nested-flex
@@ -104,6 +116,46 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
           )}
         </div>
       )}
+
+      <div style={styles.typeFilterBar}>
+        <button
+          style={styles.typeFilterToggle}
+          onClick={() => setFilterExpanded(e => !e)}
+          title="Filter by event type"
+        >
+          {filterExpanded ? '\u25BE' : '\u25B8'} Filter
+          {hiddenTypes.size > 0 && (
+            <span style={styles.typeFilterBadge}>{hiddenTypes.size} hidden</span>
+          )}
+        </button>
+        {filterExpanded && (
+          <div style={styles.typeFilterIcons}>
+            {EVENT_TYPE_GROUPS.map((group, gi) => (
+              <span key={group.label} style={styles.typeFilterGroup}>
+                {gi > 0 && <span style={styles.typeFilterSep} />}
+                {group.types.map(type => {
+                  const isHidden = hiddenTypes.has(type);
+                  return (
+                    <button
+                      key={type}
+                      style={{
+                        ...styles.typeIconBtn,
+                        opacity: isHidden ? 0.3 : 1,
+                        background: isHidden ? 'transparent' : `${EVENT_COLORS[type]}22`,
+                        borderColor: isHidden ? '#c0a070' : EVENT_COLORS[type],
+                      }}
+                      onClick={() => toggleType(type)}
+                      title={`${isHidden ? 'Show' : 'Hide'} ${type.toLowerCase().replace('_', ' ')} events`}
+                    >
+                      {EVENT_ICONS[type]}
+                    </button>
+                  );
+                })}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div style={styles.logList}>
         {cumulativeEvents.length === 0 ? (
@@ -187,6 +239,64 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#2060a0',
     textDecoration: 'underline',
     padding: 0,
+  },
+  typeFilterBar: {
+    marginBottom: 4,
+  },
+  typeFilterToggle: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: 10,
+    color: '#5a3a10',
+    padding: '2px 0',
+    fontWeight: 'bold',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+  },
+  typeFilterBadge: {
+    fontSize: 9,
+    color: '#a04040',
+    fontWeight: 'normal',
+    fontStyle: 'italic',
+    textTransform: 'none' as const,
+    letterSpacing: 0,
+  },
+  typeFilterIcons: {
+    display: 'flex',
+    flexWrap: 'wrap' as const,
+    alignItems: 'center',
+    gap: 2,
+    marginTop: 3,
+    padding: '3px 0',
+  },
+  typeFilterGroup: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 2,
+  },
+  typeFilterSep: {
+    display: 'inline-block',
+    width: 1,
+    height: 14,
+    background: '#c0a070',
+    margin: '0 2px',
+  },
+  typeIconBtn: {
+    width: 22,
+    height: 22,
+    padding: 0,
+    border: '1px solid #c0a070',
+    borderRadius: 3,
+    cursor: 'pointer',
+    fontSize: 12,
+    lineHeight: '20px',
+    textAlign: 'center' as const,
+    transition: 'opacity 0.15s',
   },
   // Event list (the only scrollable region inside EventsTab).
   logList: {

@@ -9,7 +9,7 @@
  * union becomes a compile-time error here AND in the `TECH_FIELDS` local
  * constant in `HistoryGenerator.ts`. Keep both sites in sync. (spec stretch §5)
  */
-import type { TechField } from '../../lib/types';
+import type { HistoryEventType, TechField } from '../../lib/types';
 
 export const EVENT_ICONS: Record<string, string> = {
   WAR: '\u2694\uFE0F',
@@ -52,6 +52,15 @@ export const EVENT_COLORS: Record<string, string> = {
   RUIN: '#888888',
   POPULATION: '#5a7a5a',
 };
+
+export const EVENT_TYPE_GROUPS: { label: string; types: HistoryEventType[] }[] = [
+  { label: 'Civilization', types: ['FOUNDATION', 'CONTACT', 'COUNTRY', 'EMPIRE'] },
+  { label: 'Culture',      types: ['ILLUSTRATE', 'WONDER', 'RELIGION', 'TECH', 'TECH_LOSS'] },
+  { label: 'Economy',      types: ['TRADE'] },
+  { label: 'Conflict',     types: ['WAR', 'CONQUEST'] },
+  { label: 'Disasters',    types: ['CATACLYSM', 'COLLAPSE'] },
+  { label: 'Other',        types: ['MERGE', 'EXPANSION', 'RUIN'] },
+];
 
 export const TECH_FIELD_COLORS: Record<TechField, string> = {
   science: '#208080',     // teal (canonical tech color)
