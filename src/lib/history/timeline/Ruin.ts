@@ -40,6 +40,15 @@ export function ruinifyCity(
   cause: string,
   rng: () => number,
 ): Ruin {
+  // Guard: already a ruin (e.g., both cataclysm and pop<100 triggers fire same year)
+  if (city.isRuin) {
+    return {
+      id: 'ruin_noop',
+      city: city.id,
+      cause,
+    };
+  }
+
   const absYear = year.year;
 
   const ruin: Ruin = {
