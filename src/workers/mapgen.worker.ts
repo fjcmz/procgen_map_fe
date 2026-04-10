@@ -68,13 +68,13 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     let rivers: ReturnType<typeof generateRivers> = [];
     if (!profile.suppressRivers) {
       post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
-      generateRivers(cells); // initial pass — computes riverFlow for erosion
+      generateRivers(cells, profile); // initial pass — computes riverFlow for erosion
 
       post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
       hydraulicErosion(cells, profile);
 
       post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
-      rivers = generateRivers(cells); // final pass — follows carved terrain
+      rivers = generateRivers(cells, profile); // final pass — follows carved terrain
     }
 
     // Refresh elevation-dependent properties after erosion (or for profile-based overrides)

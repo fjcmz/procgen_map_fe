@@ -112,9 +112,9 @@ function runSeed(seed: string, args: CliArgs): SeedResult {
   assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
   assignBiomes(cells, args.width, args.height, noise, profile);
   if (!profile.suppressRivers) {
-    generateRivers(cells);
+    generateRivers(cells, profile);
     hydraulicErosion(cells, profile);
-    generateRivers(cells);
+    generateRivers(cells, profile);
   }
   assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
   assignBiomes(cells, args.width, args.height, noise, profile);
