@@ -107,15 +107,16 @@ export const PROFILES: Record<string, TerrainProfile> = {
     suppressRivers: true,
   },
 
-  /** Snowball Earth. Glaciers reach the equator, thin strips of tundra at the warmest latitudes. */
+  /** Snowball Earth. Nearly all water frozen, land covered in snow and ice. */
   ice: {
     ...DEFAULT_PROFILE,
-    iceTempThreshold: 0.65,
-    snowTempThreshold: 0.55,
-    tundraTempThreshold: 0.80,
-    globalTempOffset: -0.35,
+    iceTempThreshold: 0.80,
+    snowTempThreshold: 0.70,
+    tundraTempThreshold: 0.85,
+    globalTempOffset: -0.45,
     lapseRate: 0.20,
-    contStrength: 0.25,
+    contStrength: 0.05,
+    maritimeStrength: 0.02,
     warmCurrentStrength: 0.04,
     coldCurrentStrength: 0.16,
     polarIceStart: 0.20,
