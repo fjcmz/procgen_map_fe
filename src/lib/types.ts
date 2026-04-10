@@ -284,6 +284,7 @@ export interface TerrainProfile {
 
   // --- River control ---
   suppressRivers: boolean;
+  riverFlowThreshold: number;
 }
 
 export interface GenerateRequest {

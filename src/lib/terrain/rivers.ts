@@ -1,6 +1,4 @@
-import type { Cell, River } from '../types';
-
-const FLOW_THRESHOLD = 4;
+import type { Cell, River, TerrainProfile } from '../types';
 
 /** Find the lowest-elevation neighbor for each land cell (drainage direction). */
 function buildDrainageMap(cells: Cell[]): (number | null)[] {
@@ -40,11 +38,11 @@ function accumulateFlow(cells: Cell[], drainage: (number | null)[]): void {
 }
 
 /** Collect river paths as chains of cell indices. */
-function collectRivers(cells: Cell[], drainage: (number | null)[]): River[] {
+function collectRivers(cells: Cell[], drainage: (number | null)[], flowThreshold: number): River[] {
   // River segments: pairs (from, to) where flow > threshold
   const segments: [number, number][] = [];
   for (const cell of cells) {
-    if (!cell.isWater && cell.riverFlow >= FLOW_THRESHOLD) {
+    if (!cell.isWater && cell.riverFlow >= flowThreshold) {
       const d = drainage[cell.index];
       if (d !== null) {
         segments.push([cell.index, d]);
@@ -94,8 +92,8 @@ function collectRivers(cells: Cell[], drainage: (number | null)[]): River[] {
   return rivers;
 }
 
-export function generateRivers(cells: Cell[]): River[] {
+export function generateRivers(cells: Cell[], profile: TerrainProfile): River[] {
   const drainage = buildDrainageMap(cells);
   accumulateFlow(cells, drainage);
-  return collectRivers(cells, drainage);
+  return collectRivers(cells, drainage, profile.riverFlowThreshold);
 }

@@ -64,6 +64,7 @@ export const DEFAULT_PROFILE: TerrainProfile = {
 
   // --- River control ---
   suppressRivers: false,
+  riverFlowThreshold: 4,
 };
 
 /** Recommended water ratios per profile (not part of TerrainProfile — passed separately on GenerateRequest). */
@@ -109,10 +110,10 @@ export const PROFILES: Record<string, TerrainProfile> = {
   /** Snowball Earth. Glaciers reach the equator, thin strips of tundra at the warmest latitudes. */
   ice: {
     ...DEFAULT_PROFILE,
-    iceTempThreshold: 0.55,
-    snowTempThreshold: 0.45,
-    tundraTempThreshold: 0.60,
-    globalTempOffset: -0.25,
+    iceTempThreshold: 0.65,
+    snowTempThreshold: 0.55,
+    tundraTempThreshold: 0.80,
+    globalTempOffset: -0.35,
     lapseRate: 0.20,
     contStrength: 0.25,
     warmCurrentStrength: 0.04,
@@ -121,6 +122,7 @@ export const PROFILES: Record<string, TerrainProfile> = {
     polarIceEnd: 0.50,
     latAmplitude: 0.10,
     globalMoistureOffset: -0.05,
+    riverFlowThreshold: 25,
   },
 
   /** Lush greenhouse world. Dense forests from pole to pole, heavy rainfall, no deserts. */
