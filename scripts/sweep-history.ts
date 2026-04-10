@@ -35,6 +35,7 @@ import {
   assignBiomes,
   generateRivers,
   hydraulicErosion,
+  DEFAULT_PROFILE,
 } from '../src/lib/terrain/index.ts';
 import { historyGenerator } from '../src/lib/history/HistoryGenerator.ts';
 import type { HistoryStats } from '../src/lib/history/HistoryGenerator.ts';
@@ -101,19 +102,20 @@ interface SeedResult {
 function runSeed(seed: string, args: CliArgs): SeedResult {
   const t0 = Date.now();
 
-  // Mirror mapgen.worker.ts:42–73 exactly.
+  // Mirror mapgen.worker.ts exactly.
+  const profile = DEFAULT_PROFILE;
   const { cells } = buildCellGraph(seed, args.cells, args.width, args.height);
   const noise = createNoiseSamplers3D(seed);
-  assignElevation(cells, args.width, args.height, noise, args.waterRatio, seed);
-  const { sstAnomaly } = computeOceanCurrents(cells, args.width, args.height);
-  const distFromOcean = assignMoisture(cells, args.width, args.height, noise, sstAnomaly);
-  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly);
-  assignBiomes(cells, args.width, args.height, noise);
+  assignElevation(cells, args.width, args.height, noise, args.waterRatio, seed, profile);
+  const { sstAnomaly } = computeOceanCurrents(cells, args.width, args.height, profile);
+  const distFromOcean = assignMoisture(cells, args.width, args.height, noise, sstAnomaly, profile);
+  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
+  assignBiomes(cells, args.width, args.height, noise, profile);
   generateRivers(cells);
-  hydraulicErosion(cells);
+  hydraulicErosion(cells, profile);
   generateRivers(cells);
-  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly);
-  assignBiomes(cells, args.width, args.height, noise);
+  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
+  assignBiomes(cells, args.width, args.height, noise, profile);
 
   // Worker uses `seed + '_history'` for the history RNG (see mapgen.worker.ts:84).
   const rng = seededPRNG(seed + '_history');

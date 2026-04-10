@@ -1,4 +1,4 @@
-import type { Cell } from '../types';
+import type { Cell, TerrainProfile } from '../types';
 import type { NoiseSampler3D } from './noise';
 import { fbmCylindrical, seededPRNG } from './noise';
 
@@ -21,22 +21,11 @@ interface TectonicPlate {
 // Plate generation tuning constants
 // ---------------------------------------------------------------------------
 
-const NUM_CONTINENTAL_MIN = 3;
-const NUM_CONTINENTAL_MAX = 5;
-const NUM_OCEANIC_MIN = 8;
-const NUM_OCEANIC_MAX = 12;
-
-const CONTINENTAL_GROWTH_MIN = 2.0;
-const CONTINENTAL_GROWTH_MAX = 3.5;
 const OCEANIC_GROWTH_MIN = 0.6;
 const OCEANIC_GROWTH_MAX = 1.0;
 
 const BASE_STEP_SIZE = 4;
 const CONTINENTAL_SEED_MIN_SEP_FACTOR = 0.15; // multiplied by sqrt(n)
-
-const SEAM_BOOST_MIN = 0.08;
-const SEAM_BOOST_MAX = 0.12;
-const SEAM_SPREAD_RINGS = 4;
 
 /**
  * BFS from a single cell, returns hop distances to all cells.
@@ -71,13 +60,14 @@ function bfsDistances(cells: Cell[], startCell: number): Int32Array {
  */
 function assignPlates(
   cells: Cell[],
-  rng: () => number
+  rng: () => number,
+  profile: TerrainProfile
 ): { plateOf: Int32Array; plates: TectonicPlate[] } {
   const n = cells.length;
   const plateOf = new Int32Array(n).fill(-1);
 
-  const numContinental = NUM_CONTINENTAL_MIN + Math.floor(rng() * (NUM_CONTINENTAL_MAX - NUM_CONTINENTAL_MIN + 1));
-  const numOceanic = NUM_OCEANIC_MIN + Math.floor(rng() * (NUM_OCEANIC_MAX - NUM_OCEANIC_MIN + 1));
+  const numContinental = profile.numContinentalMin + Math.floor(rng() * (profile.numContinentalMax - profile.numContinentalMin + 1));
+  const numOceanic = profile.numOceanicMin + Math.floor(rng() * (profile.numOceanicMax - profile.numOceanicMin + 1));
   const numPlates = numContinental + numOceanic;
 
   const minSeparation = Math.floor(Math.sqrt(n) * CONTINENTAL_SEED_MIN_SEP_FACTOR);
@@ -157,7 +147,7 @@ function assignPlates(
   const growthWeight: number[] = [];
   for (let i = 0; i < numPlates; i++) {
     if (i < numContinental) {
-      growthWeight.push(CONTINENTAL_GROWTH_MIN + rng() * (CONTINENTAL_GROWTH_MAX - CONTINENTAL_GROWTH_MIN));
+      growthWeight.push(profile.continentalGrowthMin + rng() * (profile.continentalGrowthMax - profile.continentalGrowthMin));
     } else {
       growthWeight.push(OCEANIC_GROWTH_MIN + rng() * (OCEANIC_GROWTH_MAX - OCEANIC_GROWTH_MIN));
     }
@@ -227,11 +217,12 @@ function boostContinentalSeams(
   cells: Cell[],
   plateOf: Int32Array,
   plates: TectonicPlate[],
-  rng: () => number
+  rng: () => number,
+  profile: TerrainProfile
 ): Float64Array {
   const n = cells.length;
   const boost = new Float64Array(n);
-  const mergeBoost = SEAM_BOOST_MIN + rng() * (SEAM_BOOST_MAX - SEAM_BOOST_MIN);
+  const mergeBoost = profile.seamBoostMin + rng() * (profile.seamBoostMax - profile.seamBoostMin);
 
   // Find cells on continental-continental plate boundaries
   const seamCells: number[] = [];
@@ -260,12 +251,12 @@ function boostContinentalSeams(
   let qi = 0;
   while (qi < queue.length) {
     const ci = queue[qi++];
-    if (dist[ci] >= SEAM_SPREAD_RINGS) continue;
+    if (dist[ci] >= profile.seamSpreadRings) continue;
     for (const ni of cells[ci].neighbors) {
       if (!visited[ni] && plates[plateOf[ni]].isContinental) {
         visited[ni] = 1;
         dist[ni] = dist[ci] + 1;
-        boost[ni] = mergeBoost * (1 - dist[ni] / (SEAM_SPREAD_RINGS + 1));
+        boost[ni] = mergeBoost * (1 - dist[ni] / (profile.seamSpreadRings + 1));
         queue.push(ni);
       }
     }
@@ -381,17 +372,18 @@ export function assignElevation(
   height: number,
   noise: NoiseSampler3D,
   waterRatio: number,
-  seed: string
+  seed: string,
+  profile: TerrainProfile
 ): void {
   const rng = seededPRNG(seed + '_tectonics');
   const n = cells.length;
 
   // --- Step 1: Generate tectonic plates ---
   // 3–5 continental plates (clustered, larger) + 8–12 oceanic plates (spread)
-  const { plateOf, plates } = assignPlates(cells, rng);
+  const { plateOf, plates } = assignPlates(cells, rng, profile);
 
   // --- Step 1b: Boost seams between adjacent continental plates ---
-  const seamBoost = boostContinentalSeams(cells, plateOf, plates, rng);
+  const seamBoost = boostContinentalSeams(cells, plateOf, plates, rng, profile);
 
   // --- Step 2: Compute plate boundary effects ---
   const { stress, convergent } = computeBoundaryEffects(
@@ -412,10 +404,10 @@ export function assignElevation(
         // Convergent boundary: mountain building
         if (plate.isContinental) {
           // Continental collision → tall mountains (Himalayas)
-          elev += stress[i] * 0.4;
+          elev += stress[i] * profile.convergentCCBoost;
         } else {
           // Oceanic subduction → volcanic arc, island chains
-          elev += stress[i] * 0.25;
+          elev += stress[i] * profile.convergentOCBoost;
         }
       } else if (convergent[i] < 0) {
         // Divergent boundary: rift valleys on land, mid-ocean ridges at sea
@@ -457,16 +449,17 @@ export function assignElevation(
     const ny = (cell.y / height) * 2 - 1;
     const polarDist = Math.abs(ny);
 
-    if (polarDist > 0.72) {
+    if (polarDist > profile.polarIceStart) {
       // Reduced southern offset for more symmetric poles
       const polarOffset = ny > 0 ? 0.0 : width * 0.17;
       const polarNoise = fbmCylindrical(
         noise.continent, cell.x + polarOffset, cell.y, width, height, 4, 2.0
       );
-      // Smoothstep blend over wider range [0.72, 0.94] to avoid banding
-      const t = Math.min(1, Math.max(0, (polarDist - 0.72) / 0.22));
+      // Smoothstep blend over range [polarIceStart, polarIceEnd] to avoid banding
+      const polarRange = profile.polarIceEnd - profile.polarIceStart;
+      const t = Math.min(1, Math.max(0, (polarDist - profile.polarIceStart) / polarRange));
       const polarBlend = t * t * (3 - 2 * t);
-      const polarLand = (polarNoise - 0.25) * 1.2 * polarBlend;
+      const polarLand = (polarNoise - 0.25) * profile.polarNoiseAmplitude * polarBlend;
       elev = Math.max(elev, polarLand);
     }
 
@@ -492,7 +485,7 @@ export function assignElevation(
   });
 
   // --- Step 6: Thermal erosion (smooth unrealistic cliffs) ---
-  thermalErosion(cells, 3, 0.05);
+  thermalErosion(cells, profile.thermalErosionIters, profile.thermalErosionTalus);
 
   // --- Step 7: Mark coast cells ---
   for (const cell of cells) {

@@ -1,8 +1,5 @@
-import type { Cell } from '../types';
+import type { Cell, TerrainProfile } from '../types';
 
-// --- Gyre model constants ---
-const WARM_CURRENT_STRENGTH = 0.12;   // max positive SST anomaly (warm poleward currents)
-const COLD_CURRENT_STRENGTH = 0.10;   // max negative SST anomaly (cold equatorward currents)
 const MIN_BASIN_SIZE = 50;            // basins smaller than this get no currents
 
 export interface OceanCurrentData {
@@ -103,7 +100,8 @@ function gyreEnvelope(absLat: number): number {
 export function computeOceanCurrents(
   cells: Cell[],
   width: number,
-  height: number
+  height: number,
+  profile: TerrainProfile
 ): OceanCurrentData {
   const n = cells.length;
   const sstAnomaly = new Float32Array(n); // defaults to 0
@@ -152,7 +150,7 @@ export function computeOceanCurrents(
       // Western margin: warm poleward current
       // Strength peaks at basin edge (relX=0) and fades inward
       const edgeFactor = 1.0 - relX / 0.3;
-      anomaly = WARM_CURRENT_STRENGTH * edgeFactor * envelope;
+      anomaly = profile.warmCurrentStrength * edgeFactor * envelope;
     } else if (relX > 0.7) {
       // Eastern margin: cold equatorward current
       // Strongest in subtropics (absLat 0.15–0.50)
@@ -160,12 +158,12 @@ export function computeOceanCurrents(
       const subtropicalBoost = absLat > 0.15 && absLat < 0.50
         ? 1.0 + 0.3 * (1.0 - Math.abs(absLat - 0.325) / 0.175)
         : 1.0;
-      anomaly = -COLD_CURRENT_STRENGTH * edgeFactor * envelope * Math.min(subtropicalBoost, 1.3);
+      anomaly = -profile.coldCurrentStrength * edgeFactor * envelope * Math.min(subtropicalBoost, 1.3);
     } else {
       // Interior: weak linear interpolation between margins
       const t = (relX - 0.3) / 0.4; // 0 at relX=0.3, 1 at relX=0.7
-      const warmSide = WARM_CURRENT_STRENGTH * 0.1 * envelope; // small residual warmth
-      const coldSide = -COLD_CURRENT_STRENGTH * 0.1 * envelope; // small residual cold
+      const warmSide = profile.warmCurrentStrength * 0.1 * envelope; // small residual warmth
+      const coldSide = -profile.coldCurrentStrength * 0.1 * envelope; // small residual cold
       anomaly = warmSide * (1 - t) + coldSide * t;
     }
 
