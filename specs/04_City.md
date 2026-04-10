@@ -59,6 +59,19 @@ Each size: `(probabilityWeight, initialPopRoll, maxPopRoll, perYearRoll)`
 | metropolis | 5 | `roll(100,10)+1000` | `roll(2000,1000)+3000000` | `roll(160,20)+30` |
 | megalopolis | 1 | `roll(1000,10)+5000` | `roll(4000,1000)+8000000` | `roll(400,20)+50` |
 
+## Dynamic Size Thresholds (`computeCitySize`)
+
+City size is recomputed each year from population and tech levels. The base population thresholds are:
+
+| Size | Min Population |
+|------|---------------|
+| medium | 10,000 |
+| large | 100,000 |
+| metropolis | 1,000,000 |
+| megalopolis | 10,000,000 |
+
+Cities below 10,000 population are classified as `small`. The `government` and `industry` tech levels reduce thresholds by ~4% per combined level via `techFactor = 1 / (1 + 0.04 * (govLevel + industryLevel))`.
+
 ## Trade Capacity (`canTradeMore()`)
 
 ### Base Max Concurrent Trades by Size

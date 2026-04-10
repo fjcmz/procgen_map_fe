@@ -14,10 +14,10 @@ export const CITY_SIZE_TRADE_CAP: Record<CitySize, number> = {
 
 /** Population thresholds for dynamic city size. Ordered descending by minPop. */
 export const CITY_SIZE_THRESHOLDS: { size: CitySize; minPop: number }[] = [
-  { size: 'megalopolis', minPop: 10000 },
-  { size: 'metropolis',  minPop: 2000 },
-  { size: 'large',       minPop: 500 },
-  { size: 'medium',      minPop: 200 },
+  { size: 'megalopolis', minPop: 10_000_000 },
+  { size: 'metropolis',  minPop: 1_000_000 },
+  { size: 'large',       minPop: 100_000 },
+  { size: 'medium',      minPop: 10_000 },
 ];
 
 export const CITY_SIZE_TO_INDEX: Record<CitySize, number> = {
