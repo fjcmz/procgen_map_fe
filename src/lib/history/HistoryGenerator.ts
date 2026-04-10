@@ -19,7 +19,6 @@ import { getCountryTechLevel } from './timeline/Tech';
 import { nameForLevel } from './timeline/techNames';
 import type { IllustrateType } from './timeline/Illustrate';
 import { generateCountryName, generateEmpireName } from './nameGenerator';
-import { CITY_SIZE_TO_INDEX } from './physical/CityEntity';
 import type { CityEntity } from './physical/CityEntity';
 
 /** Statistics about the generated history, for optional introspection. */
@@ -632,12 +631,8 @@ export class HistoryGenerator {
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
     const populationSnapshots: Record<number, Record<number, number>> = {};
 
-    const buildPopulationSnapshot = (): Record<number, number> => {
-      const snap: Record<number, number> = {};
-      for (const city of world.mapCities.values()) {
-        if (city.founded) snap[city.cellIndex] = city.currentPopulation;
-      }
-      return snap;
+    const buildPopulationSnapshot = (yearObj: Year): Record<number, number> => {
+      return { ...yearObj.cityPopulations };
     };
 
     // Dynamic city sizes: pre-build stable ordering of all city entities
@@ -874,10 +869,10 @@ export class HistoryGenerator {
         // City sizes: store size tier index for all city entities
         const sizeArr = new Uint8Array(allCityEntities.length);
         for (let ci = 0; ci < allCityEntities.length; ci++) {
-          sizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
+          sizeArr[ci] = yearObj.citySizeByCell[allCityEntities[ci].cellIndex] ?? 0;
         }
         rawCitySizeSnapshots[i] = sizeArr;
-        populationSnapshots[i] = buildPopulationSnapshot();
+        populationSnapshots[i] = buildPopulationSnapshot(yearObj);
       }
 
       prevOwnership = ownership;
@@ -893,12 +888,13 @@ export class HistoryGenerator {
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
       // Final city size snapshot
+      const finalYear = timeline.years[yearsToSerialize - 1];
       const finalSizeArr = new Uint8Array(allCityEntities.length);
       for (let ci = 0; ci < allCityEntities.length; ci++) {
-        finalSizeArr[ci] = CITY_SIZE_TO_INDEX[allCityEntities[ci].size];
+        finalSizeArr[ci] = finalYear?.citySizeByCell[allCityEntities[ci].cellIndex] ?? 0;
       }
       rawCitySizeSnapshots[yearsToSerialize] = finalSizeArr;
-      populationSnapshots[yearsToSerialize] = buildPopulationSnapshot();
+      populationSnapshots[yearsToSerialize] = buildPopulationSnapshot(finalYear);
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
