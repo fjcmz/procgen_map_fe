@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { HistoryData, HistoryEvent, HistoryEventType, SelectedEntity } from '../../lib/types';
+import type { HistoryData, HistoryEvent, SelectedEntity } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
 import { EVENT_ICONS, EVENT_COLORS, EVENT_TYPE_GROUPS } from './eventStyles';
 
@@ -26,10 +26,12 @@ function eventMatchesEntity(ev: HistoryEvent, entity: SelectedEntity, empireMemb
 
 export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntity, onSelectEntity }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
-  const [hiddenTypes, setHiddenTypes] = useState<Set<HistoryEventType>>(new Set());
+  const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [filterExpanded, setFilterExpanded] = useState(false);
 
-  const toggleType = (type: HistoryEventType) => {
+  const allFilterTypes: string[] = [...EVENT_TYPE_GROUPS.flatMap(g => g.types), 'POPULATION'];
+
+  const toggleType = (type: string) => {
     setHiddenTypes(prev => {
       const next = new Set(prev);
       if (next.has(type)) next.delete(type);
@@ -58,8 +60,8 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
         if (selectedEntity && !eventMatchesEntity(ev, selectedEntity, empireMembers)) continue;
         result.push({ year: yearData.year, event: ev });
       }
-      // Only show population summaries when not filtering
-      if (!selectedEntity) {
+      // Only show population summaries when not filtering by entity
+      if (!selectedEntity && !hiddenTypes.has('POPULATION')) {
         result.push({
           year: yearData.year,
           event: {
@@ -140,7 +142,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
               </button>
               <button
                 style={styles.typeFilterActionBtn}
-                onClick={() => setHiddenTypes(new Set(EVENT_TYPE_GROUPS.flatMap(g => g.types)))}
+                onClick={() => setHiddenTypes(new Set(allFilterTypes))}
                 title="Hide all event types"
               >
                 None
@@ -170,6 +172,26 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
                 })}
               </span>
             ))}
+            <span style={styles.typeFilterGroup}>
+              <span style={styles.typeFilterSep} />
+              {(() => {
+                const isHidden = hiddenTypes.has('POPULATION');
+                return (
+                  <button
+                    style={{
+                      ...styles.typeIconBtn,
+                      opacity: isHidden ? 0.3 : 1,
+                      background: isHidden ? 'transparent' : `${EVENT_COLORS['POPULATION']}22`,
+                      borderColor: isHidden ? '#c0a070' : EVENT_COLORS['POPULATION'],
+                    }}
+                    onClick={() => toggleType('POPULATION')}
+                    title={`${isHidden ? 'Show' : 'Hide'} population events`}
+                  >
+                    {EVENT_ICONS['POPULATION']}
+                  </button>
+                );
+              })()}
+            </span>
           </div>
         )}
       </div>
