@@ -52,7 +52,7 @@ interface UnifiedOverlayProps {
  */
 const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   generation: 280,
-  events: 280,
+  events: 560,
   details: 320,
   hierarchy: 280,
   tech: 360,

@@ -157,6 +157,13 @@ function buildCountryIndexMap(world: World, rng: () => number): CountryIndexMap 
   return { idToIndex, indexToCountry };
 }
 
+/** Resolve a country's generated display name from countryMap, falling back to the raw ID. */
+function resolveCountryName(countryMap: CountryIndexMap, countryId: string): string {
+  const idx = countryMap.idToIndex.get(countryId);
+  if (idx != null) return countryMap.indexToCountry[idx].name;
+  return countryId;
+}
+
 /**
  * Convert a Phase 5 Year's events into HistoryEvent[] for the event log.
  */
@@ -198,12 +205,12 @@ function serializeYearEvents(
   for (const c of year.countries) {
     const numIdx = countryMap.idToIndex.get(c.id) ?? -1;
     const region = world.mapRegions.get(c.governingRegion);
-    const firstName = region?.cities[0]?.name ?? c.id;
+    const cName = resolveCountryName(countryMap, c.id);
     events.push({
       type: 'COUNTRY',
       year: absYear,
       initiatorId: numIdx,
-      description: `The nation of ${firstName} is established (${c.spirit}).`,
+      description: `The nation of ${cName} is established (${c.spirit}).`,
       locationCellIndex: region?.cities[0]?.cellIndex,
     });
   }
@@ -281,12 +288,8 @@ function serializeYearEvents(
     // ladder used by the CONQUEST/TECH blocks below.
     let techDiffusionPayload: HistoryEvent['techDiffusion'];
     if (t.techDiffusion) {
-      const donorCountry = world.mapCountries.get(t.techDiffusion.donorCountryId) as CountryEvent | undefined;
-      const receiverCountry = world.mapCountries.get(t.techDiffusion.receiverCountryId) as CountryEvent | undefined;
-      const donorRegion = donorCountry ? world.mapRegions.get(donorCountry.governingRegion) : null;
-      const receiverRegion = receiverCountry ? world.mapRegions.get(receiverCountry.governingRegion) : null;
-      const fromName = donorRegion?.cities[0]?.name ?? t.techDiffusion.donorCountryId;
-      const toName = receiverRegion?.cities[0]?.name ?? t.techDiffusion.receiverCountryId;
+      const fromName = resolveCountryName(countryMap, t.techDiffusion.donorCountryId);
+      const toName = resolveCountryName(countryMap, t.techDiffusion.receiverCountryId);
       description += ` ${toName} learns ${t.techDiffusion.field} L${t.techDiffusion.newLevel} via trade with ${fromName}.`;
       techDiffusionPayload = {
         field: t.techDiffusion.field,
@@ -344,9 +347,7 @@ function serializeYearEvents(
     }
 
     for (const [countryId, { lost, absorbed }] of byCountry) {
-      const country = world.mapCountries.get(countryId) as CountryEvent | undefined;
-      const cRegion = country ? world.mapRegions.get(country.governingRegion) : null;
-      const cName = cRegion?.cities[0]?.name ?? countryId;
+      const cName = resolveCountryName(countryMap, countryId);
       const cIdx = countryMap.idToIndex.get(countryId) ?? -1;
 
       let description: string;
@@ -383,8 +384,8 @@ function serializeYearEvents(
     const defCountry = world.mapCountries.get(w.defender) as CountryEvent | undefined;
     const aggRegion = aggCountry ? world.mapRegions.get(aggCountry.governingRegion) : null;
     const defRegion = defCountry ? world.mapRegions.get(defCountry.governingRegion) : null;
-    const aggName = aggRegion?.cities[0]?.name ?? w.aggressor;
-    const defName = defRegion?.cities[0]?.name ?? w.defender;
+    const aggName = resolveCountryName(countryMap, w.aggressor);
+    const defName = resolveCountryName(countryMap, w.defender);
     const aggIdx = countryMap.idToIndex.get(w.aggressor) ?? -1;
     const defIdx = countryMap.idToIndex.get(w.defender) ?? -1;
     events.push({
@@ -411,10 +412,9 @@ function serializeYearEvents(
     const countryIdx = country
       ? countryMap.idToIndex.get(country.id) ?? -1
       : -1;
-    const countryRegion = country
-      ? world.mapRegions.get(country.governingRegion)
+    const countryName = country
+      ? resolveCountryName(countryMap, country.id)
       : undefined;
-    const countryName = countryRegion?.cities[0]?.name;
 
     const displayName = nameForLevel(t.field, t.level);
     events.push({
@@ -446,8 +446,8 @@ function serializeYearEvents(
     const conquered = world.mapCountries.get(c.conquered) as CountryEvent | undefined;
     const cqrRegion = conqueror ? world.mapRegions.get(conqueror.governingRegion) : null;
     const cqdRegion = conquered ? world.mapRegions.get(conquered.governingRegion) : null;
-    const cqrName = cqrRegion?.cities[0]?.name ?? c.conqueror;
-    const cqdName = cqdRegion?.cities[0]?.name ?? c.conquered;
+    const cqrName = resolveCountryName(countryMap, c.conqueror);
+    const cqdName = resolveCountryName(countryMap, c.conquered);
     const cqrIdx = countryMap.idToIndex.get(c.conqueror) ?? -1;
     const cqdIdx = countryMap.idToIndex.get(c.conquered) ?? -1;
     const acquired = (c.acquiredTechList ?? []).map(a => ({
@@ -475,7 +475,7 @@ function serializeYearEvents(
   for (const emp of year.empires) {
     const founder = world.mapCountries.get(emp.foundedBy) as CountryEvent | undefined;
     const founderRegion = founder ? world.mapRegions.get(founder.governingRegion) : null;
-    const founderName = founderRegion?.cities[0]?.name ?? emp.foundedBy;
+    const founderName = resolveCountryName(countryMap, emp.foundedBy);
     events.push({
       type: 'EMPIRE',
       year: absYear,
