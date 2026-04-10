@@ -43,7 +43,11 @@ function detectBasins(cells: Cell[]): { basinIds: Int32Array; basinSizes: Map<nu
 
 /**
  * Compute bounding box for a basin, handling cylindrical east-west wrapping.
- * Returns minX, maxX, and basinWidth in pixel space.
+ * Returns minX and basinWidth in pixel space.
+ *
+ * Uses a single pass over cells to compute both raw and shifted min/max,
+ * avoiding intermediate arrays and Math.min/max(...spread) which overflow
+ * the call stack on large basins (85k+ cells).
  */
 function computeBasinBounds(
   cells: Cell[],
@@ -51,30 +55,35 @@ function computeBasinBounds(
   bid: number,
   width: number
 ): { minX: number; basinWidth: number } {
-  // Collect all x-coordinates for this basin
-  const xs: number[] = [];
+  const halfWidth = width / 2;
+  let rawMin = Infinity;
+  let rawMax = -Infinity;
+  let shiftedMin = Infinity;
+  let shiftedMax = -Infinity;
+  let hasNearZero = false;
+  let hasNearWidth = false;
+
   for (let i = 0; i < cells.length; i++) {
-    if (basinIds[i] === bid) xs.push(cells[i].x);
+    if (basinIds[i] !== bid) continue;
+    const x = cells[i].x;
+
+    if (x < rawMin) rawMin = x;
+    if (x > rawMax) rawMax = x;
+
+    const sx = (x + halfWidth) % width;
+    if (sx < shiftedMin) shiftedMin = sx;
+    if (sx > shiftedMax) shiftedMax = sx;
+
+    if (x < width * 0.1) hasNearZero = true;
+    if (x > width * 0.9) hasNearWidth = true;
   }
 
-  // Check if basin wraps around the map edge
-  const hasNearZero = xs.some(x => x < width * 0.1);
-  const hasNearWidth = xs.some(x => x > width * 0.9);
-  const wraps = hasNearZero && hasNearWidth;
-
-  if (wraps) {
-    // Shift all coordinates by width/2, then wrap to [0, width)
-    const shifted = xs.map(x => ((x + width / 2) % width));
-    const sMin = Math.min(...shifted);
-    const sMax = Math.max(...shifted);
-    // Unshift the min back
-    const realMin = ((sMin - width / 2) % width + width) % width;
-    return { minX: realMin, basinWidth: sMax - sMin };
+  if (hasNearZero && hasNearWidth) {
+    const realMin = ((shiftedMin - halfWidth) % width + width) % width;
+    return { minX: realMin, basinWidth: shiftedMax - shiftedMin };
   }
 
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  return { minX, basinWidth: maxX - minX };
+  return { minX: rawMin, basinWidth: rawMax - rawMin };
 }
 
 /**

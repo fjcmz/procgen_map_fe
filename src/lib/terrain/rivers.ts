@@ -80,7 +80,10 @@ function collectRivers(cells: Cell[], drainage: (number | null)[]): River[] {
       cur = next;
     }
     if (path.length >= 2) {
-      const maxFlow = Math.max(...path.map(i => cells[i].riverFlow));
+      let maxFlow = 0;
+      for (const idx of path) {
+        if (cells[idx].riverFlow > maxFlow) maxFlow = cells[idx].riverFlow;
+      }
       rivers.push({
         path,
         width: Math.min(4, Math.sqrt(maxFlow) * 0.4),
