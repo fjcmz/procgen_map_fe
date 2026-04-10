@@ -231,5 +231,14 @@ export function assignMoisture(
     }
   }
 
+  // Global moisture offset — additive shift applied last
+  if (profile.globalMoistureOffset !== 0) {
+    for (let i = 0; i < cells.length; i++) {
+      if (!cells[i].isWater) {
+        cells[i].moisture = Math.max(0, Math.min(1, cells[i].moisture + profile.globalMoistureOffset));
+      }
+    }
+  }
+
   return distFromOcean;
 }

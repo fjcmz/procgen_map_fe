@@ -123,6 +123,7 @@ export function assignTemperature(
 
     cell.temperature = Math.max(0, Math.min(1,
       baseTemp + contMod + maritimeMod + windwardMod + currentMod - elevCooling + noiseMod
+        + profile.globalTempOffset
     ));
   }
 }
