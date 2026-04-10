@@ -1,6 +1,7 @@
 import type { ChangeEvent } from 'react';
 import type { MapView, PoliticalMode, LayerVisibility, Season } from '../../lib/types';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
+import { PROFILE_WATER_RATIOS } from '../../lib/terrain';
 
 export interface GenerationTabProps {
   seed: string;
@@ -9,6 +10,8 @@ export interface GenerationTabProps {
   onNumCellsChange: (n: number) => void;
   waterRatio: number;
   onWaterRatioChange: (r: number) => void;
+  profileName: string;
+  onProfileChange: (name: string) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
   politicalMode: PoliticalMode;
@@ -27,6 +30,25 @@ export interface GenerationTabProps {
 }
 
 const CELL_OPTIONS = [500, 1000, 2000, 4000, 10000, 50000, 100000];
+
+const PROFILE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'default', label: 'Default (Earth-like)' },
+  { value: 'desert', label: 'Desert Planet' },
+  { value: 'ice', label: 'Ice World' },
+  { value: 'forest', label: 'Forest Planet' },
+  { value: 'swamp', label: 'Swamp World' },
+  { value: 'mountains', label: 'Mountain World' },
+  { value: 'ocean', label: 'Ocean World' },
+];
+
+const PROFILE_BADGE_COLORS: Record<string, string> = {
+  desert: '#c4842d',
+  ice: '#5b8fa8',
+  forest: '#3a7a3a',
+  swamp: '#5a7a4a',
+  mountains: '#6a5a4a',
+  ocean: '#2a6a9a',
+};
 
 const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   rivers: 'Rivers',
@@ -53,6 +75,8 @@ export function GenerationTab({
   onNumCellsChange,
   waterRatio,
   onWaterRatioChange,
+  profileName,
+  onProfileChange,
   mapView,
   onMapViewChange,
   politicalMode,
@@ -82,6 +106,24 @@ export function GenerationTab({
           disabled={generating}
         />
       </label>
+
+      {profileName !== 'default' && (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '2px 8px',
+          borderRadius: 10,
+          background: `${PROFILE_BADGE_COLORS[profileName] ?? '#8b4513'}22`,
+          border: `1px solid ${PROFILE_BADGE_COLORS[profileName] ?? '#8b4513'}`,
+          fontSize: 11,
+          fontWeight: 'bold',
+          color: PROFILE_BADGE_COLORS[profileName] ?? '#8b4513',
+          fontFamily: 'Georgia, serif',
+          letterSpacing: 0.3,
+        }}>
+          {PROFILE_OPTIONS.find(p => p.value === profileName)?.label ?? profileName}
+        </div>
+      )}
 
       <label style={styles.label}>
         Detail ({numCells.toLocaleString()} cells)
@@ -115,6 +157,28 @@ export function GenerationTab({
           }
           disabled={generating}
         />
+      </label>
+
+      <label style={styles.label}>
+        Terrain Profile
+        <select
+          style={styles.input}
+          value={profileName}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+            const name = e.target.value;
+            onProfileChange(name);
+            if (name in PROFILE_WATER_RATIOS) {
+              onWaterRatioChange(PROFILE_WATER_RATIOS[name]);
+            }
+          }}
+          disabled={generating}
+        >
+          {PROFILE_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </label>
 
       <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
