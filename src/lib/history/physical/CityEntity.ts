@@ -67,14 +67,10 @@ export function pickCitySize(rng: () => number): CitySize {
   return 'small';
 }
 
-export function rollInitialPopulation(rng: () => number, size: CitySize): number {
-  switch (size) {
-    case 'small':       return roll(rng, 2, 10) + 90;
-    case 'medium':      return roll(rng, 5, 10) + 200;
-    case 'large':       return roll(rng, 40, 10) + 400;
-    case 'metropolis':  return roll(rng, 100, 10) + 1000;
-    case 'megalopolis': return roll(rng, 1000, 10) + 5000;
-  }
+export function rollInitialPopulation(rng: () => number, _size: CitySize): number {
+  // All cities start as small settlements (100–1000).
+  // 9d100 gives 9–900, + 100 → 109–1000 with a bell-curve center ~550.
+  return roll(rng, 9, 100) + 100;
 }
 
 export class CityEntity {
