@@ -12,6 +12,33 @@ export const CITY_SIZE_TRADE_CAP: Record<CitySize, number> = {
   small: 10, medium: 15, large: 20, metropolis: 30, megalopolis: 50,
 };
 
+/** Population thresholds for dynamic city size. Ordered descending by minPop. */
+export const CITY_SIZE_THRESHOLDS: { size: CitySize; minPop: number }[] = [
+  { size: 'megalopolis', minPop: 10000 },
+  { size: 'metropolis',  minPop: 2000 },
+  { size: 'large',       minPop: 500 },
+  { size: 'medium',      minPop: 200 },
+];
+
+export const CITY_SIZE_TO_INDEX: Record<CitySize, number> = {
+  small: 0, medium: 1, large: 2, metropolis: 3, megalopolis: 4,
+};
+
+export const INDEX_TO_CITY_SIZE: CitySize[] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
+
+/**
+ * Derive city size from population and tech levels.
+ * `government` and `industry` tech reduce thresholds (~4% per combined level),
+ * so advanced civilizations reach higher tiers at smaller populations.
+ */
+export function computeCitySize(population: number, govLevel: number = 0, industryLevel: number = 0): CitySize {
+  const techFactor = 1 / (1 + 0.04 * (govLevel + industryLevel));
+  for (const { size, minPop } of CITY_SIZE_THRESHOLDS) {
+    if (population >= minPop * techFactor) return size;
+  }
+  return 'small';
+}
+
 /**
  * Tech fields that multiply trade capacity by (1 + level/10) per known tech.
  * Mirror of `TRADE_TECHS` in `src/lib/history/timeline/Tech.ts`; duplicated
@@ -78,9 +105,11 @@ export class CityEntity {
     this.id = IdUtil.id('city', rngHex(rng)) ?? 'city_unknown';
     this.cellIndex = cellIndex;
     this.name = name;
-    this.size = pickCitySize(rng);
-    this.initialPopulation = rollInitialPopulation(rng, this.size);
+    // RNG calls preserved for determinism; size is then derived from population
+    const randomSize = pickCitySize(rng);
+    this.initialPopulation = rollInitialPopulation(rng, randomSize);
     this.currentPopulation = this.initialPopulation;
+    this.size = computeCitySize(this.currentPopulation);
   }
 
   /**

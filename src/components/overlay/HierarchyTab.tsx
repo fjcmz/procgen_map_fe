@@ -1,11 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { City, Country, EmpireSnapshotEntry, HistoryData, SelectedEntity } from '../../lib/types';
+import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
   cities: City[];
   selectedYear: number;
   ownershipAtYear?: Int16Array;
+  citySizesAtYear?: Uint8Array;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
   onSelectEntity?: (entity: SelectedEntity | null) => void;
 }
@@ -58,7 +60,7 @@ function lookupEmpireSnapshot(
   return [];
 }
 
-export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
+export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
   // Empires default to expanded, countries and the stateless bucket to collapsed.
   // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless'.
   const [expanded, setExpanded] = useState<Set<string>>(() => {
@@ -210,8 +212,21 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
 
   const totalLiveCountries = tree.empires.reduce((s, e) => s + e.countries.length, 0) + tree.stateless.length;
 
+  // Map cellIndex → cities[] array index for dynamic size lookup
+  const cityIdxMap = useMemo(() => {
+    if (!citySizesAtYear) return undefined;
+    return new Map(cities.map((c, i) => [c.cellIndex, i]));
+  }, [cities, citySizesAtYear]);
+
+  const resolveCitySize = useCallback((city: City): City['size'] => {
+    if (!citySizesAtYear || !cityIdxMap) return city.size;
+    const idx = cityIdxMap.get(city.cellIndex);
+    if (idx === undefined) return city.size;
+    return INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
+  }, [citySizesAtYear, cityIdxMap]);
+
   const renderCity = (city: City, dead: boolean) => {
-    const sizeLabel = SIZE_LABELS[city.size];
+    const sizeLabel = SIZE_LABELS[resolveCitySize(city)];
     const capitalMark = city.isCapital ? '\u2605 ' : '\u2022 ';
     return (
       <div

@@ -196,6 +196,8 @@ export interface HistoryData {
   populationSnapshots: Record<number, Record<number, number>>;
   /** Spec stretch §5: per-field running-max tech level, indexed by year offset. */
   techTimeline?: TechTimeline;
+  /** Per-city size tier (0–4) snapshotted every 20 years, aligned with `snapshots`. */
+  citySizeSnapshots?: Record<number, Uint8Array>;
 }
 
 export interface MapData {

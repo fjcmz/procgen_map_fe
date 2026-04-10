@@ -3,6 +3,7 @@ import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome,
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getResourceCategory } from '../history/physical/Resource';
+import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
 
@@ -564,6 +565,7 @@ function drawIcons(
   selectedYear?: number,
   season: Season = 0,
   highlightSet?: Set<number>,
+  citySizesAtYear?: Uint8Array,
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
@@ -610,13 +612,22 @@ function drawIcons(
     }
   }
 
-  // City icons
+  // City icons — resolve dynamic size from snapshot when available
+  // Build a cellIndex → cities[] array index map for snapshot lookup
+  const cityIdxMap = citySizesAtYear
+    ? new Map(data.cities.map((c, i) => [c.cellIndex, i]))
+    : undefined;
   for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
     if (highlightSet) {
       ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
     }
-    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[city.size] ?? 1.0);
+    let sizeKey = city.size;
+    if (citySizesAtYear && cityIdxMap) {
+      const idx = cityIdxMap.get(city.cellIndex);
+      if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
+    }
+    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 1.0);
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
 }
@@ -1086,6 +1097,7 @@ export function render(
   season: Season = 0,
   politicalMode: PoliticalMode = 'countries',
   highlightCells?: number[],
+  citySizesAtYear?: Uint8Array,
 ): void {
   initNoisyEdges(seed);
 
@@ -1185,7 +1197,7 @@ export function render(
     if (layers.roads) drawRoads(ctx, data);
 
     // Layer 7: Icons (biome + cities)
-    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet);
+    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet, citySizesAtYear);
 
     // Layer 7b: Wonder badges
     if (wonderCells) {
