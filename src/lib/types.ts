@@ -281,6 +281,9 @@ export interface TerrainProfile {
   // --- Global modifiers (Phase 3) ---
   globalMoistureOffset: number;
   globalTempOffset: number;
+
+  // --- River control ---
+  suppressRivers: boolean;
 }
 
 export interface GenerateRequest {

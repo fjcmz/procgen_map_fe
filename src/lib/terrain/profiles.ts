@@ -61,12 +61,15 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   // --- Global modifiers (applied in Phase 3) ---
   globalMoistureOffset: 0.0,
   globalTempOffset: 0.0,
+
+  // --- River control ---
+  suppressRivers: false,
 };
 
 /** Recommended water ratios per profile (not part of TerrainProfile — passed separately on GenerateRequest). */
 export const PROFILE_WATER_RATIOS: Record<string, number> = {
   default: 0.40,
-  desert: 0.15,
+  desert: 0,
   ice: 0.55,
   forest: 0.30,
   swamp: 0.50,
@@ -78,9 +81,10 @@ export const PROFILE_WATER_RATIOS: Record<string, number> = {
 export const PROFILES: Record<string, TerrainProfile> = {
   default: DEFAULT_PROFILE,
 
-  /** Dune-like arid world. Vast sand seas, rare oases near coasts, scorching interiors. */
+  /** Dune-like arid world. No oceans, no rivers, only desert terrain. */
   desert: {
     ...DEFAULT_PROFILE,
+    // Moisture-reduction overrides (kept for non-zero waterRatio overrides)
     latAmplitude: 0.40,
     latBias: -0.12,
     continentalityStrength: 0.65,
@@ -88,11 +92,18 @@ export const PROFILES: Record<string, TerrainProfile> = {
     shadowStrength: 0.60,
     coastalMoistureSensitivity: 2.5,
     coldCurrentStrength: 0.15,
-    globalMoistureOffset: -0.10,
     tempMoistureShift: 0.10,
-    polarIceStart: 0.85,
-    polarIceEnd: 0.98,
-    globalTempOffset: 0.05,
+    // Force all moisture to 0 — only dry column of Whittaker table
+    globalMoistureOffset: -1.0,
+    // Hot world — no polar biomes
+    globalTempOffset: 0.15,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    // No rivers
+    suppressRivers: true,
   },
 
   /** Snowball Earth. Glaciers reach the equator, thin strips of tundra at the warmest latitudes. */
