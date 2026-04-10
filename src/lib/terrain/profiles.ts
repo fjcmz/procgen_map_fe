@@ -179,16 +179,29 @@ export const PROFILES: Record<string, TerrainProfile> = {
   /** Young, tectonically violent world. Towering ranges, deep valleys, thin atmosphere on peaks. */
   mountains: {
     ...DEFAULT_PROFILE,
-    numContinentalMin: 5,
-    numContinentalMax: 7,
-    convergentCCBoost: 0.65,
-    convergentOCBoost: 0.45,
+    // More plates -> more convergent boundaries -> many more candidate ranges
+    numContinentalMin: 8,
+    numContinentalMax: 11,
+    numOceanicMin: 10,
+    numOceanicMax: 14,
+    // Let the extra continental plates actually claim territory
+    continentalGrowthMin: 2.5,
+    continentalGrowthMax: 4.0,
+    // Aggressive convergent boundary boost (mountain building)
+    convergentCCBoost: 0.70,
+    convergentOCBoost: 0.50,
+    // Wider seam spread -> longer, more linear ranges instead of isolated peaks
     seamBoostMin: 0.18,
-    seamBoostMax: 0.25,
-    seamSpreadRings: 6,
+    seamBoostMax: 0.28,
+    seamSpreadRings: 9,
+    // Sharpen post-normalization distribution: pre-power 0.67 -> post 0.75,
+    // effectively widening the mountain biome band without touching biomes.ts.
+    elevationPower: 0.75,
+    // Preserve peaks
     erosionK: 0.001,
     erosionIterations: 2,
     thermalErosionIters: 1,
+    // Climate response to tall terrain
     shadowStrength: 0.55,
     lapseRate: 0.15,
     continentalityStrength: 0.50,
