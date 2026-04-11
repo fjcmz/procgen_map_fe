@@ -2,7 +2,7 @@ import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, Road, Regi
 import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
 import { getOwnershipAtYear, getTradesAtYear, getRoadsAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
-import { getResourceCategory } from '../history/physical/Resource';
+import { getLegacyCategory } from '../history/physical/ResourceCatalog';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
@@ -888,7 +888,7 @@ function drawResources(
 
     if (centerCell.isWater) continue;
 
-    const category = getResourceCategory(region.primaryResourceType as ResourceType);
+    const category = getLegacyCategory(region.primaryResourceType as ResourceType);
     switch (category) {
       case 'strategic':    drawStrategicIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
       case 'agricultural': drawAgriculturalIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
