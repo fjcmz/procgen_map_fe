@@ -99,6 +99,9 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
         </div>
 
         <div style={styles.controls}>
+          <button style={styles.btn} onClick={() => step(-100)} title="Back 100 years">
+            &laquo; 100
+          </button>
           <button style={styles.btn} onClick={() => step(-10)} title="Back 10 years">
             &laquo; 10
           </button>
@@ -114,6 +117,9 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
           <button style={styles.btn} onClick={() => step(10)} title="Forward 10 years">
             10 &raquo;
           </button>
+          <button style={styles.btn} onClick={() => step(100)} title="Forward 100 years">
+            100 &raquo;
+          </button>
         </div>
       </div>
     </Draggable>
@@ -122,7 +128,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
 
 const styles: Record<string, React.CSSProperties> = {
   panel: {
-    width: 520,
+    width: 620,
     maxWidth: 'calc(100vw - 32px)',
     background: 'rgba(255,248,230,0.93)',
     border: '1.5px solid #8b6040',
