@@ -62,13 +62,10 @@ function lookupEmpireSnapshot(
 }
 
 export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
-  // Empires default to expanded, countries and the stateless bucket to collapsed.
-  // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless'.
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const init = new Set<string>();
-    init.add('stateless');
-    return init;
-  });
+  // All top-level nodes (empires, stateless, free cities) default to collapsed.
+  // Countries also default to collapsed.
+  // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless' | 'unassigned'.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set<string>());
 
   const toggle = (key: string) => {
     setExpanded(prev => {
@@ -322,13 +319,12 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
 
   const renderEmpire = (emp: EmpireNode) => {
     const key = `emp:${emp.entry.empireId}`;
-    // Default expanded unless explicitly collapsed by the user.
-    const isOpen = !expanded.has(`emp:collapsed:${emp.entry.empireId}`);
+    const isOpen = expanded.has(key);
     return (
       <div key={key} style={styles.empireBlock}>
         <button
           style={styles.empireHeader}
-          onClick={() => toggle(`emp:collapsed:${emp.entry.empireId}`)}
+          onClick={() => toggle(key)}
         >
           <span style={styles.chevron}>{isOpen ? '\u25BE' : '\u25B8'}</span>
           {onSelectEntity ? (
