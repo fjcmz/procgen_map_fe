@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, TerrainProfile } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, PROFILES, DEFAULT_PROFILE } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 import { CityEntity, CITY_SIZE_TRADE_CAP, type CitySize } from '../lib/history/physical/CityEntity';
@@ -67,14 +67,26 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
 
     let rivers: ReturnType<typeof generateRivers> = [];
     if (!profile.suppressRivers) {
-      post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 50 });
-      generateRivers(cells, profile); // initial pass — computes riverFlow for erosion
+      // Priority-flood pass 1: materialize small closed basins as lakes
+      // and produce a virtual drainage surface so the initial river pass
+      // always has a path to water.
+      post({ type: 'PROGRESS', step: 'Filling depressions\u2026', pct: 50 });
+      const { drainageElevation: drainageElev1 } = fillDepressions(cells, profile);
+
+      post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 52 });
+      generateRivers(cells, profile, drainageElev1); // initial pass — computes riverFlow for erosion
 
       post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
-      hydraulicErosion(cells, profile);
+      hydraulicErosion(cells, profile); // deliberately uses raw cell.elevation — deposition breaks monotonicity
+
+      // Priority-flood pass 2: erosion's deposition step can create new
+      // sinks and shift existing ones, so re-run fillDepressions on the
+      // eroded terrain before the final river trace.
+      post({ type: 'PROGRESS', step: 'Filling depressions\u2026', pct: 57 });
+      const { drainageElevation: drainageElev2 } = fillDepressions(cells, profile);
 
       post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
-      rivers = generateRivers(cells, profile); // final pass — follows carved terrain
+      rivers = generateRivers(cells, profile, drainageElev2); // final pass — follows carved terrain
     }
 
     // Refresh elevation-dependent properties after erosion (or for profile-based overrides)

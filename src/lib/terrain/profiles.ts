@@ -71,6 +71,10 @@ export const DEFAULT_PROFILE: TerrainProfile = {
 
   // --- Biome overrides ---
   marshOverride: false,
+
+  // --- Depression fill / lakes ---
+  lakeMaxSize: 60,
+  depressionFillEpsilon: 1e-5,
 };
 
 /** Recommended water ratios per profile (not part of TerrainProfile — passed separately on GenerateRequest). */

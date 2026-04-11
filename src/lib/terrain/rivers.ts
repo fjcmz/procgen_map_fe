@@ -1,15 +1,31 @@
 import type { Cell, River, TerrainProfile } from '../types';
 
-/** Find the lowest-elevation neighbor for each land cell (drainage direction). */
-function buildDrainageMap(cells: Cell[]): (number | null)[] {
+/**
+ * Find the lowest-elevation neighbor for each land cell (drainage direction).
+ *
+ * When `drainageElev` is provided (produced by `fillDepressions`), both the
+ * current cell and its neighbours are compared via that parallel surface
+ * instead of raw `cell.elevation`. After a successful priority-flood pass
+ * every reachable non-water cell has a strictly-lower neighbour in
+ * `drainageElev`, so this function never returns `null` for those cells and
+ * rivers always reach the ocean or a materialized lake. The `null` branch
+ * is kept as a safety net for degenerate inputs and the disconnected-island
+ * fallback path inside `fillDepressions`.
+ */
+function buildDrainageMap(
+  cells: Cell[],
+  drainageElev?: Float32Array,
+): (number | null)[] {
   const drainage: (number | null)[] = new Array(cells.length).fill(null);
   for (const cell of cells) {
     if (cell.isWater) continue;
-    let lowestElev = cell.elevation;
+    const cellElev = drainageElev ? drainageElev[cell.index] : cell.elevation;
+    let lowestElev = cellElev;
     let lowestIdx: number | null = null;
     for (const ni of cell.neighbors) {
-      if (cells[ni].elevation < lowestElev) {
-        lowestElev = cells[ni].elevation;
+      const nElev = drainageElev ? drainageElev[ni] : cells[ni].elevation;
+      if (nElev < lowestElev) {
+        lowestElev = nElev;
         lowestIdx = ni;
       }
     }
@@ -92,8 +108,12 @@ function collectRivers(cells: Cell[], drainage: (number | null)[], flowThreshold
   return rivers;
 }
 
-export function generateRivers(cells: Cell[], profile: TerrainProfile): River[] {
-  const drainage = buildDrainageMap(cells);
+export function generateRivers(
+  cells: Cell[],
+  profile: TerrainProfile,
+  drainageElev?: Float32Array,
+): River[] {
+  const drainage = buildDrainageMap(cells, drainageElev);
   accumulateFlow(cells, drainage);
   return collectRivers(cells, drainage, profile.riverFlowThreshold);
 }

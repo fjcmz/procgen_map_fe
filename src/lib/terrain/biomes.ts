@@ -50,7 +50,9 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
     const polarDist = Math.abs(ny);
     const temp = cell.temperature;
 
-    // Polar ice caps on water — temperature-based with noise dithering
+    // Polar ice caps on water — temperature-based with noise dithering.
+    // Runs before the LAKE short-circuit so that cold inland lakes still
+    // freeze into ICE when `temp < iceTempThreshold`, matching ocean ice.
     if (cell.isWater && temp < profile.iceTempThreshold) {
       const iceNoise = fbmCylindrical(
         noise.continent, cell.x * 1.3, cell.y * 1.3, width, height, 3, 2.0
@@ -60,6 +62,16 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
         cell.biome = 'ICE';
         continue;
       }
+    }
+
+    // Inland lake short-circuit: cells materialized by `fillDepressions`
+    // carry `isLake = true` and must keep the LAKE biome across the post-
+    // erosion refresh pass. Placed after the ICE check above so that cold
+    // lakes can still freeze, and before the OCEAN/COAST split below so
+    // the lake isn't reclassified as ocean or shallow sea.
+    if (cell.isLake) {
+      cell.biome = 'LAKE';
+      continue;
     }
     // Polar land: snow — temperature-based with noise dithering
     if (!cell.isWater && temp < profile.snowTempThreshold) {
@@ -296,4 +308,5 @@ export const BIOME_INFO: Record<BiomeType, BiomeInfo> = {
   MARSH:                       { fillColor: '#5a8a5a', label: 'Marsh',                     iconType: null },
   ICE:                         { fillColor: '#d8e8f0', label: 'Ice',                       iconType: 'snow' },
   ALPINE_MEADOW:               { fillColor: '#98b86a', label: 'Alpine Meadow',             iconType: null },
+  LAKE:                        { fillColor: '#5f8fb3', label: 'Lake',                      iconType: null },
 };
