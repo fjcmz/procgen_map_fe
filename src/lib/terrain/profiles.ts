@@ -81,7 +81,7 @@ export const PROFILE_WATER_RATIOS: Record<string, number> = {
   forest: 0.30,
   swamp: 0.50,
   mountains: 0.30,
-  ocean: 0.85,
+  ocean: 0.98,
 };
 
 /** Named terrain profiles. */
@@ -210,13 +210,17 @@ export const PROFILES: Record<string, TerrainProfile> = {
   /** Water world with scattered volcanic island chains. */
   ocean: {
     ...DEFAULT_PROFILE,
-    numContinentalMin: 1,
-    numContinentalMax: 2,
-    numOceanicMin: 14,
-    numOceanicMax: 20,
-    continentalGrowthMin: 1.2,
-    continentalGrowthMax: 1.8,
-    convergentOCBoost: 0.35,
+    // No continental plates — land emerges only from oceanic convergence + noise peaks
+    numContinentalMin: 0,
+    numContinentalMax: 0,
+    // Many oceanic plates → dense boundary network → many scattered volcanic arcs
+    numOceanicMin: 20,
+    numOceanicMax: 28,
+    // Stronger volcanic arcs at oceanic plate convergence
+    convergentOCBoost: 0.45,
+    // Dampen polar ice caps so they don't eat the entire land budget at 98% water
+    polarNoiseAmplitude: 0.35,
+    // Existing climate/current flavor — preserved
     warmCurrentStrength: 0.16,
     latAmplitude: 0.35,
     continentalityStrength: 0.10,
