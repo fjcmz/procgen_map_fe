@@ -28,6 +28,18 @@ function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
     ctx.lineTo(verts[i][0], verts[i][1]);
   }
   ctx.closePath();
+  // Secondary loop for cells that wrap across the east-west seam. The ghost
+  // polygon lives inside the same `[0, width]` frame as the main loop and
+  // fills the strip between the main polygon's clipped edge and the nearest
+  // seam that would otherwise show the parchment background.
+  const wv = cell.wrapVertices;
+  if (wv && wv.length >= 2) {
+    ctx.moveTo(wv[0][0], wv[0][1]);
+    for (let i = 1; i < wv.length; i++) {
+      ctx.lineTo(wv[i][0], wv[i][1]);
+    }
+    ctx.closePath();
+  }
 }
 
 function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season = 0): void {

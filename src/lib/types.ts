@@ -58,6 +58,17 @@ export interface Cell {
   x: number;
   y: number;
   vertices: [number, number][];
+  /**
+   * Secondary polygon loop for cells that straddle the east-west seam via a
+   * ghost point. The main Voronoi pass is clipped to `[0, width]`, so a
+   * wrap-neighbor pair has a ghost-owned sliver inside the box near `x=0` or
+   * `x=width` that the regular cell iteration never visits — leaving a
+   * parchment-colored gap at the seam. `wrapVertices` holds the ghost
+   * polygon (still in the `[0, width]` frame) attributed to the real cell
+   * it represents, so `cellPath` can draw it as a second subpath and fill
+   * the gap with the correct biome. Undefined for interior cells.
+   */
+  wrapVertices?: [number, number][];
   neighbors: number[];
   elevation: number;
   moisture: number;
