@@ -342,6 +342,7 @@ export interface GenerateRequest {
 
 export type WorkerMessage =
   | { type: 'PROGRESS'; step: string; pct: number }
+  | { type: 'TERRAIN_READY'; data: Pick<MapData, 'cells' | 'rivers' | 'width' | 'height'> }
   | { type: 'DONE'; data: MapData }
   | { type: 'ERROR'; message: string };
 

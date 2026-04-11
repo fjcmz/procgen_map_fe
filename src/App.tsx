@@ -201,6 +201,20 @@ export default function App() {
       const msg = e.data;
       if (msg.type === 'PROGRESS') {
         setProgress({ step: msg.step, pct: msg.pct });
+      } else if (msg.type === 'TERRAIN_READY') {
+        // Paint terrain now; history is still running in the worker.
+        // Keep `generating` / `progress` / the worker ref untouched — the
+        // full payload arrives with the final DONE message.
+        setMapData({
+          cells: msg.data.cells,
+          rivers: msg.data.rivers,
+          width: msg.data.width,
+          height: msg.data.height,
+          cities: [],
+          roads: [],
+          // regions / continents / history / historyStats intentionally
+          // omitted — they arrive with DONE.
+        });
       } else if (msg.type === 'DONE') {
         setMapData(msg.data);
         if (msg.data.history) {
