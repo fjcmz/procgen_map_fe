@@ -71,7 +71,7 @@ export interface Cell {
 
 export interface River {
   path: number[];
-  width: number;
+  maxFlow: number;
 }
 
 export interface City {

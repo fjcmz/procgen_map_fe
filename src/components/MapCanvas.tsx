@@ -148,7 +148,7 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear, expansionFlags);
+    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear, expansionFlags, transform.scale);
     ctx.resetTransform();
   }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells, citySizesAtYear, expansionFlags]);
 

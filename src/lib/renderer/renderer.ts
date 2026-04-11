@@ -189,18 +189,36 @@ function drawNoisyCoastlines(
   }
 }
 
+// River rendering tuning constants — tweak these to taste.
+// Rivers are drawn with zoom-stable thickness (lineWidth = screenPx / scale) and
+// zoom-dependent culling (skip any river with maxFlow < RIVER_VISIBILITY_BASE / scale^2).
+const RIVER_VISIBILITY_BASE = 60;      // at scale=1, only rivers with maxFlow >= 60 are drawn
+const RIVER_MIN_SCREEN_PX = 0.6;       // smallest visible rivers
+const RIVER_MAX_SCREEN_PX = 2.4;       // cap for the largest trunk rivers
+const RIVER_WIDTH_COEFF = 0.22;        // maps sqrt(maxFlow) → screen px before clamping
+
 function drawRivers(
   ctx: CanvasRenderingContext2D,
-  data: MapData
+  data: MapData,
+  scale: number,
 ): void {
   const { cells, rivers } = data;
   ctx.strokeStyle = '#4a7fa5';
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
+  const visibilityCutoff = RIVER_VISIBILITY_BASE / (scale * scale);
+
   for (const river of rivers) {
     if (river.path.length < 2) continue;
-    ctx.lineWidth = river.width;
+    if (river.maxFlow < visibilityCutoff) continue;
+
+    const screenPx = Math.max(
+      RIVER_MIN_SCREEN_PX,
+      Math.min(RIVER_MAX_SCREEN_PX, RIVER_WIDTH_COEFF * Math.sqrt(river.maxFlow)),
+    );
+    ctx.lineWidth = screenPx / scale;
+
     ctx.beginPath();
     const first = cells[river.path[0]];
     ctx.moveTo(first.x, first.y);
@@ -1176,6 +1194,7 @@ export function render(
   highlightCells?: number[],
   citySizesAtYear?: Uint8Array,
   expansionFlags?: Uint8Array,
+  scale: number = 1,
 ): void {
   initNoisyEdges(seed);
 
@@ -1253,7 +1272,7 @@ export function render(
     if (layers.regions) drawRegionBorders(ctx, data.cells);
 
     // Layer 4b: Rivers
-    if (layers.rivers) drawRivers(ctx, data);
+    if (layers.rivers) drawRivers(ctx, data, scale);
 
     // Layer 4c: Resource icons
     if (layers.resources) drawResources(ctx, data.cells, data.regions ?? []);
