@@ -6,6 +6,7 @@ import { worldGenerator } from './physical/WorldGenerator';
 import { continentGenerator } from './physical/ContinentGenerator';
 import { regionGenerator } from './physical/RegionGenerator';
 import { resourceGenerator } from './physical/ResourceGenerator';
+import { selectPrimary } from './physical/ResourceCatalog';
 import { cityGenerator } from './physical/CityGenerator';
 import { generateCityName, generateCountryName } from './nameGenerator';
 
@@ -361,12 +362,9 @@ export function buildPhysicalWorld(
     }
     regionGenerator.updatePotentialNeighbours(world);
 
-    // --- Step 3: Place resources in each region ---
+    // --- Step 3: Place resources in each region (habitat-aware) ---
     for (const region of seedToRegion.values()) {
-      const count = Math.floor(rng() * 10) + 1;
-      for (let i = 0; i < count; i++) {
-        region.resources.push(resourceGenerator.generate(rng));
-      }
+      region.resources = resourceGenerator.generateForRegion(region, cells, rng);
       region.updateHasResources();
     }
 
@@ -408,8 +406,8 @@ export function buildPhysicalWorld(
     // Build rendering data
     const continentRegionIds: string[] = [];
     for (const region of seedToRegion.values()) {
-      // Primary resource = first resource (deterministic)
-      const primaryResourceType = region.resources[0]?.type;
+      // Primary resource = most distinctive (rarity-ranked, luxury/art boost)
+      const primaryResourceType = selectPrimary(region.resources);
       regionData.push({
         id: region.id,
         cellIndices: region.cellIndices,
