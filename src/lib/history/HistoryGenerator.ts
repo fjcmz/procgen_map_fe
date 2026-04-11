@@ -1283,6 +1283,7 @@ export class HistoryGenerator {
       countries,
       years: historyYears,
       numYears: yearsToSerialize,
+      startOfTime: timeline.startOfTime,
       snapshots,
       tradeSnapshots,
       roadSnapshots,

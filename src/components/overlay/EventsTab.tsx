@@ -24,6 +24,12 @@ function eventMatchesEntity(ev: HistoryEvent, entity: SelectedEntity, empireMemb
   }
 }
 
+function formatAbsYear(relYear: number, startOfTime: number): string {
+  const abs = startOfTime + relYear;
+  if (abs < 0) return `${-abs} BC`;
+  return `${abs} AD`;
+}
+
 export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntity, onSelectEntity }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
@@ -104,7 +110,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
       <div style={styles.miniHeader}>
         <span style={styles.miniTitle}>Events</span>
         <span style={styles.miniCount}>
-          {cumulativeEvents.length} events &middot; Year {selectedYear}
+          {cumulativeEvents.length} events &middot; {formatAbsYear(selectedYear, historyData.startOfTime)}
         </span>
       </div>
 
@@ -216,7 +222,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
                 }}
                 onClick={locatable ? () => onNavigate([item.event.locationCellIndex!], item.event.locationCellIndex!) : undefined}
               >
-                <span style={styles.logYear}>Y{item.year}</span>
+                <span style={styles.logYear}>{formatAbsYear(item.year, historyData.startOfTime)}</span>
                 <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
                 <span style={styles.logDesc}>{item.event.description}</span>
               </div>
@@ -387,7 +393,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 10,
     fontWeight: 'bold',
     color: '#7a5a30',
-    minWidth: 30,
+    minWidth: 48,
   },
   eventIcon: {
     flexShrink: 0,
