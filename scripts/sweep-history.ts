@@ -35,6 +35,7 @@ import {
   assignBiomes,
   generateRivers,
   hydraulicErosion,
+  fillDepressions,
   DEFAULT_PROFILE,
 } from '../src/lib/terrain/index.ts';
 import { historyGenerator } from '../src/lib/history/HistoryGenerator.ts';
@@ -112,9 +113,12 @@ function runSeed(seed: string, args: CliArgs): SeedResult {
   assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
   assignBiomes(cells, args.width, args.height, noise, profile);
   if (!profile.suppressRivers) {
-    generateRivers(cells, profile);
+    // Mirror the worker's depression-fill + retrace sequence exactly.
+    const { drainageElevation: drainageElev1 } = fillDepressions(cells, profile);
+    generateRivers(cells, profile, drainageElev1);
     hydraulicErosion(cells, profile);
-    generateRivers(cells, profile);
+    const { drainageElevation: drainageElev2 } = fillDepressions(cells, profile);
+    generateRivers(cells, profile, drainageElev2);
   }
   assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
   assignBiomes(cells, args.width, args.height, noise, profile);

@@ -35,7 +35,8 @@ export type BiomeType =
   | 'SUBTROPICAL_DESERT'
   | 'MARSH'
   | 'ICE'
-  | 'ALPINE_MEADOW';
+  | 'ALPINE_MEADOW'
+  | 'LAKE';
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
 
@@ -67,6 +68,10 @@ export interface Cell {
   riverFlow: number;
   kingdom: number | null;
   regionId?: string;
+  /** True for cells materialized by `fillDepressions` — small closed basins
+   *  that become visible inland lakes. Short-circuits assignBiomes to 'LAKE'
+   *  (after the polar ICE block, so cold lakes can still freeze). */
+  isLake?: boolean;
 }
 
 export interface River {
@@ -295,6 +300,15 @@ export interface TerrainProfile {
   /** When true, low-elevation high-moisture forest biomes are converted
    *  to MARSH in assignBiomes(). Default: false. */
   marshOverride: boolean;
+
+  // --- Depression fill / lakes ---
+  /** Max connected-component size (in cells) for a closed depression to
+   *  become a visible LAKE. Larger basins stay as land and get a virtual
+   *  drainage surface via `drainageElevation` instead. Default: 60. */
+  lakeMaxSize: number;
+  /** Epsilon slope used by the Priority-Flood pass in `fillDepressions`
+   *  to guarantee strictly-monotonic drainage. Default: 1e-5. */
+  depressionFillEpsilon: number;
 }
 
 export interface GenerateRequest {

@@ -34,7 +34,7 @@ export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
   SUBTROPICAL_DESERT: 'desert',
   MARSH: 'swamp',
   ALPINE_MEADOW: 'temperate',
-  OCEAN: 'temperate', COAST: 'temperate', BEACH: 'temperate',
+  OCEAN: 'temperate', COAST: 'temperate', BEACH: 'temperate', LAKE: 'temperate',
 };
 
 function rngHex(rng: () => number): string {
