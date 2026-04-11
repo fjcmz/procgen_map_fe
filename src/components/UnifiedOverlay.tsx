@@ -36,6 +36,8 @@ interface UnifiedOverlayProps {
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
+  onExportWorld: () => void;
+  exporting: boolean;
 
   // Shared — used by the shell to enable/disable history-dependent tabs
   // and will feed data into EventsTab / HierarchyTab / TechTab in later phases.
@@ -220,6 +222,9 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onGenerate={props.onGenerate}
                 generating={props.generating}
                 progress={props.progress}
+                mapData={props.mapData}
+                onExportWorld={props.onExportWorld}
+                exporting={props.exporting}
               />
             )}
             {activeTab === 'events' && props.mapData?.history && (

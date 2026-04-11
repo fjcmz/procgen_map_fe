@@ -8,6 +8,7 @@ import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
 import { getOwnershipAtYear, getExpansionFlagsAtYear } from './lib/history';
+import { exportWorld } from './lib/export/exportWorld';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 100000;
@@ -49,6 +50,7 @@ export default function App() {
   const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const [highlightCells, setHighlightCells] = useState<number[] | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -254,6 +256,30 @@ export default function App() {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
+  const handleExportWorld = useCallback(() => {
+    if (!mapData || exporting) return;
+    setExporting(true);
+    // Defer the heavy JSON.stringify + zipSync work so the button's
+    // "Exporting…" label paints before the main thread gets pegged.
+    requestAnimationFrame(() => {
+      try {
+        exportWorld(mapData, {
+          seed,
+          numCells,
+          waterRatio,
+          profileName,
+          generateHistory,
+          numSimYears,
+        });
+      } catch (err) {
+        console.error('Export failed:', err);
+        alert(`Export failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setExporting(false);
+      }
+    });
+  }, [mapData, exporting, seed, numCells, waterRatio, profileName, generateHistory, numSimYears]);
+
   return (
     <>
       <MapCanvas
@@ -301,6 +327,8 @@ export default function App() {
         onGenerate={handleGenerate}
         generating={generating}
         progress={progress}
+        onExportWorld={handleExportWorld}
+        exporting={exporting}
         mapData={mapData}
         selectedYear={selectedYear}
         ownershipAtYear={ownershipAtYear}

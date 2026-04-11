@@ -1,5 +1,5 @@
 import type { ChangeEvent } from 'react';
-import type { MapView, PoliticalMode, LayerVisibility, Season } from '../../lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../../lib/types';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
 import { PROFILE_WATER_RATIOS } from '../../lib/terrain';
 
@@ -27,6 +27,9 @@ export interface GenerationTabProps {
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
+  mapData: MapData | null;
+  onExportWorld: () => void;
+  exporting: boolean;
 }
 
 const CELL_OPTIONS = [10000, 20000, 50000, 100000, 200000];
@@ -92,6 +95,9 @@ export function GenerationTab({
   onGenerate,
   generating,
   progress,
+  mapData,
+  onExportWorld,
+  exporting,
 }: GenerationTabProps) {
   return (
     <div style={styles.body}>
@@ -297,6 +303,18 @@ export function GenerationTab({
         {generating ? 'Generating…' : 'Generate Map'}
       </button>
 
+      <button
+        style={{
+          ...styles.exportBtn,
+          ...(!mapData || generating || exporting ? styles.exportBtnDisabled : {}),
+        }}
+        onClick={onExportWorld}
+        disabled={!mapData || generating || exporting}
+        title="Download the current map and history as a zipped JSON file"
+      >
+        {exporting ? 'Exporting…' : 'Export World'}
+      </button>
+
       {progress && (
         <div style={styles.progressWrap}>
           <div style={styles.progressBar}>
@@ -415,6 +433,24 @@ const styles: Record<string, React.CSSProperties> = {
   },
   generateBtnDisabled: {
     background: '#b0906a',
+    cursor: 'not-allowed',
+  },
+  exportBtn: {
+    padding: '7px 0',
+    background: '#fffef5',
+    color: '#5a3a10',
+    border: '1px solid #8b4513',
+    borderRadius: 5,
+    fontFamily: 'Georgia, serif',
+    fontSize: 12,
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    letterSpacing: 0.5,
+  },
+  exportBtnDisabled: {
+    color: '#a8906a',
+    border: '1px solid #c0a070',
+    background: '#f5eedc',
     cursor: 'not-allowed',
   },
   progressWrap: {
