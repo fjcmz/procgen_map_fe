@@ -93,7 +93,7 @@ function readStoredTab(): OverlayTab {
 
 export function UnifiedOverlay(props: UnifiedOverlayProps) {
   const [activeTab, setActiveTab] = useState<OverlayTab>(readStoredTab);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
 
   // Inject the focus-visible style on first render
   useEffect(ensureFocusStyle, []);
