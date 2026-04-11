@@ -6,6 +6,7 @@ import { getResourceCategory } from '../history/physical/Resource';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
+import { unwrapX, drawWrappedPath, findSharedWrapAwareVerts } from './wrap';
 
 // Kingdom colors for terrain view (subtle fills)
 const KINGDOM_COLORS_TERRAIN = [
@@ -94,7 +95,8 @@ function drawWaterDepth(
 
 function drawHillshading(
   ctx: CanvasRenderingContext2D,
-  cells: Cell[]
+  cells: Cell[],
+  width: number,
 ): void {
   // Virtual light source: azimuth 315° (NW), altitude 45°
   const az = (315 * Math.PI) / 180;
@@ -107,14 +109,17 @@ function drawHillshading(
   for (const cell of cells) {
     if (cell.isWater || cell.vertices.length < 2) continue;
 
-    // Estimate gradient from neighbors
+    // Estimate gradient from neighbors. Wrap-neighbors across the seam are
+    // unwrapped so the gradient uses the true short-arc distance (without
+    // this, border cells would see their wrap-neighbors ~width away and
+    // produce flipped shading at x ≈ 0 / x ≈ width).
     let dzdx = 0;
     let dzdy = 0;
     let weightSum = 0;
     for (const ni of cell.neighbors) {
       const nb = cells[ni];
       if (!nb) continue;
-      const dx = nb.x - cell.x;
+      const dx = unwrapX(cell.x, nb.x, width) - cell.x;
       const dy = nb.y - cell.y;
       const dist2 = dx * dx + dy * dy;
       if (dist2 < 1e-6) continue;
@@ -154,7 +159,8 @@ function isCoastEdge(cell: Cell, cells: Cell[], ni: number): boolean {
 
 function drawNoisyCoastlines(
   ctx: CanvasRenderingContext2D,
-  cells: Cell[]
+  cells: Cell[],
+  width: number,
 ): void {
   ctx.strokeStyle = '#5a3a1a';
   ctx.lineWidth = 1.5;
@@ -171,14 +177,15 @@ function drawNoisyCoastlines(
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
 
-      // Find shared edge vertices between the two cells
+      // Find shared edge vertices between the two cells, tolerating wrap
+      // (a cell on the left edge and its wrap-neighbor on the right edge
+      // have vertices clipped at x=0 and x=width respectively; the helper
+      // tries ±width shifts before giving up).
       const other = cells[ni];
-      const sharedVerts = cell.vertices.filter(v =>
-        other.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
-      );
-      if (sharedVerts.length < 2) continue;
+      const shared = findSharedWrapAwareVerts(cell, other, width);
+      if (!shared) continue;
 
-      const pts = getNoisyEdge(sharedVerts[0], sharedVerts[1], 3, 0.3);
+      const pts = getNoisyEdge(shared[0], shared[1], 3, 0.3);
       ctx.beginPath();
       ctx.moveTo(pts[0][0], pts[0][1]);
       for (let i = 1; i < pts.length; i++) {
@@ -202,7 +209,7 @@ function drawRivers(
   data: MapData,
   scale: number,
 ): void {
-  const { cells, rivers } = data;
+  const { cells, rivers, width } = data;
   ctx.strokeStyle = '#4a7fa5';
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -219,20 +226,16 @@ function drawRivers(
     );
     ctx.lineWidth = screenPx / scale;
 
-    ctx.beginPath();
-    const first = cells[river.path[0]];
-    ctx.moveTo(first.x, first.y);
-    for (let i = 1; i < river.path.length; i++) {
-      const c = cells[river.path[i]];
-      ctx.lineTo(c.x, c.y);
-    }
-    ctx.stroke();
+    // Segments that cross the cylindrical seam are drawn the short way;
+    // the 3× horizontal offset loop in render() handles visibility.
+    drawWrappedPath(ctx, river.path.map(i => cells[i]), width);
   }
 }
 
 function drawKingdomBorders(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
+  width: number,
   ownershipOverride?: Int16Array,
   colors: KingdomColor[] = KINGDOM_COLORS_TERRAIN,
   expansionFlags?: Uint8Array,
@@ -279,18 +282,16 @@ function drawKingdomBorders(
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
 
-      const sharedVerts = cell.vertices.filter(v =>
-        neighbor.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
-      );
-      if (sharedVerts.length < 2) continue;
+      const shared = findSharedWrapAwareVerts(cell, neighbor, width);
+      if (!shared) continue;
 
       const kc = cellOwner !== null
         ? colors[cellOwner % colors.length]
         : { stroke: '#888' };
       ctx.strokeStyle = kc.stroke;
       ctx.beginPath();
-      ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
-      ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
+      ctx.moveTo(shared[0][0], shared[0][1]);
+      ctx.lineTo(shared[1][0], shared[1][1]);
       ctx.stroke();
     }
   }
@@ -320,6 +321,7 @@ function lookupEmpireSnapshot(
 function drawPatternedBorders(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
+  width: number,
   ownershipOverride: Int16Array | undefined,
   politicalMode: PoliticalMode,
   historyData: HistoryData | undefined,
@@ -400,10 +402,8 @@ function drawPatternedBorders(
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
 
-      const sharedVerts = cell.vertices.filter(v =>
-        neighbor.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
-      );
-      if (sharedVerts.length < 2) continue;
+      const shared = findSharedWrapAwareVerts(cell, neighbor, width);
+      if (!shared) continue;
 
       // Determine stroke color from the entity index
       let strokeIdx: number;
@@ -415,15 +415,20 @@ function drawPatternedBorders(
       }
       ctx.strokeStyle = strokeColorForIndex(strokeIdx);
       ctx.beginPath();
-      ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
-      ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
+      ctx.moveTo(shared[0][0], shared[0][1]);
+      ctx.lineTo(shared[1][0], shared[1][1]);
       ctx.stroke();
     }
   }
   ctx.setLineDash([]);
 }
 
-function drawRoads(ctx: CanvasRenderingContext2D, cells: Cell[], roads: Road[]): void {
+function drawRoads(
+  ctx: CanvasRenderingContext2D,
+  cells: Cell[],
+  roads: Road[],
+  width: number,
+): void {
   ctx.strokeStyle = '#8b6040';
   ctx.lineWidth = 1.2;
   ctx.lineCap = 'round';
@@ -432,12 +437,9 @@ function drawRoads(ctx: CanvasRenderingContext2D, cells: Cell[], roads: Road[]):
 
   for (const road of roads) {
     if (road.path.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(cells[road.path[0]].x, cells[road.path[0]].y);
-    for (let i = 1; i < road.path.length; i++) {
-      ctx.lineTo(cells[road.path[i]].x, cells[road.path[i]].y);
-    }
-    ctx.stroke();
+    // A* roads follow the Voronoi neighbor graph which legitimately crosses
+    // the east-west seam; drawWrappedPath keeps each segment on the short arc.
+    drawWrappedPath(ctx, road.path.map(i => cells[i]), width);
   }
   ctx.setLineDash([]);
 }
@@ -763,7 +765,8 @@ function drawLabels(
 
 function drawRegionBorders(
   ctx: CanvasRenderingContext2D,
-  cells: Cell[]
+  cells: Cell[],
+  width: number,
 ): void {
   ctx.strokeStyle = 'rgba(100,80,50,0.35)';
   ctx.lineWidth = 0.5;
@@ -781,14 +784,12 @@ function drawRegionBorders(
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
 
-      const sharedVerts = cell.vertices.filter(v =>
-        neighbor.vertices.some(v2 => Math.abs(v[0] - v2[0]) < 0.5 && Math.abs(v[1] - v2[1]) < 0.5)
-      );
-      if (sharedVerts.length < 2) continue;
+      const shared = findSharedWrapAwareVerts(cell, neighbor, width);
+      if (!shared) continue;
 
       ctx.beginPath();
-      ctx.moveTo(sharedVerts[0][0], sharedVerts[0][1]);
-      ctx.lineTo(sharedVerts[1][0], sharedVerts[1][1]);
+      ctx.moveTo(shared[0][0], shared[0][1]);
+      ctx.lineTo(shared[1][0], shared[1][1]);
       ctx.stroke();
     }
   }
@@ -889,6 +890,7 @@ function drawTradeRoutes(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   tradeRoutes: TradeRouteEntry[],
+  width: number,
 ): void {
   if (tradeRoutes.length === 0) return;
   ctx.save();
@@ -898,21 +900,19 @@ function drawTradeRoutes(
   ctx.setLineDash([4, 6]);
   for (const route of tradeRoutes) {
     if (route.path && route.path.length >= 2) {
-      // Draw multi-segment pathfound route (coastal-hugging / island-hopping)
-      ctx.beginPath();
-      ctx.moveTo(cells[route.path[0]].x, cells[route.path[0]].y);
-      for (let i = 1; i < route.path.length; i++) {
-        ctx.lineTo(cells[route.path[i]].x, cells[route.path[i]].y);
-      }
-      ctx.stroke();
+      // Draw multi-segment pathfound route (coastal-hugging / island-hopping),
+      // unwrapping any seam-crossing segments onto the short arc.
+      drawWrappedPath(ctx, route.path.map(i => cells[i]), width);
     } else {
-      // Fallback: straight line between endpoints
+      // Fallback: straight line between endpoints, pick the short arc across
+      // the cylindrical seam so trade lines don't stretch the long way.
       const c1 = cells[route.cell1];
       const c2 = cells[route.cell2];
       if (!c1 || !c2) continue;
+      const c2x = unwrapX(c1.x, c2.x, width);
       ctx.beginPath();
       ctx.moveTo(c1.x, c1.y);
-      ctx.lineTo(c2.x, c2.y);
+      ctx.lineTo(c2x, c2.y);
       ctx.stroke();
     }
   }
@@ -1245,7 +1245,7 @@ export function render(
     drawBiomeFill(ctx, data.cells, effectiveSeason);
 
     // Layer 1b: Hillshading (shaded relief on land)
-    if (layers.hillshading) drawHillshading(ctx, data.cells);
+    if (layers.hillshading) drawHillshading(ctx, data.cells, width);
 
     // Layer 1c: Permafrost overlay (seasonal blue-gray tint on sub-polar land)
     if (layers.seasonalIce && effectiveSeason !== 0) {
@@ -1256,7 +1256,7 @@ export function render(
     drawWaterDepth(ctx, data.cells, width, height);
 
     // Layer 3: Noisy coastlines
-    drawNoisyCoastlines(ctx, data.cells);
+    drawNoisyCoastlines(ctx, data.cells, width);
 
     // Political view: mute terrain with parchment overlay on land cells
     if (mapView === 'political') {
@@ -1269,7 +1269,7 @@ export function render(
     }
 
     // Layer 4: Region borders (before rivers so rivers draw on top)
-    if (layers.regions) drawRegionBorders(ctx, data.cells);
+    if (layers.regions) drawRegionBorders(ctx, data.cells, width);
 
     // Layer 4b: Rivers
     if (layers.rivers) drawRivers(ctx, data, scale);
@@ -1281,24 +1281,24 @@ export function render(
     if (layers.borders) {
       if (mapView === 'political' && patternCache) {
         drawPatternedBorders(
-          ctx, data.cells, ownershipAtYear,
+          ctx, data.cells, width, ownershipAtYear,
           politicalMode, data.history, selectedYear, patternCache,
           expansionFlags,
         );
       } else {
-        drawKingdomBorders(ctx, data.cells, ownershipAtYear, KINGDOM_COLORS_TERRAIN, expansionFlags);
+        drawKingdomBorders(ctx, data.cells, width, ownershipAtYear, KINGDOM_COLORS_TERRAIN, expansionFlags);
       }
     }
 
     // Layer 5b: Trade routes
     if (tradeRoutes) {
-      drawTradeRoutes(ctx, data.cells, tradeRoutes);
+      drawTradeRoutes(ctx, data.cells, tradeRoutes, width);
     }
 
     // Layer 6: Roads (year-aware when history exists, else static fallback)
     if (layers.roads) {
       const roads = roadsAtYear ?? data.roads;
-      if (roads.length > 0) drawRoads(ctx, data.cells, roads);
+      if (roads.length > 0) drawRoads(ctx, data.cells, roads, width);
     }
 
     // Layer 7: Icons (biome + cities)
