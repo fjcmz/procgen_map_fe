@@ -40,12 +40,20 @@ export type BiomeType =
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
 
+export interface RegionResourceData {
+  /** ResourceType union string (see `history/physical/ResourceCatalog.ts`). */
+  type: string;
+  /** `Resource.original` — the natural endowment, time-invariant. */
+  amount: number;
+}
+
 export interface RegionData {
   id: string;
   cellIndices: number[];
   biome: RegionBiome;
   continentId: string;
   primaryResourceType?: string;
+  resources?: RegionResourceData[];
 }
 
 export interface ContinentData {

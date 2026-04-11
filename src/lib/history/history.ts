@@ -414,6 +414,12 @@ export function buildPhysicalWorld(
         biome: region.biome,
         continentId: continent.id,
         primaryResourceType,
+        // Snapshot the full resource list as plain data so `DetailsTab` can
+        // render per-country / per-empire aggregates. We capture `original`
+        // (natural endowment) at year-0 state, before the timeline runs and
+        // trades start draining `available`; this is the invariant view that
+        // best answers "what does this country produce".
+        resources: region.resources.map(r => ({ type: r.type, amount: r.original })),
       });
       continentRegionIds.push(region.id);
     }
