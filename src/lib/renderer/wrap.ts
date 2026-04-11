@@ -53,15 +53,23 @@ export function drawWrappedPath(
 }
 
 /**
- * Find up to two shared vertices between cells `a` and `b`, also trying
- * `b`'s vertices shifted by ±width so wrap-neighbors across the seam are
- * recognized. Returned vertices are in `a`'s own (unshifted) frame, so the
- * caller's subsequent `moveTo`/`lineTo` just works — the 3× offset loop
- * guarantees at least one visible copy lands in the viewport.
+ * Find up to two shared vertices between cells `a` and `b`. Handles two
+ * axes of wrap-awareness:
  *
- * Returns `null` if fewer than two shared vertices exist (including the
- * degenerate case of no shared edge at all — rare, but possible near the
- * voronoi bounds).
+ * 1. Each cell has an optional `wrapVertices` second polygon loop (added by
+ *    the voronoi pass for cells whose ghost polygon has a clipped sliver
+ *    inside the `[0, width]` frame). We test all 4 loop pairs
+ *    (main×main, main×wrap, wrap×main, wrap×wrap) so coastlines / borders
+ *    between a wrap-neighbor pair pick up the shared edge that lives on the
+ *    ghost-polygon side.
+ *
+ * 2. Within each loop pair, `b`'s vertices are also tried shifted by
+ *    ±width in case the shared edge lies across the seam boundary.
+ *
+ * Returned vertices are in `a`'s own (unshifted) frame so the caller's
+ * subsequent `moveTo`/`lineTo` just works — the 3× offset loop guarantees
+ * at least one visible copy lands in the viewport. Returns `null` if fewer
+ * than two shared vertices exist.
  */
 export function findSharedWrapAwareVerts(
   a: Cell,
@@ -72,18 +80,28 @@ export function findSharedWrapAwareVerts(
   // Try no shift first (fast path for the 99% of pairs that aren't on the seam),
   // then ±width for true wrap-neighbors.
   const shifts = [0, -width, width];
-  const out: [number, number][] = [];
-  for (const v of a.vertices) {
-    for (const s of shifts) {
-      if (b.vertices.some(v2 =>
-        Math.abs(v[0] - (v2[0] + s)) < EPS &&
-        Math.abs(v[1] - v2[1]) < EPS
-      )) {
-        out.push(v);
-        break;
+  const aLoops: [number, number][][] = [a.vertices];
+  if (a.wrapVertices && a.wrapVertices.length >= 2) aLoops.push(a.wrapVertices);
+  const bLoops: [number, number][][] = [b.vertices];
+  if (b.wrapVertices && b.wrapVertices.length >= 2) bLoops.push(b.wrapVertices);
+
+  for (const aVerts of aLoops) {
+    for (const bVerts of bLoops) {
+      const out: [number, number][] = [];
+      for (const v of aVerts) {
+        for (const s of shifts) {
+          if (bVerts.some(v2 =>
+            Math.abs(v[0] - (v2[0] + s)) < EPS &&
+            Math.abs(v[1] - v2[1]) < EPS
+          )) {
+            out.push(v);
+            break;
+          }
+        }
+        if (out.length === 2) break;
       }
+      if (out.length === 2) return [out[0], out[1]];
     }
-    if (out.length === 2) break;
   }
-  return out.length === 2 ? [out[0], out[1]] : null;
+  return null;
 }

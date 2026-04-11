@@ -151,5 +151,34 @@ export function buildCellGraph(
     });
   }
 
+  // Attach wrap-vertex loops for cells whose ghost has a clipped polygon
+  // inside the bounding box. Between a cell near `x=ε1` (with ghost at
+  // `x=ε1+width`) and its wrap-neighbor near `x=width-ε2` (with ghost at
+  // `x=-ε2`), the Voronoi edge with the *ghost* lies at
+  // `x=width+(ε1-ε2)/2` on the east seam and `x=(ε1-ε2)/2` on the west
+  // seam. Whenever those midpoints land inside `[0, width]`, the strip
+  // between the real cell's polygon and the bounding box is owned by a
+  // ghost that the regular loop above never iterates — so that strip is
+  // drawn as parchment background (the "tan seam band" artifact). Here we
+  // fetch each ghost's clipped polygon and attribute it to its real cell
+  // as a secondary vertex loop. The renderer's 3× offset loop then draws
+  // the loop in the correct position and the gap disappears.
+  for (const [ghostIdx, realIdx] of ghostToReal) {
+    const ghostPoly = voronoi.cellPolygon(ghostIdx);
+    if (!ghostPoly || ghostPoly.length < 4) continue;
+    const verts: [number, number][] = [];
+    const n = ghostPoly.length - 1; // last == first
+    for (let j = 0; j < n; j++) {
+      verts.push([ghostPoly[j][0], ghostPoly[j][1]]);
+    }
+    if (verts.length < 3) continue;
+    // In practice each real cell has at most one ghost that contributes a
+    // non-empty clipped polygon (cells near only one edge of the map), so
+    // the first ghost wins and later ones are discarded.
+    if (!cells[realIdx].wrapVertices) {
+      cells[realIdx].wrapVertices = verts;
+    }
+  }
+
   return { cells };
 }
