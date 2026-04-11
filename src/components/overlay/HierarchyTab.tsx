@@ -36,6 +36,7 @@ interface Tree {
   empires: EmpireNode[];
   stateless: CountryNode[];
   statelessCityCount: number;
+  unassignedCities: City[];
 }
 
 /**
@@ -147,10 +148,16 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     }
 
     // Bucket cities by country index, filtered to those founded by selectedYear.
+    // Cities whose region never formed a country carry kingdomId === -1 and
+    // go into the unassignedCities bucket instead (rendered as "Free Cities").
     const citiesByCountry = new Map<number, City[]>();
+    const unassignedCities: City[] = [];
     for (const city of cities) {
-      if (city.kingdomId < 0) continue;
       if (city.foundedYear > selectedYear) continue;
+      if (city.kingdomId < 0) {
+        unassignedCities.push(city);
+        continue;
+      }
       let list = citiesByCountry.get(city.kingdomId);
       if (!list) { list = []; citiesByCountry.set(city.kingdomId, list); }
       list.push(city);
@@ -161,6 +168,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
         return a.name.localeCompare(b.name);
       });
     }
+    unassignedCities.sort((a, b) => a.name.localeCompare(b.name));
 
     // Group countries into empires + stateless.
     const empireMap = new Map<string, EmpireNode>();
@@ -207,7 +215,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     }
     stateless.sort((a, b) => a.country.name.localeCompare(b.country.name));
 
-    return { empires, stateless, statelessCityCount };
+    return { empires, stateless, statelessCityCount, unassignedCities };
   }, [historyData, snapshot, cities, selectedYear]);
 
   const totalLiveCountries = tree.empires.reduce((s, e) => s + e.countries.length, 0) + tree.stateless.length;
@@ -357,6 +365,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
   };
 
   const statelessOpen = expanded.has('stateless');
+  const unassignedOpen = expanded.has('unassigned');
 
   return (
     <div style={styles.root}>
@@ -371,7 +380,9 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
       </div>
 
       <div style={styles.treeList}>
-        {tree.empires.length === 0 && tree.stateless.length === 0 && (
+        {tree.empires.length === 0
+          && tree.stateless.length === 0
+          && tree.unassignedCities.length === 0 && (
           <div style={styles.emptyNote}>No realms yet.</div>
         )}
 
@@ -394,6 +405,27 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
             {statelessOpen && (
               <div style={styles.countryList}>
                 {tree.stateless.map(c => renderCountry(c, null))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {tree.unassignedCities.length > 0 && (
+          <div style={styles.empireBlock}>
+            <button
+              style={styles.empireHeader}
+              onClick={() => toggle('unassigned')}
+            >
+              <span style={styles.chevron}>{unassignedOpen ? '\u25BE' : '\u25B8'}</span>
+              <span style={styles.empireName}>Free Cities</span>
+              <span style={styles.empireMeta}>
+                {tree.unassignedCities.length}{' '}
+                {tree.unassignedCities.length === 1 ? 'city' : 'cities'}
+              </span>
+            </button>
+            {unassignedOpen && (
+              <div style={styles.cityList}>
+                {tree.unassignedCities.map(c => renderCity(c, false))}
               </div>
             )}
           </div>
