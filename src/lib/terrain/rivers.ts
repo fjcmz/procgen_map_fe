@@ -84,7 +84,7 @@ function collectRivers(cells: Cell[], drainage: (number | null)[], flowThreshold
       }
       rivers.push({
         path,
-        width: Math.min(4, Math.sqrt(maxFlow) * 0.4),
+        maxFlow,
       });
     }
   }
