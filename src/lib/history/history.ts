@@ -784,6 +784,7 @@ export function generateHistory(
     countries,
     years: historyYears,
     numYears,
+    startOfTime: 0,
     snapshots,
     tradeSnapshots: {},
     roadSnapshots: {},
