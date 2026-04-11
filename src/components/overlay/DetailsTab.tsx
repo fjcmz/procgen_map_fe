@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry, Cell, TradeRouteEntry } from '../../lib/types';
+import { useMemo, useState } from 'react';
+import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry, Cell, TradeRouteEntry, RegionData } from '../../lib/types';
 import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import type { City } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
+import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -197,6 +198,49 @@ function getEmpireTechLevels(
     }
   }
   return techs;
+}
+
+/**
+ * Aggregate Resource.original amounts across every region currently owned by
+ * `countryIndex` at the selected year. Regions are atomically owned (Phase 6
+ * model — conquests transfer whole regions), so we probe `region.cellIndices[0]`
+ * as a cheap representative of the whole region's owner.
+ */
+function getCountryResources(
+  countryIndex: number,
+  ownershipAtYear: Int16Array | undefined,
+  regions: RegionData[] | undefined,
+): Map<string, number> {
+  const acc = new Map<string, number>();
+  if (!ownershipAtYear || !regions) return acc;
+  for (const region of regions) {
+    if (region.cellIndices.length === 0) continue;
+    if (ownershipAtYear[region.cellIndices[0]] !== countryIndex) continue;
+    if (!region.resources) continue;
+    for (const r of region.resources) {
+      acc.set(r.type, (acc.get(r.type) ?? 0) + r.amount);
+    }
+  }
+  return acc;
+}
+
+/** Same as `getCountryResources` but sums across a set of member countries. */
+function getEmpireResources(
+  countryIndices: Set<number>,
+  ownershipAtYear: Int16Array | undefined,
+  regions: RegionData[] | undefined,
+): Map<string, number> {
+  const acc = new Map<string, number>();
+  if (!ownershipAtYear || !regions) return acc;
+  for (const region of regions) {
+    if (region.cellIndices.length === 0) continue;
+    if (!countryIndices.has(ownershipAtYear[region.cellIndices[0]])) continue;
+    if (!region.resources) continue;
+    for (const r of region.resources) {
+      acc.set(r.type, (acc.get(r.type) ?? 0) + r.amount);
+    }
+  }
+  return acc;
 }
 
 export function DetailsTab({
@@ -461,6 +505,12 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
     [ownershipAtYear, mapData.cells, countrySet],
   );
 
+  const resources = useMemo(
+    () => getCountryResources(countryIndex, ownershipAtYear, mapData.regions),
+    [countryIndex, ownershipAtYear, mapData.regions],
+  );
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+
   const eventCounts = useMemo(
     () => getEntityEventCounts(history.years, cityCellSet, countrySet, selectedYear),
     [history.years, cityCellSet, countrySet, selectedYear],
@@ -525,6 +575,20 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
           <>
             <div style={styles.sectionLabel}>Terrain</div>
             <TerrainBar distribution={terrainDist} />
+          </>
+        )}
+
+        {resources.size > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setResourcesOpen(v => !v)}
+              aria-expanded={resourcesOpen}
+            >
+              {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({resources.size})
+            </button>
+            {resourcesOpen && <ResourceList resources={resources} />}
           </>
         )}
 
@@ -637,6 +701,12 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
     [ownershipAtYear, mapData.cells, memberSet],
   );
 
+  const resources = useMemo(
+    () => getEmpireResources(memberSet, ownershipAtYear, mapData.regions),
+    [memberSet, ownershipAtYear, mapData.regions],
+  );
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+
   const eventCounts = useMemo(
     () => getEntityEventCounts(history.years, cityCellSet, memberSet, selectedYear),
     [history.years, cityCellSet, memberSet, selectedYear],
@@ -700,6 +770,20 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
           <>
             <div style={styles.sectionLabel}>Terrain</div>
             <TerrainBar distribution={terrainDist} />
+          </>
+        )}
+
+        {resources.size > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setResourcesOpen(v => !v)}
+              aria-expanded={resourcesOpen}
+            >
+              {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({resources.size})
+            </button>
+            {resourcesOpen && <ResourceList resources={resources} />}
           </>
         )}
 
@@ -771,6 +855,48 @@ function EventRow({ event, startOfTime }: { event: HistoryEvent; startOfTime: nu
       <span style={styles.eventYear}>{formatAbsYear(event.year, startOfTime)}</span>
       <span style={styles.eventIcon}>{icon}</span>
       <span style={styles.eventDesc}>{event.description}</span>
+    </div>
+  );
+}
+
+// ── Resource List ──
+
+/** Dot color per legacy category, matches the map icon bucket split in renderer.ts. */
+const CATEGORY_COLORS: Record<LegacyResourceCategory, string> = {
+  strategic: '#8a8a8a',
+  agricultural: '#6b9a4e',
+  luxury: '#c9a240',
+};
+
+/** `natural_gas` → `Natural gas`, `iron` → `Iron`. */
+function formatResourceType(type: string): string {
+  const spaced = type.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** Resolve category color with a safe fallback for unknown types. */
+function resourceDotColor(type: string): string {
+  try {
+    return CATEGORY_COLORS[getLegacyCategory(type as ResourceType)];
+  } catch {
+    return '#888';
+  }
+}
+
+function ResourceList({ resources }: { resources: Map<string, number> }) {
+  const entries = useMemo(
+    () => Array.from(resources.entries()).sort((a, b) => b[1] - a[1]),
+    [resources],
+  );
+  return (
+    <div style={styles.techGrid}>
+      {entries.map(([type, amount]) => (
+        <div key={type} style={styles.techRow}>
+          <span style={{ ...styles.techDot, background: resourceDotColor(type) }} />
+          <span style={styles.techLabel}>{formatResourceType(type)}</span>
+          <span style={styles.techLevel}>{amount}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -926,6 +1052,27 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 4,
     paddingBottom: 2,
     borderBottom: '1px solid #e0d0b0',
+  },
+  sectionToggle: {
+    // Matches `sectionLabel` visual weight but rendered as a button so the
+    // whole header is clickable for the collapsible Resources section.
+    display: 'block',
+    width: '100%',
+    background: 'none',
+    border: 'none',
+    borderBottom: '1px solid #e0d0b0',
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontWeight: 'bold',
+    fontSize: 10,
+    color: '#5a3a10',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 4,
+    paddingBottom: 2,
+    paddingLeft: 0,
+    paddingRight: 0,
+    textAlign: 'left',
   },
   techGrid: {
     display: 'flex',
