@@ -10,23 +10,23 @@ import { Minimap } from './components/Minimap';
 import { getOwnershipAtYear, getExpansionFlagsAtYear } from './lib/history';
 
 const DEFAULT_SEED = 'fantasy';
-const DEFAULT_CELLS = 2000;
-const DEFAULT_WATER_RATIO = 0.4;
+const DEFAULT_CELLS = 100000;
+const DEFAULT_WATER_RATIO = 0.62;
 
 const DEFAULT_LAYERS: LayerVisibility = {
   rivers: true,
   roads: true,
   borders: true,
-  icons: true,
+  icons: false,
   labels: true,
-  legend: true,
-  regions: false,
-  resources: false,
+  legend: false,
+  regions: true,
+  resources: true,
   eventOverlay: true,
   tradeRoutes: true,
   wonderMarkers: true,
   religionMarkers: true,
-  minimap: true,
+  minimap: false,
   hillshading: true,
   seasonalIce: true,
 };
@@ -42,7 +42,7 @@ export default function App() {
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
-  const [generateHistory, setGenerateHistory] = useState(false);
+  const [generateHistory, setGenerateHistory] = useState(true);
   const [numSimYears, setNumSimYears] = useState(5000);
   const [selectedYear, setSelectedYear] = useState(0);
   const [season, setSeason] = useState<Season>(0);

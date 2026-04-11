@@ -29,7 +29,7 @@ export interface GenerationTabProps {
   progress: { step: string; pct: number } | null;
 }
 
-const CELL_OPTIONS = [500, 1000, 2000, 4000, 10000, 50000, 100000];
+const CELL_OPTIONS = [10000, 20000, 50000, 100000, 200000];
 
 const PROFILE_OPTIONS: { value: string; label: string }[] = [
   { value: 'default', label: 'Default (Earth-like)' },
