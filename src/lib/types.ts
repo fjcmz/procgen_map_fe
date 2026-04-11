@@ -304,8 +304,13 @@ export interface TerrainProfile {
   // --- Depression fill / lakes ---
   /** Max connected-component size (in cells) for a closed depression to
    *  become a visible LAKE. Larger basins stay as land and get a virtual
-   *  drainage surface via `drainageElevation` instead. Default: 60. */
+   *  drainage surface via `drainageElevation` instead. Default: 20. */
   lakeMaxSize: number;
+  /** Min connected-component size (in cells) for a closed depression to
+   *  become a visible LAKE. Smaller components are left as drained land
+   *  (no LAKE biome) and filter out FBM-noise micropits that would otherwise
+   *  pepper the map with 1–3 cell "ponds". Default: 4. */
+  lakeMinSize: number;
   /** Epsilon slope used by the Priority-Flood pass in `fillDepressions`
    *  to guarantee strictly-monotonic drainage. Default: 1e-5. */
   depressionFillEpsilon: number;

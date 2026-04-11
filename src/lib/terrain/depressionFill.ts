@@ -196,9 +196,15 @@ export function fillDepressions(cells: Cell[], profile: TerrainProfile): Depress
     }
   }
 
-  // Group filled cells into connected components and convert small ones
-  // into lakes. Large basins stay as land with virtual drainage only.
+  // Group filled cells into connected components and convert qualifying
+  // ones into lakes. Components outside the [lakeMinSize, lakeMaxSize] band
+  // stay as land with virtual drainage only:
+  //  - Below lakeMinSize: filters out FBM-noise micropits (1–3 cell pockmarks)
+  //    that would otherwise pepper the map with uninteresting 'ponds'.
+  //  - Above lakeMaxSize: large basins keep their land biomes; rivers still
+  //    flow through via the epsilon-gradient drainage surface.
   const componentVisited = new Uint8Array(n);
+  const minLakeSize = profile.lakeMinSize;
   const maxLakeSize = profile.lakeMaxSize;
   let lakeCellCount = 0;
 
@@ -219,7 +225,7 @@ export function fillDepressions(cells: Cell[], profile: TerrainProfile): Depress
       }
     }
 
-    if (component.length <= maxLakeSize) {
+    if (component.length >= minLakeSize && component.length <= maxLakeSize) {
       for (const idx of component) {
         const cell = cells[idx];
         cell.isWater = true;

@@ -73,7 +73,8 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   marshOverride: false,
 
   // --- Depression fill / lakes ---
-  lakeMaxSize: 60,
+  lakeMaxSize: 20,
+  lakeMinSize: 4,
   depressionFillEpsilon: 1e-5,
 };
 
@@ -150,6 +151,9 @@ export const PROFILES: Record<string, TerrainProfile> = {
     coldCurrentStrength: 0.04,
     globalTempOffset: 0.05,
     polarIceStart: 0.88,
+    // Lush world → more and larger woodland lakes
+    lakeMinSize: 2,
+    lakeMaxSize: 80,
   },
 
   /** Humid, flat, waterlogged world. Marshes, mangroves, and shallow seas. */
@@ -178,6 +182,9 @@ export const PROFILES: Record<string, TerrainProfile> = {
     globalTempOffset: 0.05,
     // Enable marsh biome assignment
     marshOverride: true,
+    // Wettest profile → allow large wetland lake bodies
+    lakeMinSize: 2,
+    lakeMaxSize: 150,
   },
 
   /** Young, tectonically violent world. Towering ranges, deep valleys, thin atmosphere on peaks. */
