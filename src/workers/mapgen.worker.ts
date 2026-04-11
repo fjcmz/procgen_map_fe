@@ -93,6 +93,10 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
     assignBiomes(cells, width, height, noise, profile);
 
+    // Terrain pipeline done — let the UI paint the map immediately while
+    // buildPhysicalWorld / HistoryGenerator continue running in this worker.
+    post({ type: 'TERRAIN_READY', data: { cells, rivers, width, height } });
+
     let cities: ReturnType<typeof historyGenerator.generate>['cities'] = [];
     let roads: ReturnType<typeof historyGenerator.generate>['roads'] = [];
     let history: ReturnType<typeof historyGenerator.generate>['historyData'] | undefined;
