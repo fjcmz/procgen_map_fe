@@ -34,12 +34,37 @@ function buildDrainageMap(
   return drainage;
 }
 
-/** Accumulate flow values downstream. */
-function accumulateFlow(cells: Cell[], drainage: (number | null)[]): void {
-  // Topological sort: process high cells first
-  const order = cells
-    .filter(c => !c.isWater)
-    .sort((a, b) => b.elevation - a.elevation);
+/**
+ * Accumulate flow values downstream.
+ *
+ * The topological order must match the drainage graph: every cell has to be
+ * processed BEFORE its drainage target, otherwise the target propagates its
+ * stale (partial) flow forward and the contribution never catches up.
+ *
+ * When `drainageElev` is provided, we sort by the PF+ε surface descending —
+ * that surface is strictly monotonic along every drainage edge by
+ * construction, so a cell always comes before its target. Without this, cells
+ * inside a filled depression (whose drainage points uphill in raw elevation,
+ * out to the pour point) are processed *after* their target and their flow
+ * gets stranded at the pour point. This only became visible once small
+ * basins stopped being lake-ified wholesale by `lakeMinSize` — lake cells
+ * were skipped entirely, so no uphill-drainage edges existed in the graph.
+ *
+ * Falls back to raw `cell.elevation` when `drainageElev` is absent, which
+ * preserves the pre-`fillDepressions` behavior for any caller that bypasses
+ * the depression-fill pass.
+ */
+function accumulateFlow(
+  cells: Cell[],
+  drainage: (number | null)[],
+  drainageElev?: Float32Array,
+): void {
+  const order = cells.filter(c => !c.isWater);
+  if (drainageElev) {
+    order.sort((a, b) => drainageElev[b.index] - drainageElev[a.index]);
+  } else {
+    order.sort((a, b) => b.elevation - a.elevation);
+  }
 
   for (const cell of cells) {
     cell.riverFlow = 1;
@@ -114,6 +139,6 @@ export function generateRivers(
   drainageElev?: Float32Array,
 ): River[] {
   const drainage = buildDrainageMap(cells, drainageElev);
-  accumulateFlow(cells, drainage);
+  accumulateFlow(cells, drainage, drainageElev);
   return collectRivers(cells, drainage, profile.riverFlowThreshold);
 }
