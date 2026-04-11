@@ -92,7 +92,7 @@ function findTargetCity(
 
         // Check cities in this neighbour region
         for (const city of neighbour.cities) {
-          if (city.founded && city.id !== sourceCity.id && !city.contacted) {
+          if (city.founded && !city.isRuin && city.id !== sourceCity.id && !city.contacted) {
             candidates.push(city);
           }
         }
@@ -103,7 +103,7 @@ function findTargetCity(
 
   // Also check source region's own cities
   for (const city of sourceRegion.cities) {
-    if (city.founded && city.id !== sourceCity.id && !city.contacted) {
+    if (city.founded && !city.isRuin && city.id !== sourceCity.id && !city.contacted) {
       candidates.push(city);
     }
   }
