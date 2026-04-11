@@ -398,7 +398,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
             <div style={styles.sectionLabel}>Recent Events ({events.length} total)</div>
             <div style={styles.eventList}>
               {recentEvents.map((ev, i) => (
-                <EventRow key={i} event={ev} />
+                <EventRow key={i} event={ev} startOfTime={history.startOfTime} />
               ))}
             </div>
           </>
@@ -576,7 +576,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
             <div style={styles.sectionLabel}>Recent Events ({events.length} total)</div>
             <div style={styles.eventList}>
               {recentEvents.map((ev, i) => (
-                <EventRow key={i} event={ev} />
+                <EventRow key={i} event={ev} startOfTime={history.startOfTime} />
               ))}
             </div>
           </>
@@ -757,12 +757,18 @@ function InfoRow({ label, value, children }: { label: string; value?: string; ch
   );
 }
 
-function EventRow({ event }: { event: HistoryEvent }) {
+function formatAbsYear(relYear: number, startOfTime: number): string {
+  const abs = startOfTime + relYear;
+  if (abs < 0) return `${-abs} BC`;
+  return `${abs} AD`;
+}
+
+function EventRow({ event, startOfTime }: { event: HistoryEvent; startOfTime: number }) {
   const color = EVENT_COLORS[event.type] ?? '#888';
   const icon = EVENT_ICONS[event.type] ?? '\u2022';
   return (
     <div style={{ ...styles.eventRow, borderLeft: `3px solid ${color}` }}>
-      <span style={styles.eventYear}>Y{event.year}</span>
+      <span style={styles.eventYear}>{formatAbsYear(event.year, startOfTime)}</span>
       <span style={styles.eventIcon}>{icon}</span>
       <span style={styles.eventDesc}>{event.description}</span>
     </div>
@@ -992,7 +998,7 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     fontWeight: 'bold',
     color: '#7a5a30',
-    minWidth: 28,
+    minWidth: 44,
   },
   eventIcon: {
     flexShrink: 0,

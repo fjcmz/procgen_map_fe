@@ -206,6 +206,8 @@ export interface HistoryData {
   countries: Country[];
   years: HistoryYear[];
   numYears: number;
+  /** Absolute calendar year at which the simulation begins (in range [-3000, -1001]). Add to a relative year index to get the display year. */
+  startOfTime: number;
   snapshots: Record<number, Int16Array>;
   /** Active trade route cell-index pairs, snapshotted every 20 years. */
   tradeSnapshots: Record<number, TradeRouteEntry[]>;
