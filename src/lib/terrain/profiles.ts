@@ -96,6 +96,28 @@ export const PROFILES: Record<string, TerrainProfile> = {
   /** Dune-like arid world. No oceans, no rivers, only desert terrain. */
   desert: {
     ...DEFAULT_PROFILE,
+    // --- Tectonic drama: visible ridges, mesas, and mountain spines ---
+    // Doubles continental plate density to create a denser web of seams.
+    numContinentalMin: 6,
+    numContinentalMax: 9,
+    continentalGrowthMin: 2.5,
+    continentalGrowthMax: 4.0,
+    // Pronounced continental-continental seam ridges, spread across more rings
+    // to form long linear ranges instead of isolated pillars.
+    seamBoostMin: 0.15,
+    seamBoostMax: 0.22,
+    seamSpreadRings: 7,
+    // Stronger collision-driven mountain building.
+    convergentCCBoost: 0.55,
+    convergentOCBoost: 0.35,
+    // Sharpen the post-normalized elevation curve so more cells reach the
+    // hardcoded highland/alpine/mountain bands in biomes.ts.
+    elevationPower: 0.85,
+    // Reduce erosion to preserve carved seams while still leaving
+    // wind-smoothed contours appropriate for a desert.
+    erosionK: 0.0015,
+    erosionIterations: 3,
+    thermalErosionIters: 2,
     // Moisture-reduction overrides (kept for non-zero waterRatio overrides)
     latAmplitude: 0.40,
     latBias: -0.12,
