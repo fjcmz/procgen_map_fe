@@ -58,6 +58,8 @@ export interface HistoryStats {
   totalExpansions: number;
   /** Total settlement events (cities founded in expansion territory) across the timeline. */
   totalSettlements: number;
+  /** Total tech-gated resource discoveries across the timeline. */
+  totalDiscoveries: number;
   /**
    * Phase 4: tech events bucketed by century (index = floor((year - startOfTime) / 100))
    * per field. Array length is `ceil(totalYearsSimulated / 100)`. Used by the sweep
@@ -440,6 +442,36 @@ function serializeYearEvents(
       discovererName: illustrate?.id ?? 'unknown',
       discovererType: illustrate?.type,
       countryName,
+    });
+  }
+
+  // Discoveries (tech-gated resources): each entry records a resource type
+  // that the owning country just unlocked for trade in a specific region.
+  // Description format: "{Country} discovers {resource} in {biome} region
+  // (requires {field} L{level})". `locationCellIndex` prefers the region's
+  // first city for clickable navigation, falling back to the region's first
+  // cell when the region has no founded city yet.
+  for (const d of year.discoveries) {
+    const region = world.mapRegions.get(d.regionId);
+    const cName = resolveCountryName(countryMap, d.countryId);
+    const cIdx = countryMap.idToIndex.get(d.countryId) ?? -1;
+    const locCell =
+      region?.cities[0]?.cellIndex ??
+      region?.cellIndices[0];
+    const biomeLabel = region?.biome ?? 'unknown';
+    const levelSuffix = d.level > 0 ? ` (requires ${d.field} L${d.level})` : ` (no tech gate)`;
+    events.push({
+      type: 'DISCOVERY',
+      year: absYear,
+      initiatorId: cIdx,
+      description: `${cName} discovers ${d.resourceType} in ${biomeLabel} region${levelSuffix}.`,
+      locationCellIndex: locCell,
+      countryName: cName,
+      discoveredResource: {
+        type: d.resourceType,
+        field: d.field,
+        level: d.level,
+      },
     });
   }
 
@@ -1274,6 +1306,7 @@ export class HistoryGenerator {
       totalRuins: timeline.years.reduce((sum, y) => sum + y.ruins.length, 0),
       totalExpansions: timeline.years.reduce((sum, y) => sum + y.expansions.length, 0),
       totalSettlements: timeline.years.reduce((sum, y) => sum + y.settlements.length, 0),
+      totalDiscoveries: timeline.years.reduce((sum, y) => sum + y.discoveries.length, 0),
       techEventsPerCenturyByField,
       peakCountryTechLevelByField,
       medianCountryTechLevelByField,

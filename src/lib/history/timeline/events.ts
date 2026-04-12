@@ -20,3 +20,20 @@ export type { Empire } from './Empire';
 export type { Merge } from './Merge';
 export type { Ruin } from './Ruin';
 export type { Expand, Settle } from './Expand';
+
+import type { ResourceType } from '../physical/Resource';
+import type { TechField } from './Tech';
+
+/**
+ * A country "discovers" (unlocks for trade) a resource type in one of its
+ * regions. Emitted by `YearGenerator` step 9 when the country's effective
+ * tech level in `field` first crosses the resource's `requiredTechLevel`.
+ * Serialized into `HistoryEvent` with type `DISCOVERY` for the event log.
+ */
+export interface Discovery {
+  countryId: string;
+  regionId: string;
+  resourceType: ResourceType;
+  field: TechField;
+  level: number;
+}

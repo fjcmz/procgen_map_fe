@@ -6,7 +6,7 @@ import { worldGenerator } from './physical/WorldGenerator';
 import { continentGenerator } from './physical/ContinentGenerator';
 import { regionGenerator } from './physical/RegionGenerator';
 import { resourceGenerator } from './physical/ResourceGenerator';
-import { selectPrimary } from './physical/ResourceCatalog';
+import { selectPrimary, isCommonUnlockedAtZero } from './physical/ResourceCatalog';
 import { cityGenerator } from './physical/CityGenerator';
 import { generateCityName, generateCountryName } from './nameGenerator';
 
@@ -363,8 +363,19 @@ export function buildPhysicalWorld(
     regionGenerator.updatePotentialNeighbours(world);
 
     // --- Step 3: Place resources in each region (habitat-aware) ---
+    // Bootstrap: every resource whose tech requirement is `exploration 0` is
+    // pre-discovered at world birth, so pre-country / level-0 regions still
+    // trade commons normally. The yearly discovery tick in `YearGenerator`
+    // step 9 adds additional resource types as the owning country's tech
+    // advances — see `specs/resources.md` Phase 3 and the plan file
+    // `plans/mossy-tickling-taco.md`.
     for (const region of seedToRegion.values()) {
       region.resources = resourceGenerator.generateForRegion(region, cells, rng);
+      for (const r of region.resources) {
+        if (isCommonUnlockedAtZero(r.type)) {
+          region.discoveredResources.add(r.type);
+        }
+      }
       region.updateHasResources();
     }
 
@@ -419,7 +430,12 @@ export function buildPhysicalWorld(
         // (natural endowment) at year-0 state, before the timeline runs and
         // trades start draining `available`; this is the invariant view that
         // best answers "what does this country produce".
-        resources: region.resources.map(r => ({ type: r.type, amount: r.original })),
+        resources: region.resources.map(r => ({
+          type: r.type,
+          amount: r.original,
+          requiredTechField: r.requiredTechField,
+          requiredTechLevel: r.requiredTechLevel,
+        })),
       });
       continentRegionIds.push(region.id);
     }

@@ -187,8 +187,55 @@ export class YearGenerator {
       if (defender) defender.atWar = true;
     }
 
-    // Step 9: Recompute resources — region.hasResources = any resource.available >= TRADE_MIN
+    // Step 9: Tech-gated resource discovery, then recompute `hasResources`.
+    //
+    // For each claimed region (has a countryId), walk its resources and
+    // promote any whose requirement is met by the country's current tech
+    // level (via the empire-founder-aware scope ladder in
+    // `getCountryTechLevel`). Discovered types are added to
+    // `region.discoveredResources` permanently — conquest transfers the
+    // region but never removes knowledge, so empire growth and peaceful
+    // absorption both inherit the set. Stateless regions (no country yet)
+    // are skipped; their commons were bootstrapped at `buildPhysicalWorld`
+    // time and stay gated until country formation.
+    //
+    // Empire members naturally inherit founder tech through the scope
+    // ladder, so a region owned by an empire-member country reads the
+    // federation's effective level without any special-case code here.
     for (const region of world.mapRegions.values()) {
+      if (region.countryId && region.resources.length > region.discoveredResources.size) {
+        const country = world.mapCountries.get(region.countryId) as CountryEvent | undefined;
+        if (country) {
+          for (const r of region.resources) {
+            if (region.discoveredResources.has(r.type)) continue;
+            if (r.requiredTechLevel <= 0) {
+              // L0-other-field fallback (currently unused — all L0 entries
+              // are `exploration 0` — but defensive so future table tweaks
+              // that add a `biology 0` row Just Work).
+              region.discoveredResources.add(r.type);
+              year.discoveries.push({
+                countryId: country.id,
+                regionId: region.id,
+                resourceType: r.type,
+                field: r.requiredTechField,
+                level: r.requiredTechLevel,
+              });
+              continue;
+            }
+            const lvl = getCountryTechLevel(world, country, r.requiredTechField);
+            if (lvl >= r.requiredTechLevel) {
+              region.discoveredResources.add(r.type);
+              year.discoveries.push({
+                countryId: country.id,
+                regionId: region.id,
+                resourceType: r.type,
+                field: r.requiredTechField,
+                level: r.requiredTechLevel,
+              });
+            }
+          }
+        }
+      }
       region.updateHasResources();
     }
 

@@ -1,4 +1,5 @@
 import type { RegionBiome } from './Region';
+import type { TechField } from '../timeline/Tech';
 
 /**
  * ResourceCatalog — declarative habitat-aware resource taxonomy.
@@ -401,3 +402,155 @@ export function selectPrimary(
   return bestType;
 }
 
+// ---------------------------------------------------------------------------
+// Tech-gated discovery requirements
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum tech investment a country needs to "discover" (unlock for trade)
+ * a resource of a given (category, rarity). Pure static lookup — no RNG,
+ * resolved at `Resource` construction time and again at discovery ticks.
+ *
+ * Design: `exploration` gates most categories (the generic "we know what
+ * this is and how to extract it" knob). `industry` gates rare/veryRare
+ * metals and refined energy (oil, coal-advanced). `science` gates the
+ * late-game luxuries — uranium, diamonds, platinum — that only make sense
+ * once a civilization has invested in hard scientific knowledge.
+ *
+ * Every `common` entry must be level 0 so early-game trade is unaffected
+ * (bootstrap in `history.ts` year-0 adds them to `discoveredResources`).
+ * The `_assertRequirementTableComplete` check below enforces that rule.
+ */
+export interface ResourceTechRequirement {
+  readonly field: TechField;
+  readonly level: number;
+}
+
+const L0_EXPLORATION: ResourceTechRequirement = { field: 'exploration', level: 0 };
+
+export const RESOURCE_TECH_REQUIREMENT: Record<ResourceCategory, Record<ResourceRarity, ResourceTechRequirement>> = {
+  crops: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  livestock: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  forestry: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  marine: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 3 },
+    veryRare: { field: 'exploration', level: 5 },
+  },
+  stone: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  metals: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'industry',    level: 2 },
+    veryRare: { field: 'industry',    level: 4 },
+  },
+  energy: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'industry',    level: 3 },
+    veryRare: { field: 'science',     level: 4 },
+  },
+  gems: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 3 },
+    veryRare: { field: 'science',     level: 3 },
+  },
+  cashCrops: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  spices: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  textiles: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 2 },
+    veryRare: { field: 'exploration', level: 4 },
+  },
+  exotic: {
+    common:   L0_EXPLORATION,
+    uncommon: L0_EXPLORATION,
+    rare:     { field: 'exploration', level: 3 },
+    veryRare: { field: 'exploration', level: 5 },
+  },
+};
+
+/** Pure lookup: returns the tech requirement for a given resource type. */
+export function getResourceTechRequirement(type: ResourceType): ResourceTechRequirement {
+  const s = getResourceSpec(type);
+  return RESOURCE_TECH_REQUIREMENT[s.category][s.rarity];
+}
+
+/**
+ * True if the resource's requirement is exactly `exploration 0` — i.e. it is
+ * available to every civilization from year 0 with no tech investment. Used
+ * by `history.ts` to bootstrap `Region.discoveredResources` at world birth.
+ */
+export function isCommonUnlockedAtZero(type: ResourceType): boolean {
+  const req = getResourceTechRequirement(type);
+  return req.field === 'exploration' && req.level === 0;
+}
+
+// One-shot sanity check — mirrors the `_assertTechAdjacencySymmetric` pattern
+// in `timeline/Tech.ts`. Asserts (a) the table covers every
+// (category × rarity) pair, (b) levels are non-negative integers, and (c)
+// rarity levels are monotonically non-decreasing within a category when they
+// stay on the same field (a rare copper can't be easier to unlock than an
+// uncommon copper). Different fields across rarities are allowed — see
+// `metals` where uncommon is exploration-2 and rare jumps to industry-3.
+// Common entries may be L0 or L1; the bootstrap in `history.ts` only treats
+// true `exploration 0` entries as pre-discovered at year 0.
+(function _assertRequirementTableComplete(): void {
+  const categories: ResourceCategory[] = [
+    'metals', 'energy', 'stone', 'gems', 'livestock', 'crops',
+    'cashCrops', 'forestry', 'marine', 'spices', 'textiles', 'exotic',
+  ];
+  const rarities: ResourceRarity[] = ['common', 'uncommon', 'rare', 'veryRare'];
+  for (const cat of categories) {
+    const row = RESOURCE_TECH_REQUIREMENT[cat];
+    if (!row) throw new Error(`RESOURCE_TECH_REQUIREMENT missing category: ${cat}`);
+    let prev: ResourceTechRequirement | null = null;
+    for (const rar of rarities) {
+      const req = row[rar];
+      if (!req) throw new Error(`RESOURCE_TECH_REQUIREMENT missing ${cat}/${rar}`);
+      if (!Number.isInteger(req.level) || req.level < 0) {
+        throw new Error(`RESOURCE_TECH_REQUIREMENT bad level for ${cat}/${rar}: ${req.level}`);
+      }
+      if (prev && prev.field === req.field && req.level < prev.level) {
+        throw new Error(
+          `RESOURCE_TECH_REQUIREMENT non-monotonic for ${cat}/${rar}: ` +
+          `${req.field} ${req.level} < previous ${prev.field} ${prev.level}`,
+        );
+      }
+      prev = req;
+    }
+  }
+})();

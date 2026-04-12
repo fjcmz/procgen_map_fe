@@ -1,7 +1,7 @@
 import { IdUtil } from '../IdUtil';
 import type { BiomeType } from '../../types';
 import type { CityEntity } from './CityEntity';
-import type { Resource } from './Resource';
+import type { Resource, ResourceType } from './Resource';
 import { TRADE_MIN } from './Resource';
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
@@ -62,6 +62,15 @@ export class Region {
   hasResources: boolean = false;
   neighbourRegions: Region[] = [];
   potentialNeighbours: Region[][] = [];
+  /**
+   * Resource types the owning country has "discovered" (unlocked for trade).
+   * Grows monotonically — once a type enters this set it never leaves, even
+   * after conquest (the conqueror inherits institutional knowledge). Common
+   * L0 resources are bootstrapped at year 0 in `history.ts`; the yearly tick
+   * in `YearGenerator` adds additional types as the owning country's tech
+   * levels cross each resource's `requiredTechLevel`.
+   */
+  discoveredResources: Set<ResourceType> = new Set();
 
   constructor(biome: RegionBiome, rng: () => number) {
     this.id = IdUtil.id('region', rngHex(rng)) ?? 'region_unknown';
@@ -69,6 +78,11 @@ export class Region {
   }
 
   updateHasResources(): void {
-    this.hasResources = this.resources.some(r => r.available >= TRADE_MIN);
+    // Resource must be both discovered (tech-unlocked) AND have enough stock
+    // remaining to trade. Bootstrap at region creation populates common L0
+    // resources so pre-country regions still report correctly.
+    this.hasResources = this.resources.some(r =>
+      this.discoveredResources.has(r.type) && r.available >= TRADE_MIN
+    );
   }
 }
