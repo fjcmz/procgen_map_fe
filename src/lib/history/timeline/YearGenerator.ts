@@ -63,7 +63,7 @@ export class YearGenerator {
           }
           if (cellCap === 0) {
             const cell = cells[city.cellIndex];
-            if (cell) cellCap = CELL_BIOME_CAPACITY[cell.biome] ?? 50_000;
+            if (cell) cellCap = CELL_BIOME_CAPACITY[cell.biome] ?? 12_500;
           }
           capacity = Math.min(cellCap, capacity);
         }
