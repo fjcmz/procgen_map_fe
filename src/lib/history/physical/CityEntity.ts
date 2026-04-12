@@ -28,12 +28,41 @@ export const INDEX_TO_CITY_SIZE: CitySize[] = ['small', 'medium', 'large', 'metr
 
 /**
  * Population milestones that each grant +1 cell of territory.
- * City starts with 1 cell (founding cell), so max cells from milestones = 1 + 14 = 15.
- * Government tech adds +1 cell per level on top of this.
+ * City starts with 1 cell (founding cell), so max cells from milestones = 1 + 56 = 57.
+ * Government tech adds +4 cells per level (capped at +20) on top of this.
+ *
+ * 4x granularity: each old milestone interval is subdivided into 4 geometric
+ * sub-steps, plus 3 sub-steps before the first old milestone (500).
  */
 export const CITY_TERRITORY_MILESTONES: number[] = [
-  500, 2_000, 5_000, 10_000, 25_000, 50_000, 100_000,
-  250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000, 25_000_000,
+  // 0→500 band
+  125, 200, 325, 500,
+  // 500→2_000 band
+  710, 1_000, 1_410, 2_000,
+  // 2_000→5_000 band
+  2_660, 3_350, 4_200, 5_000,
+  // 5_000→10_000 band
+  5_950, 7_070, 8_410, 10_000,
+  // 10_000→25_000 band
+  12_550, 15_800, 19_900, 25_000,
+  // 25_000→50_000 band
+  29_700, 35_350, 42_050, 50_000,
+  // 50_000→100_000 band
+  59_500, 70_700, 84_100, 100_000,
+  // 100_000→250_000 band
+  125_500, 158_000, 199_000, 250_000,
+  // 250_000→500_000 band
+  297_000, 354_000, 421_000, 500_000,
+  // 500_000→1_000_000 band
+  595_000, 707_000, 841_000, 1_000_000,
+  // 1M→2.5M band
+  1_255_000, 1_580_000, 1_990_000, 2_500_000,
+  // 2.5M→5M band
+  2_970_000, 3_540_000, 4_210_000, 5_000_000,
+  // 5M→10M band
+  5_950_000, 7_070_000, 8_410_000, 10_000_000,
+  // 10M→25M band
+  12_550_000, 15_800_000, 19_900_000, 25_000_000,
 ];
 
 /** Max cells a city can own based purely on population milestones (excludes tech bonus). */
@@ -46,9 +75,9 @@ export function maxCellsForPopulation(pop: number): number {
   return count;
 }
 
-/** Max cells a city can own including government tech bonus (capped at +5). */
+/** Max cells a city can own including government tech bonus (capped at +20, 4 cells per gov level). */
 export function maxCellsForCity(pop: number, govLevel: number): number {
-  return maxCellsForPopulation(pop) + Math.min(5, govLevel);
+  return maxCellsForPopulation(pop) + Math.min(20, govLevel * 4);
 }
 
 /**
