@@ -35,6 +35,8 @@ export class World {
   mapReligions: Map<string, Religion> = new Map();
   mapWars: Map<string, War> = new Map();
   mapAliveWars: Map<string, War> = new Map();
+  /** Countries removed from mapCountries by dissolution (all cities ruined). */
+  mapDeadCountries: Map<string, CountryEvent> = new Map();
 
   constructor(rng: () => number) {
     this.id = IdUtil.id('world', rngHex(rng)) ?? 'world_unknown';

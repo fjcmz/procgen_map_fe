@@ -162,6 +162,14 @@ function buildCountryIndexMap(world: World, rng: () => number): CountryIndexMap 
     indexToCountry.push({ id: countryId, name, regionId: country.governingRegion });
     idx++;
   }
+  // Include dissolved countries so their names can be resolved for empire snapshots
+  for (const [countryId, country] of world.mapDeadCountries) {
+    if (idToIndex.has(countryId)) continue; // guard against duplicates
+    idToIndex.set(countryId, idx);
+    const name = generateCountryName(rng, usedCountryNames);
+    indexToCountry.push({ id: countryId, name, regionId: country.governingRegion });
+    idx++;
+  }
   return { idToIndex, indexToCountry };
 }
 
@@ -1132,11 +1140,12 @@ export class HistoryGenerator {
 
     // Phase 5: Build Country[] for UI
     const countries = countryMap.indexToCountry.map((entry, idx) => {
-      const country = world.mapCountries.get(entry.id) as CountryEvent;
+      const country = (world.mapCountries.get(entry.id) ?? world.mapDeadCountries.get(entry.id)) as CountryEvent | undefined;
       const region = world.mapRegions.get(entry.regionId);
       const capitalCell = region?.cities[0]?.cellIndex ?? 0;
-      // Country is alive if its region isn't conquered by another at the final year
-      const isAlive = !!country && country.foundedOn <= (timeline.years[yearsToSerialize - 1]?.year ?? 0);
+      // Country is alive if it's still in mapCountries (not dissolved) at the final year
+      const isAlive = !!country && !world.mapDeadCountries.has(entry.id)
+        && country.foundedOn <= (timeline.years[yearsToSerialize - 1]?.year ?? 0);
       return {
         id: idx,
         name: entry.name,
