@@ -141,9 +141,9 @@ export interface ResourceSpec {
 
 export const RARITY_WEIGHTS: Record<ResourceRarity, number> = {
   common: 100,
-  uncommon: 30,
-  rare: 8,
-  veryRare: 2,
+  uncommon: 40,
+  rare: 15,
+  veryRare: 8,
 };
 
 /**
