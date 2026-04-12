@@ -70,6 +70,8 @@ export class WarGenerator {
       if (!nRegion || !nRegion.isCountry || !nRegion.countryId) continue;
       const candidate = world.mapCountries.get(nRegion.countryId) as CountryEvent | undefined;
       if (!candidate) continue;
+      // Skip countries already at war
+      if (candidate.atWar) continue;
       // Not in the same empire
       if (aggressor.memberOf && candidate.memberOf && aggressor.memberOf === candidate.memberOf) continue;
       defender = candidate;

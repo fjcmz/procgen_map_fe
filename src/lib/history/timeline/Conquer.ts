@@ -73,9 +73,23 @@ export class ConquerGenerator {
     // Remove finished war from alive wars
     world.mapAliveWars.delete(finishingWar.id);
 
-    // Set both countries atWar = false
-    conquerorCountry.atWar = false;
-    conqueredCountry.atWar = false;
+    // Only clear atWar if the country has no other alive wars remaining.
+    // The finished war was already deleted from mapAliveWars above, so
+    // this check only considers other concurrent wars.
+    const stillAtWar = (country: CountryEvent): boolean => {
+      for (const w of world.mapAliveWars.values() as Iterable<War>) {
+        if (w.aggressor === country.id || w.defender === country.id) return true;
+      }
+      return false;
+    };
+    if (!stillAtWar(conquerorCountry)) conquerorCountry.atWar = false;
+    if (!stillAtWar(conqueredCountry)) conqueredCountry.atWar = false;
+
+    // Capture government tech levels BEFORE the tech merge — after merge the
+    // conqueror always has max(conqueror, conquered) so the dissolution check
+    // would be dead code if we read post-merge values.
+    const preConquerorGov = getCountryTechLevel(world, conquerorCountry, 'government');
+    const preConqueredGov = getCountryTechLevel(world, conqueredCountry, 'government');
 
     // Tech assimilation: merge techs, keep max-level per field
     const originalTechs = new Map(conquerorCountry.knownTechs);
@@ -103,9 +117,7 @@ export class ConquerGenerator {
     // 15% chance, gated on (a) the conqueror is currently in an empire and
     // (b) conquerorGov < conqueredGov.
     if (conquerorCountry.memberOf) {
-      const conquerorGov = getCountryTechLevel(world, conquerorCountry, 'government');
-      const conqueredGov = getCountryTechLevel(world, conqueredCountry, 'government');
-      if (conquerorGov < conqueredGov && rng() < 0.15) {
+      if (preConquerorGov < preConqueredGov && rng() < 0.15) {
         this._dissolveEmpire(conquerorCountry.memberOf, absYear);
       }
     }
@@ -148,10 +160,18 @@ export class ConquerGenerator {
       empire.reach.delete(conquered.governingRegion);
       empire.members?.delete(conquered);
 
-      // If empire drops to one member: dissolve
+      // If empire drops to one member: fully dissolve (release remaining
+      // members, clear sets). Matches the cleanup in Ruin.ts _dissolveCountry
+      // and _dissolveEmpire above.
       if (empire.countries.size <= 1) {
         empire.destroyedOn = conquered.year?.year ?? 0;
         empire.conqueredBy = conqueror.id;
+        if (empire.members) {
+          for (const member of empire.members) member.memberOf = null;
+          empire.members.clear();
+        }
+        empire.countries.clear();
+        empire.reach.clear();
       }
       conquered.memberOf = null;
     }
