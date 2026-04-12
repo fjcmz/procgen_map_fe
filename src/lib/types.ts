@@ -345,6 +345,18 @@ export interface TerrainProfile {
    *  to MARSH in assignBiomes(). Default: false. */
   marshOverride: boolean;
 
+  // --- Continental shelf / shallow sea ---
+  /** Number of BFS hops from coastal land cells into water for the
+   *  continental shelf elevation boost. 0 = no shelf effect. Default: 3. */
+  shelfWidth: number;
+  /** Strength of the shelf boost (0–1). At 1.0 the innermost ring is pushed
+   *  to the land/water boundary elevation; at 0.5 it's pushed halfway.
+   *  Default: 0.6. */
+  shelfStrength: number;
+  /** Elevation threshold below which a water cell is classified as OCEAN
+   *  rather than COAST (shallow sea). Default: 0.1. */
+  shallowSeaThreshold: number;
+
   // --- Depression fill / lakes ---
   /** Max connected-component size (in cells) for a closed depression to
    *  become a visible LAKE. Larger basins stay as land and get a virtual

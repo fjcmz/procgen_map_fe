@@ -97,7 +97,7 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
     }
 
     if (cell.isWater) {
-      if (cell.elevation < 0.1) {
+      if (cell.elevation < profile.shallowSeaThreshold) {
         cell.biome = 'OCEAN';
       } else {
         cell.biome = 'COAST';
