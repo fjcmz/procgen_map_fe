@@ -251,6 +251,7 @@ function drawKingdomBorders(
   ownershipOverride?: Int16Array,
   colors: KingdomColor[] = KINGDOM_COLORS_TERRAIN,
   expansionFlags?: Uint8Array,
+  scale: number = 1,
 ): void {
   const getOwner = (cell: Cell): number | null => {
     if (ownershipOverride) {
@@ -279,8 +280,8 @@ function drawKingdomBorders(
 
   // Draw border edges
   const drawnPairs = new Set<string>();
-  ctx.setLineDash([6, 4]);
-  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6 / scale, 4 / scale]);
+  ctx.lineWidth = 1.5 / scale;
 
   for (const cell of cells) {
     const cellOwner = getOwner(cell);
@@ -328,6 +329,7 @@ function drawPatternedBorders(
   selectedYear: number | undefined,
   patternCache: PatternCache,
   expansionFlags?: Uint8Array,
+  scale: number = 1,
 ): void {
   const ALPHA = 0.55;
 
@@ -387,8 +389,8 @@ function drawPatternedBorders(
 
   // Draw border edges (same logic as drawKingdomBorders but with pattern-derived strokes)
   const drawnPairs = new Set<string>();
-  ctx.setLineDash([6, 4]);
-  ctx.lineWidth = 1.5;
+  ctx.setLineDash([6 / scale, 4 / scale]);
+  ctx.lineWidth = 1.5 / scale;
 
   for (const cell of cells) {
     const cellOwner = getOwner(cell);
@@ -1148,7 +1150,7 @@ function drawCurrentYearEvents(
   ctx.restore();
 }
 
-function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCells: number[], width: number): void {
+function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCells: number[], width: number, scale: number = 1): void {
   ctx.save();
   // Fill pass
   ctx.fillStyle = 'rgba(255, 220, 60, 0.35)';
@@ -1160,7 +1162,7 @@ function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCe
   }
   // Stroke pass — only external boundary edges
   ctx.strokeStyle = '#ffd700';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = 2 / scale;
   const highlightSet = new Set(highlightCells);
 
   if (highlightSet.size === 1) {
@@ -1298,10 +1300,10 @@ export function render(
         drawPatternedBorders(
           ctx, data.cells, width, ownershipAtYear,
           politicalMode, data.history, selectedYear, patternCache,
-          expansionFlags,
+          expansionFlags, scale,
         );
       } else {
-        drawKingdomBorders(ctx, data.cells, width, ownershipAtYear, KINGDOM_COLORS_TERRAIN, expansionFlags);
+        drawKingdomBorders(ctx, data.cells, width, ownershipAtYear, KINGDOM_COLORS_TERRAIN, expansionFlags, scale);
       }
     }
 
@@ -1340,7 +1342,7 @@ export function render(
 
     // Layer 9: Entity highlight (click-to-navigate)
     if (highlightCells && highlightCells.length > 0) {
-      drawHighlight(ctx, data.cells, highlightCells, width);
+      drawHighlight(ctx, data.cells, highlightCells, width, scale);
     }
 
     ctx.restore();
