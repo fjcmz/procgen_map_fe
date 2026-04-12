@@ -27,6 +27,31 @@ export const CITY_SIZE_TO_INDEX: Record<CitySize, number> = {
 export const INDEX_TO_CITY_SIZE: CitySize[] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
 
 /**
+ * Population milestones that each grant +1 cell of territory.
+ * City starts with 1 cell (founding cell), so max cells from milestones = 1 + 14 = 15.
+ * Government tech adds +1 cell per level on top of this.
+ */
+export const CITY_TERRITORY_MILESTONES: number[] = [
+  500, 2_000, 5_000, 10_000, 25_000, 50_000, 100_000,
+  250_000, 500_000, 1_000_000, 2_500_000, 5_000_000, 10_000_000, 25_000_000,
+];
+
+/** Max cells a city can own based purely on population milestones (excludes tech bonus). */
+export function maxCellsForPopulation(pop: number): number {
+  let count = 1; // founding cell
+  for (const milestone of CITY_TERRITORY_MILESTONES) {
+    if (pop >= milestone) count++;
+    else break;
+  }
+  return count;
+}
+
+/** Max cells a city can own including government tech bonus (capped at +5). */
+export function maxCellsForCity(pop: number, govLevel: number): number {
+  return maxCellsForPopulation(pop) + Math.min(5, govLevel);
+}
+
+/**
  * Derive city size from population and tech levels.
  * `government` and `industry` tech reduce thresholds (~4% per combined level),
  * so advanced civilizations reach higher tiers at smaller populations.
@@ -94,6 +119,8 @@ export class CityEntity {
   wonders: string[] = [];
   religions: Map<string, number> = new Map();
   cataclysms: string[] = [];
+  /** Cells owned by this city. Keys are cell indices, values are the year the cell was claimed. */
+  ownedCells: Map<number, number> = new Map();
   // Transient
   regionId: string = '';
   contactCities: Set<CityEntity> = new Set();

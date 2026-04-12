@@ -39,6 +39,9 @@ export class FoundationGenerator {
     city.founded = true;
     city.foundedOn = absYear;
 
+    // Claim founding cell as city territory
+    city.ownedCells.set(city.cellIndex, absYear);
+
     // Add city to usable and uncontacted maps
     world.mapUsableCities.set(city.id, city);
     world.mapUncontactedCities.set(city.id, city);

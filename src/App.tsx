@@ -136,7 +136,11 @@ export default function App() {
     if (entity.type === 'city') {
       const city = mapData.cities.find(c => c.cellIndex === entity.cellIndex);
       if (city) {
-        setHighlightCells([city.cellIndex]);
+        // Highlight city's owned cells at the selected year (territory view)
+        const owned = city.ownedCells
+          ?.filter(oc => oc.yearAdded <= selectedYear)
+          .map(oc => oc.cellIndex) ?? [city.cellIndex];
+        setHighlightCells(owned.length > 0 ? owned : [city.cellIndex]);
         const cell = mapData.cells[city.cellIndex];
         if (cell) mapCanvasRef.current?.navigateTo(cell.x, cell.y);
       }
@@ -171,7 +175,7 @@ export default function App() {
         if (cell) mapCanvasRef.current?.navigateTo(cell.x, cell.y);
       }
     }
-  }, [mapData, ownershipAtYear]);
+  }, [mapData, ownershipAtYear, selectedYear]);
 
   // Clean up worker on unmount
   useEffect(() => {

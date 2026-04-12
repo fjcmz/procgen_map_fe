@@ -25,6 +25,37 @@ export const REGION_BIOME_CAPACITY: Record<RegionBiome, number> = {
   tundra:      250_000,
 };
 
+/**
+ * Per-cell carrying capacity by fine-grained cell biome (20 types).
+ * Calibrated so ~8 cells of grassland/forest ≈ old REGION_BIOME_CAPACITY for temperate (2.5M).
+ * Used by YearGenerator step 4 to compute city carrying capacity from owned cells.
+ */
+export const CELL_BIOME_CAPACITY: Record<BiomeType, number> = {
+  // Land biomes — calibrated so 15 cells ≈ old REGION_BIOME_CAPACITY.
+  // Temperate target: 2.5M / 15 ≈ 167K average.
+  GRASSLAND:                    190_000,
+  TEMPERATE_DECIDUOUS_FOREST:   170_000,
+  TEMPERATE_RAIN_FOREST:        160_000,
+  TAIGA:                        120_000,
+  ALPINE_MEADOW:                100_000,
+  TROPICAL_SEASONAL_FOREST:      60_000,
+  TROPICAL_RAIN_FOREST:          50_000,
+  SHRUBLAND:                     75_000,
+  MARSH:                         30_000,
+  TEMPERATE_DESERT:              55_000,
+  SUBTROPICAL_DESERT:            18_000,
+  BARE:                          15_000,
+  SCORCHED:                      10_000,
+  TUNDRA:                        18_000,
+  SNOW:                          12_000,
+  ICE:                            5_000,
+  // Water biomes — modest capacity (fishing, trade)
+  COAST:                         25_000,
+  BEACH:                         35_000,
+  OCEAN:                          8_000,
+  LAKE:                          45_000,
+};
+
 export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
   SNOW: 'tundra',   ICE: 'tundra',    TUNDRA: 'tundra',
   BARE: 'arid',     SCORCHED: 'arid', SHRUBLAND: 'arid', TEMPERATE_DESERT: 'arid',

@@ -445,6 +445,8 @@ export function buildPhysicalWorld(
         if (tooClose) continue;
 
         const cityEntity = cityGenerator.generate(ci, generateCityName(rng, usedCityNames), rng, region, world);
+        // Claim founding cell as city territory (year 0 = pre-history)
+        cityEntity.ownedCells.set(ci, 0);
         region.cities.push(cityEntity);
         globalPlacedCityCells.push(ci);
         placed++;
