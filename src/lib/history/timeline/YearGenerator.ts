@@ -126,8 +126,41 @@ export class YearGenerator {
 
         if (frontier.length === 0) continue;
 
-        // Sort: land cells first (by biome capacity desc), then sea cells (by biome capacity desc)
+        // Multi-source BFS from resource cells within the region to compute
+        // hop-distance for every region cell.  This lets cities grow *toward*
+        // resources even when no resource cell is immediately adjacent.
+        // Bounded by region size (~30 cells) so very cheap.
+        const resourceDist = new Map<number, number>();
+        const resCells = [...region.cellResources.keys()];
+        if (resCells.length > 0) {
+          const queue: number[] = [];
+          for (const rc of resCells) {
+            if (regionCellSet.has(rc)) {
+              resourceDist.set(rc, 0);
+              queue.push(rc);
+            }
+          }
+          let qi = 0;
+          while (qi < queue.length) {
+            const ci = queue[qi++];
+            const d = resourceDist.get(ci)!;
+            for (const ni of cells[ci].neighbors) {
+              if (!regionCellSet.has(ni)) continue;
+              if (resourceDist.has(ni)) continue;
+              resourceDist.set(ni, d + 1);
+              queue.push(ni);
+            }
+          }
+        }
+        const maxDist = resCells.length > 0
+          ? Math.max(...frontier.map(ci => resourceDist.get(ci) ?? 9999))
+          : 0;
+
+        // Sort: closest to a resource first, then land over water, then biome capacity desc
         frontier.sort((a, b) => {
+          const aDist = resourceDist.get(a) ?? maxDist + 1;
+          const bDist = resourceDist.get(b) ?? maxDist + 1;
+          if (aDist !== bDist) return aDist - bDist; // closer to resource wins
           const aWater = cells[a].isWater ? 1 : 0;
           const bWater = cells[b].isWater ? 1 : 0;
           if (aWater !== bWater) return aWater - bWater; // land first
