@@ -270,9 +270,13 @@ export const PROFILES: Record<string, TerrainProfile> = {
     continentalityStrength: 0.10,
     // Ocean world thermal corrections — tiny islands should not exhibit continental
     // climate extremes; water world has higher thermal inertia overall
-    globalTempOffset: 0.10,
+    globalTempOffset: 0.15,
     contStrength: 0.03,
-    lapseRate: 0.06,
+    lapseRate: 0.04,
+    // Restrict frozen biomes to extreme poles — water world stays warm
+    iceTempThreshold: 0.08,
+    snowTempThreshold: 0.05,
+    tundraTempThreshold: 0.10,
     // Archipelago → wider shelf around islands, slightly higher shallow sea threshold
     shelfWidth: 5,
     shallowSeaThreshold: 0.12,
