@@ -618,6 +618,23 @@ function computeOwnership(
     }
   }
 
+  // Also seed dead countries (dissolved via ruinifyCity) — their governing
+  // regions should appear in historical snapshots for years before dissolution.
+  // Only fill unclaimed cells so live countries take priority.
+  for (const [countryId, country] of world.mapDeadCountries) {
+    const ce = country as CountryEvent;
+    if (ce.foundedOn > yearObj.year) continue;
+    const numIdx = countryMap.idToIndex.get(countryId);
+    if (numIdx === undefined) continue;
+    const region = world.mapRegions.get(ce.governingRegion);
+    if (!region) continue;
+    for (const ci of region.cellIndices) {
+      if (ownership[ci] === -1) {
+        ownership[ci] = numIdx;
+      }
+    }
+  }
+
   // Handle conquests: conquered country's region transfers to conqueror
   // We need to replay all conquests up to this year
   // The conquer events mutate country membership in empires but the region's countryId
@@ -631,6 +648,17 @@ function computeOwnership(
       regionOwner.set(ce.governingRegion, countryId);
     }
   }
+  // Include dead countries so conquest chains involving dissolved countries
+  // can still transfer their regions. Only seed if not already claimed by
+  // a live country.
+  for (const [countryId, country] of world.mapDeadCountries) {
+    const ce = country as CountryEvent;
+    if (ce.foundedOn <= yearObj.year) {
+      if (!regionOwner.has(ce.governingRegion)) {
+        regionOwner.set(ce.governingRegion, countryId);
+      }
+    }
+  }
 
   // Now apply conquests in chronological order up to this year.
   // Transitive: when C conquers B (who had conquered A), all regions
@@ -639,7 +667,8 @@ function computeOwnership(
   for (const y of timeline.years) {
     if (y.year > yearObj.year) break;
     for (const conquer of y.conquers) {
-      const conqueredCountry = world.mapCountries.get(conquer.conquered) as CountryEvent | undefined;
+      const conqueredCountry = (world.mapCountries.get(conquer.conquered)
+        ?? world.mapDeadCountries.get(conquer.conquered)) as CountryEvent | undefined;
       if (!conqueredCountry) continue;
       // Transfer ALL regions currently owned by the conquered to the conqueror.
       // This handles transitive chains (C beats B who beat A → C gets A's region).
