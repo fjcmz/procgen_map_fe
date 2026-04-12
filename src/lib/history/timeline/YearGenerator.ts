@@ -1,8 +1,8 @@
 import { Year } from './Year';
 import type { Timeline } from './Timeline';
 import type { World } from '../physical/World';
-import { REGION_BIOME_GROWTH, REGION_BIOME_CAPACITY } from '../physical/Region';
-import { computeCitySize, CITY_SIZE_TO_INDEX } from '../physical/CityEntity';
+import { REGION_BIOME_GROWTH, REGION_BIOME_CAPACITY, CELL_BIOME_CAPACITY } from '../physical/Region';
+import { computeCitySize, CITY_SIZE_TO_INDEX, maxCellsForCity } from '../physical/CityEntity';
 import { foundationGenerator } from './Foundation';
 import { contactGenerator } from './Contact';
 import { countryGenerator } from './Country';
@@ -46,28 +46,31 @@ export class YearGenerator {
     }
     year.worldPopulation = worldPop;
 
-    // Step 4: Logistic growth with biome carrying capacity
-    // Phase 1: `energy` tech multiplies `growth`'s effective level, capped so
-    // a level-10 energy country gets +50% growth boost (1.5×) at most.
-    // Note: tech effects read from the country-scope (or empire founder) via
-    // getCityTechLevel, not directly from city.knownTechs — see Tech.ts helpers.
+    // Step 4: Logistic growth with per-cell carrying capacity
+    // Capacity = sum of CELL_BIOME_CAPACITY for owned cells, capped at
+    // REGION_BIOME_CAPACITY. Early cities are cell-limited; mature cities
+    // hit the region cap, matching old flat-cap behavior.
     for (const city of world.mapUsableCities.values()) {
       const region = world.mapRegions.get(city.regionId);
       if (region) {
         const growthRate = REGION_BIOME_GROWTH[region.biome] / 100;
-        // Carrying capacity: base from biome, scaled up by growth tech (× energy)
         let capacity = REGION_BIOME_CAPACITY[region.biome];
+        if (cells) {
+          let cellCap = 0;
+          for (const ci of city.ownedCells.keys()) {
+            const cell = cells[ci];
+            if (cell) cellCap += CELL_BIOME_CAPACITY[cell.biome] ?? 0;
+          }
+          if (cellCap === 0) {
+            const cell = cells[city.cellIndex];
+            if (cell) cellCap = CELL_BIOME_CAPACITY[cell.biome] ?? 50_000;
+          }
+          capacity = Math.min(cellCap, capacity);
+        }
         const growthLevel = getCityTechLevel(world, city, 'growth');
         if (growthLevel > 0) {
           const energyLevel = getCityTechLevel(world, city, 'energy');
           const energyMult = 1 + 0.05 * Math.min(energyLevel, 10);
-          // Phase 4 tuning: growth coefficient 0.15 → 0.12. `energy` stacks
-          // (up to ×1.5) on top of `growth` since Phase 1, so 0.15 was
-          // effectively 0.225 at energy level 10 — the compounding snowball
-          // the spec warns about in `tech_overhaul.md` Phase 4. A full halving
-          // to 0.10 dropped peakPopulation by ~32% across the 5-seed sweep
-          // (outside the ±30% quality gate), so round 2 backs off to 0.12 to
-          // land inside the gate while still curbing the compounding effect.
           capacity *= 1 + growthLevel * 0.12 * energyMult;
         }
         // Logistic growth: rate decelerates as population approaches capacity
@@ -84,6 +87,62 @@ export class YearGenerator {
       const govLevel = getCityTechLevel(world, city, 'government');
       const indLevel = getCityTechLevel(world, city, 'industry');
       city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
+    }
+
+    // Step 4c: Territory expansion — cities claim adjacent cells from their region
+    // when population milestones (+ gov tech bonus) allow more cells.
+    if (cells) {
+      // Build a global claimed-cells index: cellIndex → cityId (prevents overlaps)
+      const claimedCells = new Map<number, string>();
+      for (const city of world.mapUsableCities.values()) {
+        for (const ci of city.ownedCells.keys()) {
+          claimedCells.set(ci, city.id);
+        }
+      }
+
+      for (const city of world.mapUsableCities.values()) {
+        const govLevel = getCityTechLevel(world, city, 'government');
+        const maxCells = maxCellsForCity(city.currentPopulation, govLevel);
+        if (city.ownedCells.size >= maxCells) continue;
+
+        const region = world.mapRegions.get(city.regionId);
+        if (!region) continue;
+
+        const regionCellSet = new Set(region.cellIndices);
+
+        // Build frontier: cells adjacent to owned cells, in the same region, unclaimed
+        const frontier: number[] = [];
+        const seen = new Set<number>();
+        for (const ownedCi of city.ownedCells.keys()) seen.add(ownedCi);
+        for (const ownedCi of city.ownedCells.keys()) {
+          for (const ni of cells[ownedCi].neighbors) {
+            if (seen.has(ni)) continue;
+            seen.add(ni);
+            if (!regionCellSet.has(ni)) continue;
+            if (claimedCells.has(ni)) continue;
+            frontier.push(ni);
+          }
+        }
+
+        if (frontier.length === 0) continue;
+
+        // Sort: land cells first (by biome capacity desc), then sea cells (by biome capacity desc)
+        frontier.sort((a, b) => {
+          const aWater = cells[a].isWater ? 1 : 0;
+          const bWater = cells[b].isWater ? 1 : 0;
+          if (aWater !== bWater) return aWater - bWater; // land first
+          return (CELL_BIOME_CAPACITY[cells[b].biome] ?? 0) - (CELL_BIOME_CAPACITY[cells[a].biome] ?? 0);
+        });
+
+        // Claim cells one at a time up to maxCells
+        let toClaim = maxCells - city.ownedCells.size;
+        for (const ci of frontier) {
+          if (toClaim <= 0) break;
+          city.ownedCells.set(ci, absYear);
+          claimedCells.set(ci, city.id);
+          toClaim--;
+        }
+      }
     }
 
     // Step 5: Kill/retire illustrates
@@ -355,11 +414,14 @@ export class YearGenerator {
       if (empire) year.empires.push(empire);
     }
 
-    // Capture per-city population and size at end of year for snapshot serialization
+    // Capture per-city population, size, and owned cells at end of year for snapshot serialization
     for (const city of world.mapCities.values()) {
       if (city.founded) {
         year.cityPopulations[city.cellIndex] = city.currentPopulation;
         year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
+        if (city.ownedCells.size > 0) {
+          year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
+        }
       }
     }
 

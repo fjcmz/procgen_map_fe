@@ -58,6 +58,12 @@ export interface RegionResourceData {
    * backwards compatibility — missing / 0 means always unlocked.
    */
   requiredTechLevel?: number;
+  /**
+   * Whether this resource is currently exploited — i.e. its cell is owned by
+   * a city. Snapshot at final year; for time-scrubbed status, the UI recomputes
+   * from city `ownedCells[].yearAdded` + resource `cellIndex`.
+   */
+  exploited?: boolean;
 }
 
 export interface RegionData {
@@ -111,6 +117,11 @@ export interface River {
   maxFlow: number;
 }
 
+export interface CityOwnedCell {
+  cellIndex: number;
+  yearAdded: number;
+}
+
 export interface City {
   cellIndex: number;
   name: string;
@@ -120,6 +131,8 @@ export interface City {
   size: 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
   isRuin: boolean;
   ruinYear: number;
+  /** Cells owned by this city, with the year each was claimed. */
+  ownedCells?: CityOwnedCell[];
 }
 
 export interface Road {

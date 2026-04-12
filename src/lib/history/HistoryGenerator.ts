@@ -793,6 +793,23 @@ export class HistoryGenerator {
     const historyRoot = HistoryRoot.INSTANCE;
     const timeline = timelineGenerator.generate(rng, historyRoot, world, cells, usedCityNames);
 
+    // Phase 1b: Update region resource exploitation status from city territory.
+    // Build a global set of all cells owned by any founded city, then mark each
+    // resource in regionData as exploited or not.
+    {
+      const allOwnedCells = new Set<number>();
+      for (const city of world.mapCities.values()) {
+        if (!city.founded) continue;
+        for (const ci of city.ownedCells.keys()) allOwnedCells.add(ci);
+      }
+      for (const rd of regionData) {
+        if (!rd.resources) continue;
+        for (const r of rd.resources) {
+          r.exploited = allOwnedCells.has(r.cellIndex);
+        }
+      }
+    }
+
     // Phase 2: Build country index map for ownership arrays
     const countryMap = buildCountryIndexMap(world, rng);
 
@@ -1127,6 +1144,10 @@ export class HistoryGenerator {
         size: cityEntity.size,
         isRuin: cityEntity.isRuin,
         ruinYear: cityEntity.isRuin ? cityEntity.ruinYear - timeline.startOfTime : 0,
+        ownedCells: Array.from(cityEntity.ownedCells.entries()).map(([ci, yr]) => ({
+          cellIndex: ci,
+          yearAdded: yr >= timeline.startOfTime ? yr - timeline.startOfTime : yr,
+        })),
       });
     }
 

@@ -93,8 +93,18 @@ export class TradeGenerator {
     const res2 = targetResources[Math.floor(rng() * targetResources.length)];
 
     const absYear = year.year;
+    // Consume rngHex before the exploitation check to preserve RNG sequence.
+    const tradeHex = rngHex(rng);
+
+    // City territory gate: a resource can only be exploited if its cell is
+    // owned by a city in the region.
+    if (!this._isResourceExploited(world, sourceRegion.id, res1.cellIndex) ||
+        !this._isResourceExploited(world, targetRegion.id, res2.cellIndex)) {
+      return null;
+    }
+
     const trade: Trade = {
-      id: IdUtil.id('trade', absYear, res1.type, res2.type, rngHex(rng)) ?? 'trade_unknown',
+      id: IdUtil.id('trade', absYear, res1.type, res2.type, tradeHex) ?? 'trade_unknown',
       started: absYear,
       ended: null,
       endCause: '',
@@ -124,6 +134,17 @@ export class TradeGenerator {
     this._tryTechDiffusion(rng, year, world, sourceCity, targetCity, trade);
 
     return trade;
+  }
+
+  /** Check if a resource cell is owned by any founded city in its region. */
+  private _isResourceExploited(world: World, regionId: string, cellIndex: number): boolean {
+    const region = world.mapRegions.get(regionId);
+    if (!region) return false;
+    for (const city of region.cities) {
+      if (!city.founded) continue;
+      if (city.ownedCells.has(cellIndex)) return true;
+    }
+    return false;
   }
 
   /**
