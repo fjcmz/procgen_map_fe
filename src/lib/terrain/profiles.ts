@@ -262,10 +262,17 @@ export const PROFILES: Record<string, TerrainProfile> = {
     convergentOCBoost: 0.45,
     // Dampen polar ice caps so they don't eat the entire land budget at 98% water
     polarNoiseAmplitude: 0.35,
+    // Push polar elevation boost poleward — fewer polar islands, more temperate ones
+    polarIceStart: 0.85,
     // Existing climate/current flavor — preserved
     warmCurrentStrength: 0.16,
     latAmplitude: 0.35,
     continentalityStrength: 0.10,
+    // Ocean world thermal corrections — tiny islands should not exhibit continental
+    // climate extremes; water world has higher thermal inertia overall
+    globalTempOffset: 0.10,
+    contStrength: 0.03,
+    lapseRate: 0.06,
     // Archipelago → wider shelf around islands, slightly higher shallow sea threshold
     shelfWidth: 5,
     shallowSeaThreshold: 0.12,
