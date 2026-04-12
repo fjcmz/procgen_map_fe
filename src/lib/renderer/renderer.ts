@@ -870,7 +870,7 @@ function drawResources(
     if (!region.resources) continue;
     for (const r of region.resources) {
       const cell = cells[r.cellIndex];
-      if (!cell || cell.isWater) continue;
+      if (!cell) continue;
       const category = getLegacyCategory(r.type as ResourceType);
       switch (category) {
         case 'strategic':    drawStrategicIcon(ctx, cell.x, cell.y, iconSize); break;
