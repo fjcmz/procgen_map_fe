@@ -193,7 +193,7 @@ export default function App() {
     workerRef.current = worker;
 
     const height = window.innerHeight;
-    const width = Math.max(window.innerWidth, height * 2);
+    const width = Math.max(window.innerWidth, Math.round(height * 1.8));
 
     setGenerating(true);
     setProgress({ step: 'Starting…', pct: 0 });

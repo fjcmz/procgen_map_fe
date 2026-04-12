@@ -20,7 +20,8 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   convergentOCBoost: 0.25,
   polarIceStart: 0.72,
   polarIceEnd: 0.94,
-  polarNoiseAmplitude: 1.2,
+  polarNoiseAmplitude: 0.6,
+  polarBlendWeight: 0.5,
   thermalErosionIters: 3,
   thermalErosionTalus: 0.05,
 
@@ -159,6 +160,7 @@ export const PROFILES: Record<string, TerrainProfile> = {
     coldCurrentStrength: 0.16,
     polarIceStart: 0.20,
     polarIceEnd: 0.50,
+    polarBlendWeight: 0.7,
     latAmplitude: 0.10,
     globalMoistureOffset: -0.05,
     riverFlowThreshold: 25,

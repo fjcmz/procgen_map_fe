@@ -61,7 +61,8 @@ function bfsDistances(cells: Cell[], startCell: number): Int32Array {
 function assignPlates(
   cells: Cell[],
   rng: () => number,
-  profile: TerrainProfile
+  profile: TerrainProfile,
+  height: number
 ): { plateOf: Int32Array; plates: TectonicPlate[] } {
   const n = cells.length;
   const plateOf = new Int32Array(n).fill(-1);
@@ -86,8 +87,15 @@ function assignPlates(
     let seedCell: number;
 
     if (s === 0) {
-      // First continental seed: random
-      seedCell = Math.floor(rng() * n);
+      // First continental seed: biased toward mid-latitudes to avoid
+      // clustering all continents at a pole.
+      let candidate = Math.floor(rng() * n);
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const cellNy = Math.abs((cells[candidate].y / height) * 2 - 1);
+        if (cellNy < 0.8) break;
+        candidate = Math.floor(rng() * n);
+      }
+      seedCell = candidate;
     } else if (s < numContinental) {
       // Subsequent continental seeds: nearest to existing continental seeds,
       // but at least minSeparation hops away
@@ -433,7 +441,7 @@ export function assignElevation(
 
   // --- Step 1: Generate tectonic plates ---
   // 3–5 continental plates (clustered, larger) + 8–12 oceanic plates (spread)
-  const { plateOf, plates } = assignPlates(cells, rng, profile);
+  const { plateOf, plates } = assignPlates(cells, rng, profile, height);
 
   // --- Step 1b: Boost seams between adjacent continental plates ---
   const seamBoost = boostContinentalSeams(cells, plateOf, plates, rng, profile);
@@ -503,17 +511,15 @@ export function assignElevation(
     const polarDist = Math.abs(ny);
 
     if (polarDist > profile.polarIceStart) {
-      // Reduced southern offset for more symmetric poles
-      const polarOffset = ny > 0 ? 0.0 : width * 0.17;
       const polarNoise = fbmCylindrical(
-        noise.continent, cell.x + polarOffset, cell.y, width, height, 4, 2.0
+        noise.continent, cell.x, cell.y, width, height, 4, 2.0
       );
       // Smoothstep blend over range [polarIceStart, polarIceEnd] to avoid banding
       const polarRange = profile.polarIceEnd - profile.polarIceStart;
       const t = Math.min(1, Math.max(0, (polarDist - profile.polarIceStart) / polarRange));
       const polarBlend = t * t * (3 - 2 * t);
       const polarLand = (polarNoise - 0.25) * profile.polarNoiseAmplitude * polarBlend;
-      elev = Math.max(elev, polarLand);
+      elev += polarLand * profile.polarBlendWeight;
     }
 
     cell.elevation = Math.max(0, Math.min(1, elev));
