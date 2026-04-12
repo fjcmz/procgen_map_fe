@@ -435,6 +435,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const empire = country ? findEmpireForCountry(empireSnap, country.id) : undefined;
 
   const wonderSnap = useMemo(() => {
@@ -460,6 +461,34 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
     () => getCellEvents(history.years, cellIndex, selectedYear),
     [history.years, cellIndex, selectedYear],
   );
+
+  const techLevels = useMemo(
+    () => countryId >= 0 ? getCountryTechLevels(history.years, countryId, selectedYear) : new Map<string, number>(),
+    [history.years, countryId, selectedYear],
+  );
+
+  const cityResources = useMemo(() => {
+    const acc = new Map<string, ResourceAggregate>();
+    if (!city?.ownedCells || !mapData.regions) return acc;
+    const ownedSet = new Set(
+      city.ownedCells.filter(oc => oc.yearAdded <= selectedYear).map(oc => oc.cellIndex),
+    );
+    for (const region of mapData.regions) {
+      if (!region.resources) continue;
+      for (const r of region.resources) {
+        if (!ownedSet.has(r.cellIndex)) continue;
+        const locked = isResourceLocked(r, techLevels);
+        const prev = acc.get(r.type);
+        if (prev) {
+          prev.amount += r.amount;
+          if (!locked) prev.locked = false;
+        } else {
+          acc.set(r.type, { amount: r.amount, locked, exploited: true });
+        }
+      }
+    }
+    return acc;
+  }, [city, mapData.regions, selectedYear, techLevels]);
 
   const recentEvents = events.slice(-15);
 
@@ -508,33 +537,19 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
         </div>
 
         {/* Resources on this city's owned cells */}
-        {city?.ownedCells && mapData.regions && (() => {
-          const ownedSet = new Set(city.ownedCells!.filter(oc => oc.yearAdded <= selectedYear).map(oc => oc.cellIndex));
-          const cityResources: { type: string; amount: number }[] = [];
-          for (const region of mapData.regions) {
-            if (!region.resources) continue;
-            for (const r of region.resources) {
-              if (ownedSet.has(r.cellIndex)) {
-                cityResources.push({ type: r.type, amount: r.amount });
-              }
-            }
-          }
-          if (cityResources.length === 0) return null;
-          return (
-            <>
-              <div style={styles.sectionLabel}>Resources ({cityResources.length})</div>
-              <div style={styles.techGrid}>
-                {cityResources.map((r, i) => (
-                  <div key={i} style={styles.techRow}>
-                    <span style={{ ...styles.techDot, background: resourceDotColor(r.type) }} />
-                    <span style={styles.techLabel}>{'\u2692 '}{formatResourceType(r.type)}</span>
-                    <span style={styles.techLevel}>{r.amount}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          );
-        })()}
+        {cityResources.size > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setResourcesOpen(v => !v)}
+              aria-expanded={resourcesOpen}
+            >
+              {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({cityResources.size})
+            </button>
+            {resourcesOpen && <ResourceList resources={cityResources} />}
+          </>
+        )}
 
         {recentEvents.length > 0 && (
           <>
