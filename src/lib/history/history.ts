@@ -433,6 +433,7 @@ export function buildPhysicalWorld(
         resources: region.resources.map(r => ({
           type: r.type,
           amount: r.original,
+          cellIndex: r.cellIndex,
           requiredTechField: r.requiredTechField,
           requiredTechLevel: r.requiredTechLevel,
         })),

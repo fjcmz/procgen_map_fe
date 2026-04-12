@@ -867,32 +867,16 @@ function drawResources(
   const iconSize = 5;
 
   for (const region of regions) {
-    if (!region.primaryResourceType || region.cellIndices.length === 0) continue;
-
-    // Find center cell: cell nearest the median x/y of the region
-    let sumX = 0, sumY = 0;
-    for (const ci of region.cellIndices) {
-      sumX += cells[ci].x;
-      sumY += cells[ci].y;
-    }
-    const mx = sumX / region.cellIndices.length;
-    const my = sumY / region.cellIndices.length;
-
-    let bestDist = Infinity;
-    let centerCell = cells[region.cellIndices[0]];
-    for (const ci of region.cellIndices) {
-      const c = cells[ci];
-      const d = (c.x - mx) ** 2 + (c.y - my) ** 2;
-      if (d < bestDist) { bestDist = d; centerCell = c; }
-    }
-
-    if (centerCell.isWater) continue;
-
-    const category = getLegacyCategory(region.primaryResourceType as ResourceType);
-    switch (category) {
-      case 'strategic':    drawStrategicIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
-      case 'agricultural': drawAgriculturalIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
-      case 'luxury':       drawLuxuryIcon(ctx, centerCell.x, centerCell.y, iconSize); break;
+    if (!region.resources) continue;
+    for (const r of region.resources) {
+      const cell = cells[r.cellIndex];
+      if (!cell || cell.isWater) continue;
+      const category = getLegacyCategory(r.type as ResourceType);
+      switch (category) {
+        case 'strategic':    drawStrategicIcon(ctx, cell.x, cell.y, iconSize); break;
+        case 'agricultural': drawAgriculturalIcon(ctx, cell.x, cell.y, iconSize); break;
+        case 'luxury':       drawLuxuryIcon(ctx, cell.x, cell.y, iconSize); break;
+      }
     }
   }
 }

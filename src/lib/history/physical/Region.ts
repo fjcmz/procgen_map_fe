@@ -47,6 +47,10 @@ export class Region {
   readonly id: string;
   biome: RegionBiome;
   resources: Resource[] = [];
+  /** Per-cell resource index (worker-only). Keys are cell indices, values
+   *  are the subset of `resources` that belong to that cell. Populated by
+   *  `ResourceGenerator.generateForRegion`. */
+  cellResources: Map<number, Resource[]> = new Map();
   cities: CityEntity[] = [];
   neighbours: Set<string> = new Set();
   cellIndices: number[] = [];

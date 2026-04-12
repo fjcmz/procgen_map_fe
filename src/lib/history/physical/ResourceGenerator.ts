@@ -10,33 +10,27 @@ import {
 } from './ResourceCatalog';
 
 /**
- * Habitat-aware region generator.
+ * Habitat-aware per-cell resource generator.
  *
  * Pipeline per region:
- *   1. `buildRegionProfile(region, cells)` — single-pass aggregate of
- *      cell climate/geography data (no RNG).
- *   2. Pick a uniform `count = 1 + floor(rng()*10)` — **byte-identical**
- *      to the legacy loop that this replaces, so the RNG budget per
- *      region stays stable and downstream simulation (city placement,
- *      history steps) reads the same rng values as before.
- *   3. Filter `RESOURCE_SPECS` by `computeFitScore > 0`. Hydrology and
- *      climate axes are hard gates; the biome whitelist is a SOFT bias
- *      (off-biome specs stay eligible at 20% weight) so the per-region
- *      eligible pool stays wide regardless of biome. Weight each
- *      eligible spec as `rarityWeight * fitScore`.
- *   4. Iterate `count` times: weighted-pick from the pool (1 rng call),
- *      construct a `Resource` (rngHex = 3 + rollDice = 10 rng calls —
- *      same shape as legacy `resourceGenerator.generate`), then remove
- *      the pick from the pool so no duplicates within a region.
+ *   1. Roll target `count = 1 + floor(rng()*10)` (same budget roll as
+ *      the legacy per-region generator).
+ *   2. For each land cell in the region, build a per-cell profile and
+ *      compute the total eligible weight across `RESOURCE_SPECS`. This
+ *      is a deterministic score reflecting how resource-rich the cell's
+ *      specific terrain/climate/hydrology is.
+ *   3. Rank land cells by total eligible weight descending (tiebreak by
+ *      cell index for determinism), take the top `count` cells.
+ *   4. For each selected cell, weighted-pick one spec from that cell's
+ *      own pool (1 rng call), construct a `Resource` with `cellIndex`
+ *      (3 hex + 10 dice rng calls). Also populates `region.cellResources`.
  *
- * RNG-call accounting (must stay byte-identical to legacy path):
- *   legacy: 1 (count) + count * (1 pickType + 3 hex + 10 dice) = 1 + 14*count
- *   new:    1 (count) + count * (1 sample + 3 hex + 10 dice) = 1 + 14*count  ✓
- *
- * Rarity influences *which* types spawn (via `RARITY_WEIGHTS`), not how
- * much stockpile they start with — every spec uses the same
- * `STANDARD_ABUNDANCE` (10d10+20) as the legacy code so trade
- * exhaustion timing and Wonder gating stay unchanged.
+ * RNG-call accounting:
+ *   1 (count) + count * (1 sample + 3 hex + 10 dice) = 1 + 14*count
+ *   When fewer land cells exist than `count`, the shortfall burns
+ *   14 rng calls per missing cell to keep the per-region budget stable.
+ *   When a selected cell has an empty pool (all specs hard-gated), the
+ *   same 14-call burn applies.
  */
 
 export interface RegionProfile {
@@ -53,12 +47,35 @@ export interface RegionProfile {
 }
 
 // ---------------------------------------------------------------------------
-// Profile builder
+// Profile builders
 // ---------------------------------------------------------------------------
 
 const RIVER_FLOW_THRESHOLD = 4;
 const MOUNTAIN_ELEVATION_THRESHOLD = 0.72;
 
+/**
+ * Build a profile for a single cell, reusing the `RegionProfile` shape so
+ * `computeFitScore` works unchanged. `regionBiome` is inherited from the
+ * owning region (the off-biome soft bias still uses the region's dominant
+ * biome, not the individual cell's Voronoi biome).
+ */
+export function buildCellProfile(cell: Cell, regionBiome: RegionBiome): RegionProfile {
+  const isMountain = cell.elevation > MOUNTAIN_ELEVATION_THRESHOLD;
+  return {
+    regionBiome,
+    hasCoast: cell.isCoast,
+    hasRiver: cell.riverFlow > RIVER_FLOW_THRESHOLD,
+    hasLake: !!cell.isLake,
+    hasMountain: isMountain,
+    mountainFraction: isMountain ? 1 : 0,
+    maxElevation: cell.elevation,
+    meanTemperature: cell.temperature,
+    meanMoisture: cell.moisture,
+    cellCount: 1,
+  };
+}
+
+/** Aggregate region profile (kept for any external callers). */
 export function buildRegionProfile(region: Region, cells: Cell[]): RegionProfile {
   let hasCoast = false;
   let hasRiver = false;
@@ -210,49 +227,93 @@ function weightedPickIndex(pool: EligibleEntry[], rng: () => number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Per-cell fit ranking
+// ---------------------------------------------------------------------------
+
+interface CellFit {
+  cellIndex: number;
+  pool: EligibleEntry[];
+  totalWeight: number;
+}
+
+/**
+ * Build the eligible resource pool for a single cell and return the
+ * aggregate weight (used to rank cells by resource-richness).
+ */
+function buildCellFit(cellIndex: number, cell: Cell, regionBiome: RegionBiome): CellFit {
+  const profile = buildCellProfile(cell, regionBiome);
+  const pool: EligibleEntry[] = [];
+  let totalWeight = 0;
+  for (const spec of RESOURCE_SPECS) {
+    const fit = computeFitScore(spec, profile);
+    if (fit <= 0) continue;
+    const w = RARITY_WEIGHTS[spec.rarity] * fit;
+    pool.push({ spec, weight: w });
+    totalWeight += w;
+  }
+  return { cellIndex, pool, totalWeight };
+}
+
+// ---------------------------------------------------------------------------
 // Public generator
 // ---------------------------------------------------------------------------
 
 export class ResourceGenerator {
   /**
-   * Generate the full resource list for a region using habitat-aware
-   * weighted sampling. Replaces the legacy `1 + rng() * 10` loop over
-   * `pickResourceType(rng)` while keeping the per-region RNG call
-   * budget byte-identical (see module docstring).
+   * Generate resources for a region using per-cell habitat scoring.
+   *
+   * Each resource is attached to a specific cell (the top-K most
+   * resource-fit land cells in the region). The flat array is stored
+   * on `region.resources`; the per-cell index is stored on
+   * `region.cellResources`.
+   *
+   * RNG budget: 1 (count) + count * 14 (1 sample + 3 hex + 10 dice).
    */
   generateForRegion(region: Region, cells: Cell[], rng: () => number): Resource[] {
-    // --- Step A: target count (1 rng call, same shape as legacy) ---
+    // --- Step A: target count (1 rng call) ---
     const count = Math.floor(rng() * 10) + 1;
 
-    // --- Step B: build eligible pool in a stable, deterministic order ---
-    const profile = buildRegionProfile(region, cells);
-    const pool: EligibleEntry[] = [];
-    for (const spec of RESOURCE_SPECS) {
-      const fit = computeFitScore(spec, profile);
-      if (fit <= 0) continue;
-      const rarityWeight = RARITY_WEIGHTS[spec.rarity];
-      pool.push({ spec, weight: rarityWeight * fit });
+    // --- Step B: score every land cell in the region ---
+    const fits: CellFit[] = [];
+    for (const ci of region.cellIndices) {
+      const c = cells[ci];
+      if (!c || c.isWater) continue;
+      fits.push(buildCellFit(ci, c, region.biome));
     }
 
-    // --- Step C: interleaved sample + construct ---
-    // Each iteration consumes: 1 rng (sample) + 3 rng (rngHex in
-    // Resource ctor) + 10 rng (rollDice) = 14 rng calls, matching the
-    // legacy pickResourceType + new Resource(rng) per-iteration budget.
+    // Sort by totalWeight descending, tiebreak by cellIndex ascending
+    // for deterministic order independent of region.cellIndices iteration.
+    fits.sort((a, b) => b.totalWeight - a.totalWeight || a.cellIndex - b.cellIndex);
+
+    // --- Step C: pick top `count` cells, one resource each ---
     const out: Resource[] = [];
+    region.cellResources.clear();
+
     for (let i = 0; i < count; i++) {
-      if (pool.length === 0) {
-        // Pool exhausted — we still need to consume 14 rng calls to
-        // preserve the RNG budget, but there's no spec to assign them
-        // to. Consume and discard: 1 sample + 3 hex + 10 dice = 14.
-        // This path is rare (requires more than `pool.length` target
-        // picks for a region with very few eligible specs).
+      if (i >= fits.length) {
+        // Fewer land cells than target — burn 14 rng calls to keep
+        // the per-region budget stable.
         for (let j = 0; j < 14; j++) rng();
         continue;
       }
-      const idx = weightedPickIndex(pool, rng);
-      const picked = pool[idx].spec;
-      pool.splice(idx, 1);
-      out.push(new Resource(picked.type, rng, picked.abundance));
+      const cf = fits[i];
+      if (cf.pool.length === 0) {
+        // Cell has no eligible specs — burn 14 rng calls.
+        for (let j = 0; j < 14; j++) rng();
+        continue;
+      }
+      const idx = weightedPickIndex(cf.pool, rng);
+      const picked = cf.pool[idx].spec;
+      const res = new Resource(cf.cellIndex, picked.type, rng, picked.abundance);
+      out.push(res);
+
+      // Populate the per-cell index
+      let arr = region.cellResources.get(cf.cellIndex);
+      if (!arr) {
+        arr = [];
+        region.cellResources.set(cf.cellIndex, arr);
+      }
+      arr.push(res);
     }
     return out;
   }
