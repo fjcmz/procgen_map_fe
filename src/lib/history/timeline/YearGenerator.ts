@@ -126,8 +126,11 @@ export class YearGenerator {
 
         if (frontier.length === 0) continue;
 
-        // Sort: land cells first (by biome capacity desc), then sea cells (by biome capacity desc)
+        // Sort: resource cells first, then land over water, then by biome capacity desc
         frontier.sort((a, b) => {
+          const aRes = region.cellResources.has(a) ? 1 : 0;
+          const bRes = region.cellResources.has(b) ? 1 : 0;
+          if (aRes !== bRes) return bRes - aRes; // resource cells first
           const aWater = cells[a].isWater ? 1 : 0;
           const bWater = cells[b].isWater ? 1 : 0;
           if (aWater !== bWater) return aWater - bWater; // land first
