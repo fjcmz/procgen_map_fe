@@ -228,7 +228,8 @@ function _dissolveCountry(
       }
     }
 
-    // Remove country from world
+    // Move country to dead list (keeps it available for name resolution at serialization)
+    world.mapDeadCountries.set(country.id, country);
     world.mapCountries.delete(country.id);
   }
 
