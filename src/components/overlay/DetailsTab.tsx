@@ -431,7 +431,7 @@ interface SubProps {
 }
 
 // ── City Details ──
-function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity }: SubProps & { cellIndex: number }) {
+function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { cellIndex: number }) {
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
@@ -500,9 +500,18 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
       </div>
 
       <div style={styles.scrollArea}>
-        <div style={styles.entityName}>
-          {city?.isCapital && <span title="Capital">{'\u2605'} </span>}
-          {city?.name ?? `Cell #${cellIndex}`}
+        <div style={styles.entityNameRow}>
+          <div style={styles.entityName}>
+            {city?.isCapital && <span title="Capital">{'\u2605'} </span>}
+            {city?.name ?? `Cell #${cellIndex}`}
+          </div>
+          {onNavigate && (
+            <button
+              style={styles.locateBtn}
+              onClick={() => onNavigate([cellIndex], cellIndex)}
+              title="Locate on map"
+            >{'\u25CE'}</button>
+          )}
         </div>
 
         <div style={styles.infoGrid}>
@@ -567,7 +576,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
 }
 
 // ── Country Details ──
-function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity }: SubProps & { countryIndex: number }) {
+function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { countryIndex: number }) {
   const country = history.countries[countryIndex];
   const empire = findEmpireForCountry(empireSnap, countryIndex);
 
@@ -657,9 +666,25 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
       </div>
 
       <div style={styles.scrollArea}>
-        <div style={styles.entityName}>
-          {country.name}
-          {!country.isAlive && <span style={styles.deadBadge}> (fallen)</span>}
+        <div style={styles.entityNameRow}>
+          <div style={styles.entityName}>
+            {country.name}
+            {!country.isAlive && <span style={styles.deadBadge}> (fallen)</span>}
+          </div>
+          {onNavigate && ownershipAtYear && (
+            <button
+              style={styles.locateBtn}
+              onClick={() => {
+                const cells: number[] = [];
+                for (let i = 0; i < ownershipAtYear.length; i++) {
+                  if (ownershipAtYear[i] === countryIndex) cells.push(i);
+                }
+                if (cells.length === 0) cells.push(country.capitalCellIndex);
+                onNavigate(cells, country.capitalCellIndex);
+              }}
+              title="Locate on map"
+            >{'\u25CE'}</button>
+          )}
         </div>
 
         <div style={styles.infoGrid}>
@@ -765,7 +790,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
 }
 
 // ── Empire Details ──
-function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, ownershipAtYear, popSnap, onSelectEntity }: SubProps & { empireId: string }) {
+function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, ownershipAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { empireId: string }) {
   const empEntry = empireSnap.find(e => e.empireId === empireId);
 
   const founderCountry = empEntry ? history.countries[empEntry.founderCountryIndex] : undefined;
@@ -856,7 +881,26 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
       </div>
 
       <div style={styles.scrollArea}>
-        <div style={styles.entityName}>{empEntry.name}</div>
+        <div style={styles.entityNameRow}>
+          <div style={styles.entityName}>{empEntry.name}</div>
+          {onNavigate && ownershipAtYear && (
+            <button
+              style={styles.locateBtn}
+              onClick={() => {
+                const idSet = new Set(empEntry.memberCountryIndices);
+                const cells: number[] = [];
+                for (let i = 0; i < ownershipAtYear.length; i++) {
+                  if (idSet.has(ownershipAtYear[i])) cells.push(i);
+                }
+                const founder = history.countries[empEntry.founderCountryIndex];
+                const centerCell = founder?.capitalCellIndex ?? 0;
+                if (cells.length === 0) cells.push(centerCell);
+                onNavigate(cells, centerCell);
+              }}
+              title="Locate on map"
+            >{'\u25CE'}</button>
+          )}
+        </div>
 
         <div style={styles.infoGrid}>
           <InfoRow label="Territory" value={`${totalTerritory} cells`} />
@@ -1129,11 +1173,28 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 8,
     paddingRight: 2,
   },
+  entityNameRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+  },
   entityName: {
     fontWeight: 'bold',
     fontSize: 14,
     color: '#2a1a00',
     padding: '2px 0',
+  },
+  locateBtn: {
+    flexShrink: 0,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 14,
+    color: '#7a5a30',
+    padding: '0 2px',
+    lineHeight: 1,
+    opacity: 0.7,
   },
   deadBadge: {
     fontWeight: 'normal',
