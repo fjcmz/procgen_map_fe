@@ -202,7 +202,7 @@ function normalizeBorders(
       const neighborOwnerCount = new Map<number, number>();
       let sameOwnerCount = 0;
       for (const ni of cells[i].neighbors) {
-        if (cells[ni].isWater || ownership[ni] === -2) continue;
+        if (ownership[ni] === -2) continue;
         const no = ownership[ni];
         if (no === owner) {
           sameOwnerCount++;
@@ -630,9 +630,12 @@ export function generateHistory(
   });
 
   // Ownership: -2 = impassable, -1 = unclaimed, >= 0 = countryId
+  // Coastal water cells with a regionId stay claimable (territorial waters).
   const ownership = new Int16Array(numCells).fill(-1);
   for (let i = 0; i < numCells; i++) {
-    if (cells[i].isWater || cells[i].elevation >= MOUNTAIN_THRESHOLD) {
+    if (cells[i].elevation >= MOUNTAIN_THRESHOLD) {
+      ownership[i] = -2;
+    } else if (cells[i].isWater && !cells[i].regionId) {
       ownership[i] = -2;
     }
   }

@@ -260,9 +260,9 @@ function drawKingdomBorders(
     return cell.kingdom;
   };
 
-  // Fill kingdom regions
+  // Fill kingdom regions (land + owned coastal water)
   for (const cell of cells) {
-    if (cell.isWater || cell.vertices.length < 2) continue;
+    if (cell.vertices.length < 2) continue;
     const owner = getOwner(cell);
     if (owner === null) continue;
     const kc = colors[owner % colors.length];
@@ -283,13 +283,17 @@ function drawKingdomBorders(
   ctx.lineWidth = 1.5;
 
   for (const cell of cells) {
-    if (cell.isWater) continue;
     const cellOwner = getOwner(cell);
+    if (cellOwner === null) continue;
     for (const ni of cell.neighbors) {
       const neighbor = cells[ni];
-      if (neighbor.isWater) continue;
       const neighborOwner = getOwner(neighbor);
       if (cellOwner === neighborOwner) continue;
+      // Skip land↔water boundaries where the water side is unowned —
+      // those are coastlines, not political borders.
+      if (cell.isWater !== neighbor.isWater) {
+        if (cellOwner === null || neighborOwner === null) continue;
+      }
       const key = [cell.index, ni].sort().join('-');
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
@@ -365,9 +369,9 @@ function drawPatternedBorders(
     });
   }
 
-  // Fill cells with patterns
+  // Fill cells with patterns (land + owned coastal water)
   for (const cell of cells) {
-    if (cell.isWater || cell.vertices.length < 2) continue;
+    if (cell.vertices.length < 2) continue;
     const owner = getOwner(cell);
     if (owner === null) continue;
 
@@ -403,13 +407,17 @@ function drawPatternedBorders(
   ctx.lineWidth = 1.5;
 
   for (const cell of cells) {
-    if (cell.isWater) continue;
     const cellOwner = getOwner(cell);
+    if (cellOwner === null) continue;
     for (const ni of cell.neighbors) {
       const neighbor = cells[ni];
-      if (neighbor.isWater) continue;
       const neighborOwner = getOwner(neighbor);
       if (cellOwner === neighborOwner) continue;
+      // Skip land↔water boundaries where the water side is unowned —
+      // those are coastlines, not political borders.
+      if (cell.isWater !== neighbor.isWater) {
+        if (cellOwner === null || neighborOwner === null) continue;
+      }
       const key = [cell.index, ni].sort().join('-');
       if (drawnPairs.has(key)) continue;
       drawnPairs.add(key);
