@@ -45,6 +45,8 @@ export interface RegionResourceData {
   type: string;
   /** `Resource.original` — the natural endowment, time-invariant. */
   amount: number;
+  /** Cell index this resource is spatially attached to. */
+  cellIndex: number;
   /**
    * Tech field the owning country must invest in to unlock this resource for
    * trade. Optional for backwards compatibility — missing means "unlocked at

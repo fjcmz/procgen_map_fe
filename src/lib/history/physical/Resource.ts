@@ -25,6 +25,8 @@ function rngHex(rng: () => number): string {
 
 export class Resource {
   readonly id: string;
+  /** The cell this resource is spatially attached to. */
+  readonly cellIndex: number;
   readonly type: ResourceType;
   readonly original: number;
   available: number;
@@ -33,8 +35,9 @@ export class Resource {
   /** Minimum level of `requiredTechField` required to unlock this resource. 0 = available at year 0. */
   readonly requiredTechLevel: number;
 
-  constructor(type: ResourceType, rng: () => number, abundance: AbundanceDice) {
+  constructor(cellIndex: number, type: ResourceType, rng: () => number, abundance: AbundanceDice) {
     this.id = IdUtil.id('resource', type, rngHex(rng)) ?? 'resource_unknown';
+    this.cellIndex = cellIndex;
     this.type = type;
     this.original = rollDice(rng, abundance.sides, abundance.count) + abundance.bonus;
     this.available = this.original;
