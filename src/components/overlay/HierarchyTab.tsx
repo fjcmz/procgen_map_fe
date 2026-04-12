@@ -66,6 +66,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
   // Countries also default to collapsed.
   // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless' | 'unassigned'.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set<string>());
+  const [searchQuery, setSearchQuery] = useState('');
 
   const toggle = (key: string) => {
     setExpanded(prev => {
@@ -235,7 +236,74 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     return { empires, stateless, statelessCityCount, unassignedCities };
   }, [historyData, snapshot, cities, selectedYear, ownershipAtYear]);
 
-  const totalLiveCountries = tree.empires.reduce((s, e) => s + e.countries.length, 0) + tree.stateless.length;
+  // --- Search filtering ---
+  const filteredTree = useMemo<Tree>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return tree;
+
+    const matchesQuery = (name: string) => name.toLowerCase().includes(q);
+
+    const filterCountryNode = (node: CountryNode, parentMatched: boolean): CountryNode | null => {
+      const countryMatches = matchesQuery(node.country.name);
+      if (parentMatched || countryMatches) {
+        // Show all cities when country or its parent matched
+        return node;
+      }
+      // Check if any city matches
+      const matchedCities = node.cities.filter(c => matchesQuery(c.name));
+      if (matchedCities.length > 0) {
+        return { country: node.country, cities: matchedCities };
+      }
+      return null;
+    };
+
+    const filteredEmpires: EmpireNode[] = [];
+    for (const emp of tree.empires) {
+      const empireMatches = matchesQuery(emp.entry.name);
+      if (empireMatches) {
+        filteredEmpires.push(emp);
+        continue;
+      }
+      const filteredCountries: CountryNode[] = [];
+      let totalCities = 0;
+      for (const c of emp.countries) {
+        const fc = filterCountryNode(c, false);
+        if (fc) {
+          filteredCountries.push(fc);
+          totalCities += fc.cities.length;
+        }
+      }
+      if (filteredCountries.length > 0) {
+        filteredEmpires.push({ entry: emp.entry, countries: filteredCountries, totalCities });
+      }
+    }
+
+    const filteredStateless: CountryNode[] = [];
+    let filteredStatelessCityCount = 0;
+    for (const c of tree.stateless) {
+      const fc = filterCountryNode(c, false);
+      if (fc) {
+        filteredStateless.push(fc);
+        filteredStatelessCityCount += fc.cities.length;
+      }
+    }
+
+    const filteredUnassigned = tree.unassignedCities.filter(c => matchesQuery(c.name));
+
+    return {
+      empires: filteredEmpires,
+      stateless: filteredStateless,
+      statelessCityCount: filteredStatelessCityCount,
+      unassignedCities: filteredUnassigned,
+    };
+  }, [tree, searchQuery]);
+
+  // When searching, auto-expand all visible branches so matches are visible.
+  const isSearching = searchQuery.trim().length > 0;
+
+  const isExpanded = (key: string) => isSearching || expanded.has(key);
+
+  const totalLiveCountries = filteredTree.empires.reduce((s, e) => s + e.countries.length, 0) + filteredTree.stateless.length;
 
   // Map cellIndex → cities[] array index for dynamic size lookup
   const cityIdxMap = useMemo(() => {
@@ -291,7 +359,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
 
   const renderCountry = (node: CountryNode, founderIdx: number | null) => {
     const key = `cty:${node.country.id}`;
-    const isOpen = expanded.has(key);
+    const isOpen = isExpanded(key);
     const isFounder = founderIdx !== null && node.country.id === founderIdx;
     const dead = !node.country.isAlive;
     return (
@@ -339,7 +407,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
 
   const renderEmpire = (emp: EmpireNode) => {
     const key = `emp:${emp.entry.empireId}`;
-    const isOpen = expanded.has(key);
+    const isOpen = isExpanded(key);
     return (
       <div key={key} style={styles.empireBlock}>
         <button
@@ -380,8 +448,8 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     );
   };
 
-  const statelessOpen = expanded.has('stateless');
-  const unassignedOpen = expanded.has('unassigned');
+  const statelessOpen = isExpanded('stateless');
+  const unassignedOpen = isExpanded('unassigned');
 
   return (
     <div style={styles.root}>
@@ -395,16 +463,35 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
         </span>
       </div>
 
+      <div style={styles.searchBox}>
+        <input
+          type="text"
+          placeholder="Search realms..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={styles.searchInput}
+        />
+        {searchQuery && (
+          <button
+            style={styles.searchClear}
+            onClick={() => setSearchQuery('')}
+            title="Clear search"
+          >{'\u00D7'}</button>
+        )}
+      </div>
+
       <div style={styles.treeList}>
-        {tree.empires.length === 0
-          && tree.stateless.length === 0
-          && tree.unassignedCities.length === 0 && (
-          <div style={styles.emptyNote}>No realms yet.</div>
+        {filteredTree.empires.length === 0
+          && filteredTree.stateless.length === 0
+          && filteredTree.unassignedCities.length === 0 && (
+          <div style={styles.emptyNote}>
+            {isSearching ? 'No matches.' : 'No realms yet.'}
+          </div>
         )}
 
-        {tree.empires.map(renderEmpire)}
+        {filteredTree.empires.map(renderEmpire)}
 
-        {tree.stateless.length > 0 && (
+        {filteredTree.stateless.length > 0 && (
           <div style={styles.empireBlock}>
             <button
               style={styles.empireHeader}
@@ -413,20 +500,20 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
               <span style={styles.chevron}>{statelessOpen ? '\u25BE' : '\u25B8'}</span>
               <span style={styles.empireName}>Stateless</span>
               <span style={styles.empireMeta}>
-                {tree.stateless.length} {tree.stateless.length === 1 ? 'country' : 'countries'}
+                {filteredTree.stateless.length} {filteredTree.stateless.length === 1 ? 'country' : 'countries'}
                 {', '}
-                {tree.statelessCityCount} {tree.statelessCityCount === 1 ? 'city' : 'cities'}
+                {filteredTree.statelessCityCount} {filteredTree.statelessCityCount === 1 ? 'city' : 'cities'}
               </span>
             </button>
             {statelessOpen && (
               <div style={styles.countryList}>
-                {tree.stateless.map(c => renderCountry(c, null))}
+                {filteredTree.stateless.map(c => renderCountry(c, null))}
               </div>
             )}
           </div>
         )}
 
-        {tree.unassignedCities.length > 0 && (
+        {filteredTree.unassignedCities.length > 0 && (
           <div style={styles.empireBlock}>
             <button
               style={styles.empireHeader}
@@ -435,13 +522,13 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
               <span style={styles.chevron}>{unassignedOpen ? '\u25BE' : '\u25B8'}</span>
               <span style={styles.empireName}>Free Cities</span>
               <span style={styles.empireMeta}>
-                {tree.unassignedCities.length}{' '}
-                {tree.unassignedCities.length === 1 ? 'city' : 'cities'}
+                {filteredTree.unassignedCities.length}{' '}
+                {filteredTree.unassignedCities.length === 1 ? 'city' : 'cities'}
               </span>
             </button>
             {unassignedOpen && (
               <div style={styles.cityList}>
-                {tree.unassignedCities.map(c => renderCity(c, false, false))}
+                {filteredTree.unassignedCities.map(c => renderCity(c, false, false))}
               </div>
             )}
           </div>
@@ -634,5 +721,34 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#9a7a50',
     fontStyle: 'italic',
     padding: '4px 8px',
+  },
+  searchBox: {
+    position: 'relative',
+    marginBottom: 4,
+  },
+  searchInput: {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '4px 24px 4px 6px',
+    fontSize: 11,
+    fontFamily: 'Georgia, serif',
+    border: '1px solid #d4b896',
+    borderRadius: 3,
+    background: '#faf3e6',
+    color: '#3a1a00',
+    outline: 'none',
+  },
+  searchClear: {
+    position: 'absolute',
+    right: 2,
+    top: '50%',
+    transform: 'translateY(-50%)',
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 14,
+    color: '#7a5a30',
+    padding: '0 4px',
+    lineHeight: 1,
   },
 };
