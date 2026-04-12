@@ -290,6 +290,7 @@ export interface TerrainProfile {
   polarIceStart: number;
   polarIceEnd: number;
   polarNoiseAmplitude: number;
+  polarBlendWeight: number;
   thermalErosionIters: number;
   thermalErosionTalus: number;
 
