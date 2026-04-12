@@ -165,20 +165,26 @@ function evalRange(range: ClimateRange, value: number): number {
  */
 const OFF_BIOME_FIT = 0.2;
 
-export function computeFitScore(spec: ResourceSpec, profile: RegionProfile): number {
+export function computeFitScore(spec: ResourceSpec, profile: RegionProfile, isSea = false): number {
   const h: HabitatSpec = spec.habitat;
+
+  // Sea/land exclusion gates
+  if (isSea && !h.requiresSea && !h.allowsSea) return 0; // land-only spec on a sea cell
+  if (!isSea && h.requiresSea) return 0;                  // sea-only spec on a land cell
 
   let fit = 1;
   if (h.biomes && !h.biomes.includes(profile.regionBiome)) {
     fit = OFF_BIOME_FIT;
   }
 
-  // Hard hydrology/topography gates
-  if (h.requiresCoast && !profile.hasCoast) return 0;
-  if (h.requiresRiver && !profile.hasRiver) return 0;
-  if (h.requiresMountain && !profile.hasMountain) return 0;
-  if (h.requiresLake && !profile.hasLake) return 0;
-  if (h.forbidsMountain && profile.mountainFraction >= 0.15) return 0;
+  // Hard hydrology/topography gates (skip coast/river/mountain/lake for sea cells)
+  if (!isSea) {
+    if (h.requiresCoast && !profile.hasCoast) return 0;
+    if (h.requiresRiver && !profile.hasRiver) return 0;
+    if (h.requiresMountain && !profile.hasMountain) return 0;
+    if (h.requiresLake && !profile.hasLake) return 0;
+    if (h.forbidsMountain && profile.mountainFraction >= 0.15) return 0;
+  }
 
   if (h.temperature) {
     fit *= evalRange(h.temperature, profile.meanTemperature);
@@ -246,12 +252,13 @@ function buildCellFit(
   cell: Cell,
   regionBiome: RegionBiome,
   rarityWeights: Record<ResourceRarity, number>,
+  isSea = false,
 ): CellFit {
   const profile = buildCellProfile(cell, regionBiome);
   const pool: EligibleEntry[] = [];
   let totalWeight = 0;
   for (const spec of RESOURCE_SPECS) {
-    const fit = computeFitScore(spec, profile);
+    const fit = computeFitScore(spec, profile, isSea);
     if (fit <= 0) continue;
     const w = rarityWeights[spec.rarity] * fit;
     pool.push({ spec, weight: w });
@@ -322,6 +329,65 @@ export class ResourceGenerator {
       out.push(res);
 
       // Populate the per-cell index
+      let arr = region.cellResources.get(cf.cellIndex);
+      if (!arr) {
+        arr = [];
+        region.cellResources.set(cf.cellIndex, arr);
+      }
+      arr.push(res);
+    }
+    return out;
+  }
+
+  /**
+   * Generate sea resources for a region's shallow-water cells.
+   *
+   * Called after `generateForRegion` for every region. Regions without
+   * shallow sea cells consume the same RNG budget (burn pattern) so
+   * per-region RNG consumption stays deterministic regardless of geography.
+   *
+   * RNG budget: 1 (count) + seaCount * 14 (1 sample + 3 hex + 10 dice).
+   */
+  generateSeaResourcesForRegion(
+    region: Region,
+    cells: Cell[],
+    rng: () => number,
+    rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+  ): Resource[] {
+    // --- Step A: target count (1 rng call) ---
+    const seaCount = Math.floor(rng() * 3) + 1; // 1-3 sea resources
+
+    // --- Step B: score every shallow sea cell in the region ---
+    const fits: CellFit[] = [];
+    for (const ci of region.cellIndices) {
+      const c = cells[ci];
+      if (!c || !c.isWater) continue;
+      // Shallow sea = COAST biome water cells (elevation >= 0.1)
+      if (c.biome !== 'COAST') continue;
+      fits.push(buildCellFit(ci, c, region.biome, rarityWeights, true));
+    }
+
+    fits.sort((a, b) => b.totalWeight - a.totalWeight || a.cellIndex - b.cellIndex);
+
+    // --- Step C: pick top `seaCount` cells, one resource each ---
+    const out: Resource[] = [];
+
+    for (let i = 0; i < seaCount; i++) {
+      if (i >= fits.length) {
+        // Fewer sea cells than target — burn 14 rng calls.
+        for (let j = 0; j < 14; j++) rng();
+        continue;
+      }
+      const cf = fits[i];
+      if (cf.pool.length === 0) {
+        for (let j = 0; j < 14; j++) rng();
+        continue;
+      }
+      const idx = weightedPickIndex(cf.pool, rng);
+      const picked = cf.pool[idx].spec;
+      const res = new Resource(cf.cellIndex, picked.type, rng, picked.abundance);
+      out.push(res);
+
       let arr = region.cellResources.get(cf.cellIndex);
       if (!arr) {
         arr = [];

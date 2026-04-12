@@ -364,6 +364,38 @@ export function buildPhysicalWorld(
     }
     regionGenerator.updatePotentialNeighbours(world);
 
+    // --- Step 2b: Assign shallow sea cells to nearest coastal region ---
+    // BFS from coastal land cells outward through shallow water (COAST biome)
+    // up to 2 hops. Water cells are appended after land cells so
+    // cellIndices[0] remains a land cell for ownership probes.
+    const assignedWater = new Set<number>();
+    for (const region of seedToRegion.values()) {
+      // Collect coastal land cells in this region
+      const coastQueue: number[] = [];
+      for (const ci of region.cellIndices) {
+        if (cells[ci].isCoast) {
+          for (const ni of cells[ci].neighbors) {
+            if (cells[ni].isWater && cells[ni].biome === 'COAST' && !assignedWater.has(ni)) {
+              assignedWater.add(ni);
+              coastQueue.push(ni);
+              region.cellIndices.push(ni);
+              cells[ni].regionId = region.id;
+            }
+          }
+        }
+      }
+      // Second hop: expand one more ring through shallow water
+      for (const wi of coastQueue) {
+        for (const ni of cells[wi].neighbors) {
+          if (cells[ni].isWater && cells[ni].biome === 'COAST' && !assignedWater.has(ni)) {
+            assignedWater.add(ni);
+            region.cellIndices.push(ni);
+            cells[ni].regionId = region.id;
+          }
+        }
+      }
+    }
+
     // --- Step 3: Place resources in each region (habitat-aware) ---
     // Bootstrap: every resource whose tech requirement is `exploration 0` is
     // pre-discovered at world birth, so pre-country / level-0 regions still
@@ -374,6 +406,14 @@ export function buildPhysicalWorld(
     for (const region of seedToRegion.values()) {
       region.resources = resourceGenerator.generateForRegion(region, cells, rng, rarityWeights);
       for (const r of region.resources) {
+        if (isCommonUnlockedAtZero(r.type)) {
+          region.discoveredResources.add(r.type);
+        }
+      }
+      // Sea resource pass: place resources on shallow water cells
+      const seaResources = resourceGenerator.generateSeaResourcesForRegion(region, cells, rng, rarityWeights);
+      region.resources.push(...seaResources);
+      for (const r of seaResources) {
         if (isCommonUnlockedAtZero(r.type)) {
           region.discoveredResources.add(r.type);
         }

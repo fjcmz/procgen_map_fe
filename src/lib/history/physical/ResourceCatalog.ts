@@ -9,7 +9,7 @@ import type { TechField } from '../timeline/Tech';
  * file that produced this module) for the design rationale.
  *
  * Key design points:
- *  - 47 resource types in 12 fine-grained categories.
+ *  - 49 resource types in 12 fine-grained categories.
  *  - Each spec declares a `HabitatSpec` (biome whitelist + optional
  *    hydrology flags + optional soft-trapezoid climate ranges) and a
  *    `rarity` tier that drives both spawn probability and stockpile size.
@@ -46,8 +46,8 @@ export type ResourceType =
   | 'cotton' | 'tea' | 'coffee' | 'sugar' | 'tobacco'
   // forestry (3)
   | 'timber' | 'hardwood' | 'amber'
-  // marine (3)
-  | 'fish' | 'whales' | 'pearls'
+  // marine (5)
+  | 'fish' | 'whales' | 'pearls' | 'kelp' | 'coral'
   // spices (2)
   | 'pepper' | 'saffron'
   // textiles (1)
@@ -118,6 +118,10 @@ export interface HabitatSpec {
   requiresLake?: boolean;
   /** Hard gate — region's mountain fraction must be below 0.15. */
   forbidsMountain?: boolean;
+  /** Hard gate — resource can only spawn on shallow sea cells (isWater + COAST biome). */
+  requiresSea?: boolean;
+  /** Soft flag — resource can spawn on shallow sea cells in addition to land. */
+  allowsSea?: boolean;
 }
 
 export interface AbundanceDice {
@@ -175,7 +179,7 @@ const ABUNDANCE_BY_RARITY: Record<ResourceRarity, AbundanceDice> = {
 };
 
 // ---------------------------------------------------------------------------
-// The catalog (47 entries)
+// The catalog (49 entries)
 // ---------------------------------------------------------------------------
 
 /**
@@ -216,9 +220,9 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
   spec('coal', 'energy', ['industry', 'military'],
     { biomes: ['temperate', 'tundra'] }, 'common'),
   spec('oil', 'energy', ['industry', 'military', 'trade'],
-    { biomes: ['arid', 'desert', 'tundra'], moisture: [0, 0.5] }, 'uncommon'),
+    { biomes: ['arid', 'desert', 'tundra'], moisture: [0, 0.5], allowsSea: true }, 'uncommon'),
   spec('natural_gas', 'energy', ['industry'],
-    { biomes: ['arid', 'desert', 'tundra'] }, 'uncommon'),
+    { biomes: ['arid', 'desert', 'tundra'], allowsSea: true }, 'uncommon'),
   spec('uranium', 'energy', ['science', 'military'],
     { biomes: ['tundra', 'arid'], requiresMountain: true }, 'veryRare'),
   spec('peat', 'energy', ['industry'],
@@ -288,11 +292,15 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
 
   // ---------------- marine ----------------
   spec('fish', 'marine', ['food', 'trade'],
-    { requiresCoast: true }, 'common'),
+    { requiresSea: true }, 'common'),
   spec('whales', 'marine', ['industry', 'trade'],
-    { biomes: ['tundra', 'temperate'], requiresCoast: true, temperature: [0, 0.55, 0.05, 0.4] }, 'uncommon'),
+    { biomes: ['tundra', 'temperate'], requiresSea: true, temperature: [0, 0.55, 0.05, 0.4] }, 'uncommon'),
   spec('pearls', 'marine', ['luxury', 'art', 'religion'],
-    { biomes: ['tropical'], requiresCoast: true, temperature: [0.6, 1, 0.7, 1] }, 'rare'),
+    { biomes: ['tropical'], requiresSea: true, temperature: [0.6, 1, 0.7, 1] }, 'rare'),
+  spec('kelp', 'marine', ['food', 'industry'],
+    { biomes: ['temperate', 'tropical'], requiresSea: true, temperature: [0.3, 0.85, 0.4, 0.75] }, 'common'),
+  spec('coral', 'marine', ['luxury', 'art', 'science'],
+    { biomes: ['tropical'], requiresSea: true, temperature: [0.65, 1, 0.7, 0.95] }, 'uncommon'),
 
   // ---------------- spices ----------------
   spec('pepper', 'spices', ['trade', 'luxury', 'food'],
