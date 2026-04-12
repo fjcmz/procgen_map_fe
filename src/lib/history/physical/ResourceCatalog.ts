@@ -43,7 +43,7 @@ export type ResourceType =
   // crops (5)
   | 'wheat' | 'rice' | 'maize' | 'barley' | 'dates'
   // cashCrops (5)
-  | 'cotton' | 'tea' | 'coffee' | 'sugar' | 'tobacco'
+  | 'cotton' | 'tea' | 'coffee' | 'sugar' | 'incense'
   // forestry (3)
   | 'timber' | 'hardwood' | 'amber'
   // marine (5)
@@ -279,7 +279,7 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
     { biomes: ['tropical'], requiresMountain: true, temperature: [0.5, 0.95, 0.6, 0.9] }, 'uncommon'),
   spec('sugar', 'cashCrops', ['trade', 'food', 'luxury'],
     { biomes: ['tropical', 'swamp'], moisture: [0.5, 1, 0.6, 0.95] }, 'uncommon'),
-  spec('tobacco', 'cashCrops', ['trade', 'luxury'],
+  spec('incense', 'cashCrops', ['trade', 'luxury'],
     { biomes: ['temperate', 'tropical'], moisture: [0.35, 0.9, 0.45, 0.8] }, 'uncommon'),
 
   // ---------------- forestry ----------------
