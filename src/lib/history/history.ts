@@ -1,4 +1,4 @@
-import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry } from '../types';
+import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, EmpireSnapshotEntry } from '../types';
 import { generateRoads } from './roads';
 import { BIOME_TO_REGION_BIOME } from './physical/Region';
 import type { World } from './physical/World';
@@ -517,6 +517,128 @@ export function getOwnershipAtYear(
   }
 
   return ownership;
+}
+
+/**
+ * Reconstruct empire membership at a given year from snapshots + event replay.
+ * Empire snapshots are stored every 20 years. Between snapshots, CONQUEST and
+ * EMPIRE events are replayed to close the gap so the returned membership
+ * matches the exact year's ownership state.
+ */
+export function getEmpiresAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): EmpireSnapshotEntry[] {
+  const finalKey = historyData.numYears;
+  if (targetYear >= finalKey && historyData.empireSnapshots[finalKey]) {
+    return historyData.empireSnapshots[finalKey];
+  }
+
+  // Find the base snapshot
+  let baseYear: number | null = null;
+  const floored = Math.max(0, Math.floor(targetYear / 20) * 20);
+  for (let y = floored; y >= 0; y -= 20) {
+    if (historyData.empireSnapshots[y]) { baseYear = y; break; }
+  }
+  if (baseYear === null) return [];
+
+  const baseSnapshot = historyData.empireSnapshots[baseYear];
+  if (baseYear === targetYear) return baseSnapshot;
+
+  // Build mutable membership state from the base snapshot
+  const empireMembers = new Map<string, Set<number>>();
+  const countryToEmpire = new Map<number, string>();
+  const empireEntries = new Map<string, EmpireSnapshotEntry>();
+  for (const emp of baseSnapshot) {
+    const members = new Set(emp.memberCountryIndices);
+    empireMembers.set(emp.empireId, members);
+    empireEntries.set(emp.empireId, emp);
+    for (const idx of members) countryToEmpire.set(idx, emp.empireId);
+  }
+
+  // Pre-index the next snapshot for empire name/id resolution
+  const nextSnapYear = Math.min(floored + 20, finalKey);
+  const nextSnapshot = historyData.empireSnapshots[nextSnapYear];
+  const nextSnapByFounder = new Map<number, EmpireSnapshotEntry>();
+  if (nextSnapshot) {
+    for (const emp of nextSnapshot) nextSnapByFounder.set(emp.founderCountryIndex, emp);
+  }
+
+  let syntheticId = 0;
+
+  // Replay events from (baseYear+1) to targetYear
+  for (const yearData of historyData.years) {
+    if (yearData.year <= baseYear) continue;
+    if (yearData.year > targetYear) break;
+
+    const conquests: Array<{ conqueror: number; conquered: number }> = [];
+    const empireFounders: number[] = [];
+    for (const ev of yearData.events) {
+      if (ev.type === 'CONQUEST' && ev.targetId !== undefined) {
+        conquests.push({ conqueror: ev.initiatorId, conquered: ev.targetId });
+      } else if (ev.type === 'EMPIRE') {
+        empireFounders.push(ev.initiatorId);
+      }
+    }
+
+    // Process conquests
+    for (const { conqueror, conquered } of conquests) {
+      const conqueredEmpireId = countryToEmpire.get(conquered);
+      if (conqueredEmpireId) {
+        const members = empireMembers.get(conqueredEmpireId);
+        if (members) {
+          members.delete(conquered);
+          if (members.size <= 1) {
+            for (const m of members) countryToEmpire.delete(m);
+            empireMembers.delete(conqueredEmpireId);
+            empireEntries.delete(conqueredEmpireId);
+          }
+        }
+        countryToEmpire.delete(conquered);
+      }
+      const conquerorEmpireId = countryToEmpire.get(conqueror);
+      if (conquerorEmpireId) {
+        const members = empireMembers.get(conquerorEmpireId);
+        if (members) {
+          members.add(conquered);
+          countryToEmpire.set(conquered, conquerorEmpireId);
+        }
+      }
+    }
+
+    // Process new empires
+    for (const founder of empireFounders) {
+      const triggering = conquests.find(c => c.conqueror === founder);
+      const nextEntry = nextSnapByFounder.get(founder);
+      const empireId = nextEntry?.empireId ?? `__synth_${syntheticId++}`;
+      const name = nextEntry?.name ?? `Empire of ${historyData.countries[founder]?.name ?? 'Unknown'}`;
+      const members = new Set<number>();
+      members.add(founder);
+      if (triggering) members.add(triggering.conquered);
+      empireMembers.set(empireId, members);
+      empireEntries.set(empireId, {
+        empireId, name,
+        founderCountryIndex: founder,
+        memberCountryIndices: [],
+      });
+      for (const m of members) countryToEmpire.set(m, empireId);
+    }
+  }
+
+  // Rebuild snapshot entries
+  const result: EmpireSnapshotEntry[] = [];
+  for (const [empireId, members] of empireMembers) {
+    if (members.size === 0) continue;
+    const entry = empireEntries.get(empireId);
+    const sorted = Array.from(members).sort((a, b) => a - b);
+    result.push({
+      empireId,
+      name: entry?.name ?? empireId,
+      founderCountryIndex: entry?.founderCountryIndex ?? sorted[0],
+      memberCountryIndices: sorted,
+    });
+  }
+  return result;
 }
 
 /**

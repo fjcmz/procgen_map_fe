@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { City, Country, EmpireSnapshotEntry, HistoryData, SelectedEntity } from '../../lib/types';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
+import { getEmpiresAtYear } from '../../lib/history';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
@@ -37,28 +38,6 @@ interface Tree {
   stateless: CountryNode[];
   statelessCityCount: number;
   unassignedCities: City[];
-}
-
-/**
- * Look up the empire snapshot at or before `selectedYear`. Snapshots are
- * written every 20 years plus the final year, so we floor to the nearest
- * 20-year tick and walk backward if that key is missing (truncated runs).
- */
-function lookupEmpireSnapshot(
-  historyData: HistoryData,
-  selectedYear: number,
-): EmpireSnapshotEntry[] {
-  const finalKey = historyData.numYears;
-  // Prefer the exact final snapshot on the last frame.
-  if (selectedYear >= finalKey && historyData.empireSnapshots[finalKey]) {
-    return historyData.empireSnapshots[finalKey];
-  }
-  const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
-  for (let y = floored; y >= 0; y -= 20) {
-    const snap = historyData.empireSnapshots[y];
-    if (snap) return snap;
-  }
-  return [];
 }
 
 export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
@@ -119,20 +98,13 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
   // Keep the empire tree defaulted-expanded even when the snapshot changes
   // as the user scrubs: seed any newly-seen empire ids into the expanded set.
   const snapshot = useMemo(
-    () => lookupEmpireSnapshot(historyData, selectedYear),
+    () => getEmpiresAtYear(historyData, selectedYear),
     [historyData, selectedYear],
   );
 
-  // Compute nearest snapshot key for empire entity selection
-  const snapKey = useMemo(() => {
-    const finalKey = historyData.numYears;
-    if (selectedYear >= finalKey && historyData.empireSnapshots[finalKey]) return finalKey;
-    const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
-    for (let y = floored; y >= 0; y -= 20) {
-      if (historyData.empireSnapshots[y]) return y;
-    }
-    return 0;
-  }, [historyData, selectedYear]);
+  // Empire entity selection uses the exact selected year since getEmpiresAtYear
+  // already replays events to that point.
+  const snapKey = selectedYear;
 
   const tree = useMemo<Tree>(() => {
     const { countries } = historyData;

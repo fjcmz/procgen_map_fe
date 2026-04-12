@@ -1,7 +1,7 @@
 export { assignKingdoms } from './borders';
 export { placeCities } from './cities';
 export { generateRoads } from './roads';
-export { generateHistory, getOwnershipAtYear, getExpansionFlagsAtYear, buildPhysicalWorld, scoreCellForCity } from './history';
+export { generateHistory, getOwnershipAtYear, getEmpiresAtYear, getExpansionFlagsAtYear, buildPhysicalWorld, scoreCellForCity } from './history';
 export { HistoryGenerator, historyGenerator } from './HistoryGenerator';
 export type { HistoryStats } from './HistoryGenerator';
 export { IdUtil } from './IdUtil';
