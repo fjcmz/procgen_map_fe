@@ -8,6 +8,8 @@
 import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
+import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
+import type { ResourceRarity } from './physical/ResourceCatalog';
 import { aStar, computeDistanceFromLand, generateTradeRoutePath } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
 import { HistoryRoot } from './HistoryRoot';
@@ -771,6 +773,7 @@ export class HistoryGenerator {
     width: number,
     rng: () => number,
     numSimYears: number,
+    rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
   ): {
     cities: City[];
     roads: Road[];
@@ -780,7 +783,7 @@ export class HistoryGenerator {
     stats: HistoryStats;
   } {
     // Phase 0: Build physical world
-    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng);
+    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights);
 
     // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
     const historyRoot = HistoryRoot.INSTANCE;

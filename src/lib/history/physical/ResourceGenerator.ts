@@ -3,10 +3,11 @@ import type { Region, RegionBiome } from './Region';
 import { Resource } from './Resource';
 import {
   RESOURCE_SPECS,
-  RARITY_WEIGHTS,
+  RARITY_WEIGHTS_BY_MODE,
   type ClimateRange,
   type HabitatSpec,
   type ResourceSpec,
+  type ResourceRarity,
 } from './ResourceCatalog';
 
 /**
@@ -240,14 +241,19 @@ interface CellFit {
  * Build the eligible resource pool for a single cell and return the
  * aggregate weight (used to rank cells by resource-richness).
  */
-function buildCellFit(cellIndex: number, cell: Cell, regionBiome: RegionBiome): CellFit {
+function buildCellFit(
+  cellIndex: number,
+  cell: Cell,
+  regionBiome: RegionBiome,
+  rarityWeights: Record<ResourceRarity, number>,
+): CellFit {
   const profile = buildCellProfile(cell, regionBiome);
   const pool: EligibleEntry[] = [];
   let totalWeight = 0;
   for (const spec of RESOURCE_SPECS) {
     const fit = computeFitScore(spec, profile);
     if (fit <= 0) continue;
-    const w = RARITY_WEIGHTS[spec.rarity] * fit;
+    const w = rarityWeights[spec.rarity] * fit;
     pool.push({ spec, weight: w });
     totalWeight += w;
   }
@@ -268,8 +274,16 @@ export class ResourceGenerator {
    * `region.cellResources`.
    *
    * RNG budget: 1 (count) + count * 14 (1 sample + 3 hex + 10 dice).
+   *
+   * @param rarityWeights - Optional rarity spawn weights; defaults to the
+   *   'scarce' preset. Pass `RARITY_WEIGHTS_BY_MODE[mode]` from the worker.
    */
-  generateForRegion(region: Region, cells: Cell[], rng: () => number): Resource[] {
+  generateForRegion(
+    region: Region,
+    cells: Cell[],
+    rng: () => number,
+    rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+  ): Resource[] {
     // --- Step A: target count (1 rng call) ---
     const count = Math.floor(rng() * 10) + 1;
 
@@ -278,7 +292,7 @@ export class ResourceGenerator {
     for (const ci of region.cellIndices) {
       const c = cells[ci];
       if (!c || c.isWater) continue;
-      fits.push(buildCellFit(ci, c, region.biome));
+      fits.push(buildCellFit(ci, c, region.biome, rarityWeights));
     }
 
     // Sort by totalWeight descending, tiebreak by cellIndex ascending

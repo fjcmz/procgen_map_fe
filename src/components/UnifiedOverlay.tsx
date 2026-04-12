@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, SelectedEntity } from '../lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, SelectedEntity, ResourceRarityMode } from '../lib/types';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
@@ -33,6 +33,8 @@ interface UnifiedOverlayProps {
   onGenerateHistoryToggle: () => void;
   numSimYears: number;
   onNumSimYearsChange: (n: number) => void;
+  resourceRarityMode: ResourceRarityMode;
+  onResourceRarityModeChange: (mode: ResourceRarityMode) => void;
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
@@ -219,6 +221,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onGenerateHistoryToggle={props.onGenerateHistoryToggle}
                 numSimYears={props.numSimYears}
                 onNumSimYearsChange={props.onNumSimYearsChange}
+                resourceRarityMode={props.resourceRarityMode}
+                onResourceRarityModeChange={props.onResourceRarityModeChange}
                 onGenerate={props.onGenerate}
                 generating={props.generating}
                 progress={props.progress}
