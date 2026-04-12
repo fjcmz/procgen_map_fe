@@ -173,9 +173,10 @@ function drawNoisyCoastlines(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   width: number,
+  scale: number = 1,
 ): void {
   ctx.strokeStyle = '#5a3a1a';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.5 / scale;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
 
@@ -454,11 +455,12 @@ function drawMountainIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  s: number
+  s: number,
+  scale: number = 1,
 ): void {
   ctx.fillStyle = '#7a6050';
   ctx.strokeStyle = '#4a3020';
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = 0.8 / scale;
   // Background peak (small, behind the others)
   ctx.beginPath();
   ctx.moveTo(x - s * 1.1, y + s * 0.5);
@@ -502,7 +504,8 @@ function drawTreeIcon(
   x: number,
   y: number,
   s: number,
-  density: number = 0.5
+  density: number = 0.5,
+  scale: number = 1,
 ): void {
   // Modulate tree color by vegetation density: sparse/dry → lighter, dense/wet → darker
   const r = Math.round(58 - density * 20);   // 58 → 38
@@ -510,7 +513,7 @@ function drawTreeIcon(
   const b = Math.round(48 - density * 16);   // 48 → 32
   ctx.fillStyle = `rgb(${r},${g},${b})`;
   ctx.strokeStyle = `rgb(${r - 16},${g - 16},${b - 16})`;
-  ctx.lineWidth = 0.5;
+  ctx.lineWidth = 0.5 / scale;
   ctx.beginPath();
   ctx.moveTo(x, y - s);
   ctx.lineTo(x - s * 0.7, y + s * 0.3);
@@ -527,12 +530,13 @@ function drawDesertIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  s: number
+  s: number,
+  scale: number = 1,
 ): void {
   // Cactus
   ctx.fillStyle = '#6a9040';
   ctx.strokeStyle = '#4a6020';
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = 0.8 / scale;
   // Trunk
   ctx.fillRect(x - s * 0.2, y - s * 0.5, s * 0.4, s * 1.2);
   // Arms
@@ -544,10 +548,11 @@ function drawSnowIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
-  s: number
+  s: number,
+  scale: number = 1,
 ): void {
   ctx.strokeStyle = '#a0b8d0';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 / scale;
   // Simple snowflake (6 lines)
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * Math.PI * 2;
@@ -572,14 +577,15 @@ function drawCityIcon(
   y: number,
   s: number,
   isCapital: boolean,
-  sizeScale: number = 1.0
+  sizeScale: number = 1.0,
+  scale: number = 1,
 ): void {
   const ss = s * sizeScale;
   if (isCapital) {
     // Castle silhouette
     ctx.fillStyle = '#c8a060';
     ctx.strokeStyle = '#5a3a10';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1 / scale;
     ctx.fillRect(x - ss, y - ss * 0.3, ss * 2, ss * 1.1);
     // Battlements
     for (let i = -1; i <= 1; i++) {
@@ -590,7 +596,7 @@ function drawCityIcon(
     // Simple tower
     ctx.fillStyle = '#d4b880';
     ctx.strokeStyle = '#5a3a10';
-    ctx.lineWidth = 0.8;
+    ctx.lineWidth = 0.8 / scale;
     ctx.fillRect(x - ss * 0.4, y - ss * 0.5, ss * 0.8, ss * 1.2);
     ctx.fillRect(x - ss * 0.6, y - ss * 0.9, ss * 0.3, ss * 0.5);
     ctx.fillRect(x + ss * 0.3, y - ss * 0.9, ss * 0.3, ss * 0.5);
@@ -603,11 +609,12 @@ function drawRuinIcon(
   x: number,
   y: number,
   s: number,
+  scale: number = 1,
 ): void {
   // Crumbled walls — two broken pillars with rubble
   ctx.fillStyle = '#999';
   ctx.strokeStyle = '#666';
-  ctx.lineWidth = 0.8;
+  ctx.lineWidth = 0.8 / scale;
   // Left pillar (broken top)
   ctx.fillRect(x - s * 0.7, y - s * 0.2, s * 0.3, s * 0.9);
   ctx.strokeRect(x - s * 0.7, y - s * 0.2, s * 0.3, s * 0.9);
@@ -631,13 +638,14 @@ function drawIcons(
   season: Season = 0,
   highlightSet?: Set<number>,
   citySizesAtYear?: Uint8Array,
+  scale: number = 1,
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
     ? cities
     : cities.filter(c => c.foundedYear <= selectedYear);
   const citySet = new Set(visibleCities.map(c => c.cellIndex));
-  const iconSize = Math.max(4, Math.min(8, data.width / 150));
+  const iconSize = Math.max(4, Math.min(8, data.width / 150)) / scale;
 
   // Biome icons (sample ~20% of cells for density control, ~40% for mountains)
   for (const cell of cells) {
@@ -653,7 +661,7 @@ function drawIcons(
       if (cell.index % 5 >= 2) continue;
       // Scale icon size by elevation: higher = bigger
       const elevScale = Math.max(0.8, Math.min(1.4, 0.8 + (cell.elevation - 0.75) * 1.6));
-      drawMountainIcon(ctx, cell.x, cell.y, iconSize * elevScale);
+      drawMountainIcon(ctx, cell.x, cell.y, iconSize * elevScale, scale);
     } else if (info.iconType) {
       if (info.iconType === 'tree') {
         // Variable tree density: 10% at dry edges, 30% at wet edges
@@ -663,15 +671,15 @@ function drawIcons(
         const rand = hash - Math.floor(hash);
         if (rand > treeRate) continue;
         const sizeScale = 0.85 + density * 0.3;
-        drawTreeIcon(ctx, cell.x, cell.y, iconSize * 0.8 * sizeScale, density);
+        drawTreeIcon(ctx, cell.x, cell.y, iconSize * 0.8 * sizeScale, density, scale);
       } else {
         // ~20% density for non-tree icons
         if (cell.index % 5 !== 0) continue;
         const s = iconSize;
         switch (info.iconType) {
-          case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s); break;
-          case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7); break;
-          case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s); break;
+          case 'mountain': drawMountainIcon(ctx, cell.x, cell.y, s, scale); break;
+          case 'desert':   drawDesertIcon(ctx, cell.x, cell.y, s * 0.7, scale); break;
+          case 'snow':     drawSnowIcon(ctx, cell.x, cell.y, s, scale); break;
         }
       }
     }
@@ -700,7 +708,7 @@ function drawIcons(
       const idx = cityIdxMap.get(city.cellIndex);
       if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
     }
-    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 1.0);
+    drawCityIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 1.0, scale);
   }
 
   // Ruin icons
@@ -709,7 +717,7 @@ function drawIcons(
     if (highlightSet) {
       ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
     }
-    drawRuinIcon(ctx, cell.x, cell.y, iconSize * 1.2);
+    drawRuinIcon(ctx, cell.x, cell.y, iconSize * 1.2, scale);
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
 }
@@ -719,12 +727,16 @@ function drawLabels(
   data: MapData,
   selectedYear?: number,
   highlightSet?: Set<number>,
+  scale: number = 1,
 ): void {
   const { cells, cities } = data;
   const visibleCities = selectedYear === undefined
     ? cities
     : cities.filter(c => c.foundedYear <= selectedYear);
-  const fontSize = Math.max(9, Math.min(13, data.width / 100));
+  const fontSize = Math.max(9, Math.min(13, data.width / 100)) / scale;
+  const ox = 10 / scale;   // horizontal text offset from icon
+  const oy = 5 / scale;    // vertical text offset from icon
+  const sd = 1 / scale;    // shadow spread (±1px around text center)
 
   for (const city of visibleCities) {
     const cell = cells[city.cellIndex];
@@ -742,28 +754,28 @@ function drawLabels(
 
       // Shadow
       ctx.fillStyle = 'rgba(200,200,200,0.7)';
-      ctx.fillText(city.name, cell.x + 9, cell.y + 4);
-      ctx.fillText(city.name, cell.x + 11, cell.y + 4);
-      ctx.fillText(city.name, cell.x + 9, cell.y + 6);
-      ctx.fillText(city.name, cell.x + 11, cell.y + 6);
+      ctx.fillText(city.name, cell.x + ox - sd, cell.y + oy - sd);
+      ctx.fillText(city.name, cell.x + ox + sd, cell.y + oy - sd);
+      ctx.fillText(city.name, cell.x + ox - sd, cell.y + oy + sd);
+      ctx.fillText(city.name, cell.x + ox + sd, cell.y + oy + sd);
 
       // Text
       ctx.fillStyle = '#777';
-      ctx.fillText(city.name, cell.x + 10, cell.y + 5);
+      ctx.fillText(city.name, cell.x + ox, cell.y + oy);
     } else {
-      const fontStyle = city.isCapital ? `bold ${fontSize + 1}px Georgia, serif` : `${fontSize}px Georgia, serif`;
+      const fontStyle = city.isCapital ? `bold ${fontSize + 1 / scale}px Georgia, serif` : `${fontSize}px Georgia, serif`;
       ctx.font = fontStyle;
 
       // Shadow
       ctx.fillStyle = 'rgba(255,248,230,0.85)';
-      ctx.fillText(city.name, cell.x + 9, cell.y + 4);
-      ctx.fillText(city.name, cell.x + 11, cell.y + 4);
-      ctx.fillText(city.name, cell.x + 9, cell.y + 6);
-      ctx.fillText(city.name, cell.x + 11, cell.y + 6);
+      ctx.fillText(city.name, cell.x + ox - sd, cell.y + oy - sd);
+      ctx.fillText(city.name, cell.x + ox + sd, cell.y + oy - sd);
+      ctx.fillText(city.name, cell.x + ox - sd, cell.y + oy + sd);
+      ctx.fillText(city.name, cell.x + ox + sd, cell.y + oy + sd);
 
       // Text
       ctx.fillStyle = city.isCapital ? '#2a1a00' : '#3a2a10';
-      ctx.fillText(city.name, cell.x + 10, cell.y + 5);
+      ctx.fillText(city.name, cell.x + ox, cell.y + oy);
     }
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
@@ -773,9 +785,10 @@ function drawRegionBorders(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
   width: number,
+  scale: number = 1,
 ): void {
   ctx.strokeStyle = 'rgba(100,80,50,0.35)';
-  ctx.lineWidth = 0.5;
+  ctx.lineWidth = 0.5 / scale;
   ctx.setLineDash([]);
 
   const drawnPairs = new Set<string>();
@@ -801,11 +814,11 @@ function drawRegionBorders(
   }
 }
 
-function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // Pickaxe: two rects forming a cross
   ctx.fillStyle = '#555';
   ctx.strokeStyle = '#333';
-  ctx.lineWidth = 0.5;
+  ctx.lineWidth = 0.5 / scale;
   // Vertical bar
   ctx.fillRect(x - s * 0.15, y - s * 0.6, s * 0.3, s * 1.2);
   // Horizontal bar
@@ -813,10 +826,10 @@ function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.strokeRect(x - s * 0.6, y - s * 0.6, s * 1.2, s * 1.2);
 }
 
-function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // Wheat stalk: vertical stem with diagonal seeds
   ctx.strokeStyle = '#b8860b';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 / scale;
   ctx.beginPath();
   ctx.moveTo(x, y + s);
   ctx.lineTo(x, y - s);
@@ -835,10 +848,10 @@ function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: numbe
   }
 }
 
-function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // 6-pointed sparkle (lines radiating from center)
   ctx.strokeStyle = '#d4a017';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 / scale;
   for (let i = 0; i < 6; i++) {
     const angle = (i / 6) * Math.PI * 2;
     ctx.beginPath();
@@ -856,9 +869,10 @@ function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: 
 function drawResources(
   ctx: CanvasRenderingContext2D,
   cells: Cell[],
-  regions: RegionData[]
+  regions: RegionData[],
+  scale: number = 1,
 ): void {
-  const iconSize = 5;
+  const iconSize = 5 / scale;
 
   for (const region of regions) {
     if (!region.resources) continue;
@@ -867,9 +881,9 @@ function drawResources(
       if (!cell) continue;
       const category = getLegacyCategory(r.type as ResourceType);
       switch (category) {
-        case 'strategic':    drawStrategicIcon(ctx, cell.x, cell.y, iconSize); break;
-        case 'agricultural': drawAgriculturalIcon(ctx, cell.x, cell.y, iconSize); break;
-        case 'luxury':       drawLuxuryIcon(ctx, cell.x, cell.y, iconSize); break;
+        case 'strategic':    drawStrategicIcon(ctx, cell.x, cell.y, iconSize, scale); break;
+        case 'agricultural': drawAgriculturalIcon(ctx, cell.x, cell.y, iconSize, scale); break;
+        case 'luxury':       drawLuxuryIcon(ctx, cell.x, cell.y, iconSize, scale); break;
       }
     }
   }
@@ -915,12 +929,14 @@ function drawWonderBadges(
   cells: Cell[],
   wonderCells: number[],
   highlightSet?: Set<number>,
+  scale: number = 1,
 ): void {
   if (wonderCells.length === 0) return;
   ctx.save();
-  ctx.font = 'bold 11px Georgia, serif';
+  ctx.font = `bold ${11 / scale}px Georgia, serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  const yOff = 14 / scale;
   for (const ci of wonderCells) {
     const cell = cells[ci];
     if (!cell) continue;
@@ -930,9 +946,9 @@ function drawWonderBadges(
     // Gold star above city
     ctx.fillStyle = '#d4a800';
     ctx.strokeStyle = '#7a5500';
-    ctx.lineWidth = 0.5;
-    ctx.fillText('★', cell.x, cell.y - 14);
-    ctx.strokeText('★', cell.x, cell.y - 14);
+    ctx.lineWidth = 0.5 / scale;
+    ctx.fillText('★', cell.x, cell.y - yOff);
+    ctx.strokeText('★', cell.x, cell.y - yOff);
   }
   ctx.restore();
 }
@@ -943,12 +959,15 @@ function drawReligionMarkers(
   cells: Cell[],
   religionCells: number[],
   highlightSet?: Set<number>,
+  scale: number = 1,
 ): void {
   if (religionCells.length === 0) return;
   ctx.save();
-  ctx.font = '9px Georgia, serif';
+  ctx.font = `${9 / scale}px Georgia, serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  const xOff = 10 / scale;
+  const yOff = 6 / scale;
   for (const ci of religionCells) {
     const cell = cells[ci];
     if (!cell) continue;
@@ -957,9 +976,9 @@ function drawReligionMarkers(
     }
     ctx.fillStyle = '#8040a0';
     ctx.strokeStyle = '#400060';
-    ctx.lineWidth = 0.5;
-    ctx.fillText('✦', cell.x + 10, cell.y - 6);
-    ctx.strokeText('✦', cell.x + 10, cell.y - 6);
+    ctx.lineWidth = 0.5 / scale;
+    ctx.fillText('✦', cell.x + xOff, cell.y - yOff);
+    ctx.strokeText('✦', cell.x + xOff, cell.y - yOff);
   }
   ctx.restore();
 }
@@ -1273,7 +1292,7 @@ export function render(
     drawWaterDepth(ctx, data.cells, width, height);
 
     // Layer 3: Noisy coastlines
-    drawNoisyCoastlines(ctx, data.cells, width);
+    drawNoisyCoastlines(ctx, data.cells, width, scale);
 
     // Political view: mute terrain with parchment overlay on land cells
     if (mapView === 'political') {
@@ -1286,13 +1305,13 @@ export function render(
     }
 
     // Layer 4: Region borders (before rivers so rivers draw on top)
-    if (layers.regions) drawRegionBorders(ctx, data.cells, width);
+    if (layers.regions) drawRegionBorders(ctx, data.cells, width, scale);
 
     // Layer 4b: Rivers
     if (layers.rivers) drawRivers(ctx, data, scale);
 
     // Layer 4c: Resource icons
-    if (layers.resources) drawResources(ctx, data.cells, data.regions ?? []);
+    if (layers.resources) drawResources(ctx, data.cells, data.regions ?? [], scale);
 
     // Layer 5: Kingdom borders
     if (layers.borders) {
@@ -1319,16 +1338,16 @@ export function render(
     }
 
     // Layer 7: Icons (biome + cities)
-    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet, citySizesAtYear);
+    if (layers.icons) drawIcons(ctx, data, selectedYear, effectiveSeason, highlightSet, citySizesAtYear, scale);
 
     // Layer 7b: Wonder badges
     if (wonderCells) {
-      drawWonderBadges(ctx, data.cells, wonderCells, highlightSet);
+      drawWonderBadges(ctx, data.cells, wonderCells, highlightSet, scale);
     }
 
     // Layer 7c: Religion markers
     if (religionCells) {
-      drawReligionMarkers(ctx, data.cells, religionCells, highlightSet);
+      drawReligionMarkers(ctx, data.cells, religionCells, highlightSet, scale);
     }
 
     // Layer 7d: Current-year event overlays
@@ -1338,7 +1357,7 @@ export function render(
     }
 
     // Layer 8: City labels
-    if (layers.labels) drawLabels(ctx, data, selectedYear, highlightSet);
+    if (layers.labels) drawLabels(ctx, data, selectedYear, highlightSet, scale);
 
     // Layer 9: Entity highlight (click-to-navigate)
     if (highlightCells && highlightCells.length > 0) {
