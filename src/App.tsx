@@ -7,7 +7,7 @@ import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
-import { getOwnershipAtYear, getExpansionFlagsAtYear } from './lib/history';
+import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
 
 const DEFAULT_SEED = 'fantasy';
@@ -74,6 +74,46 @@ export default function App() {
     if (!mapData?.history || selectedYear === undefined) return undefined;
     return getExpansionFlagsAtYear(mapData.history, selectedYear);
   }, [mapData?.history, selectedYear]);
+
+  // Recalculate highlight cells when selectedYear changes while an entity is
+  // selected.  Territory boundaries shift over time, so the highlight must
+  // track the entity's footprint at the *current* year — without re-centering
+  // the viewport (that only happens on explicit entity selection).
+  useEffect(() => {
+    if (!selectedEntity || !mapData) return;
+
+    if (selectedEntity.type === 'city') {
+      const city = mapData.cities.find(c => c.cellIndex === selectedEntity.cellIndex);
+      if (city) {
+        const owned = city.ownedCells
+          ?.filter(oc => oc.yearAdded <= selectedYear)
+          .map(oc => oc.cellIndex) ?? [city.cellIndex];
+        setHighlightCells(owned.length > 0 ? owned : [city.cellIndex]);
+      }
+    } else if (selectedEntity.type === 'country') {
+      if (!ownershipAtYear) return;
+      const cells: number[] = [];
+      for (let i = 0; i < ownershipAtYear.length; i++) {
+        if (ownershipAtYear[i] === selectedEntity.countryIndex) cells.push(i);
+      }
+      setHighlightCells(cells.length > 0 ? cells : null);
+    } else if (selectedEntity.type === 'empire') {
+      if (!mapData.history || !ownershipAtYear) return;
+      const empireSnaps = getEmpiresAtYear(mapData.history, selectedYear);
+      const empEntry = empireSnaps.find(e => e.empireId === selectedEntity.empireId);
+      if (!empEntry) {
+        setHighlightCells(null);
+        return;
+      }
+      const memberSet = new Set(empEntry.memberCountryIndices);
+      const cells: number[] = [];
+      for (let i = 0; i < ownershipAtYear.length; i++) {
+        if (memberSet.has(ownershipAtYear[i])) cells.push(i);
+      }
+      setHighlightCells(cells.length > 0 ? cells : null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedYear, ownershipAtYear]);
 
   const handleEntityNavigate = useCallback((cellIndices: number[], centerCellIndex: number) => {
     const cell = mapData?.cells[centerCellIndex];
