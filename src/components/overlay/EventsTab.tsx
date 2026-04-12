@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryData, HistoryEvent, SelectedEntity } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
 import { EVENT_ICONS, EVENT_COLORS, EVENT_TYPE_GROUPS } from './eventStyles';
+import { getEmpiresAtYear } from '../../lib/history';
 
 interface EventsTabProps {
   historyData: HistoryData;
@@ -46,15 +47,15 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
     });
   };
 
-  // Resolve empire members for filtering (if entity is an empire)
+  // Resolve empire members for filtering (if entity is an empire).
+  // Uses selectedYear so membership tracks the current timeline position.
   const empireMembers = useMemo(() => {
     if (!selectedEntity || selectedEntity.type !== 'empire') return undefined;
-    const snapYear = selectedEntity.snapshotYear;
-    const empSnap = historyData.empireSnapshots[snapYear];
-    const entry = empSnap?.find(e => e.empireId === selectedEntity.empireId);
+    const empSnaps = getEmpiresAtYear(historyData, selectedYear);
+    const entry = empSnaps.find(e => e.empireId === selectedEntity.empireId);
     if (!entry) return undefined;
     return new Set(entry.memberCountryIndices);
-  }, [selectedEntity, historyData.empireSnapshots]);
+  }, [selectedEntity, historyData, selectedYear]);
 
   // Collect all events up to selectedYear, with a population summary at the end of each year
   const cumulativeEvents = useMemo(() => {
@@ -98,12 +99,11 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
     if (selectedEntity.type === 'country') {
       return historyData.countries[selectedEntity.countryIndex]?.name ?? `Country #${selectedEntity.countryIndex}`;
     }
-    // Empire — find name from snapshot
-    const snapYear = selectedEntity.snapshotYear;
-    const empSnap = historyData.empireSnapshots[snapYear];
-    const entry = empSnap?.find(e => e.empireId === selectedEntity.empireId);
+    // Empire — find name from snapshot at current year
+    const empSnaps = getEmpiresAtYear(historyData, selectedYear);
+    const entry = empSnaps.find(e => e.empireId === selectedEntity.empireId);
     return entry?.name ?? `Empire`;
-  }, [selectedEntity, historyData]);
+  }, [selectedEntity, historyData, selectedYear]);
 
   return (
     <div style={styles.root}>
