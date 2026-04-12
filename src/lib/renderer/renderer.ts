@@ -1156,7 +1156,7 @@ function drawCurrentYearEvents(
   ctx.restore();
 }
 
-function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCells: number[]): void {
+function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCells: number[], width: number): void {
   ctx.save();
   // Fill pass
   ctx.fillStyle = 'rgba(255, 220, 60, 0.35)';
@@ -1166,14 +1166,41 @@ function drawHighlight(ctx: CanvasRenderingContext2D, cells: Cell[], highlightCe
     cellPath(ctx, cell);
     ctx.fill();
   }
-  // Stroke pass — thicker gold border on top
+  // Stroke pass — only external boundary edges
   ctx.strokeStyle = '#ffd700';
   ctx.lineWidth = 2;
-  for (const ci of highlightCells) {
-    const cell = cells[ci];
-    if (!cell || cell.vertices.length < 2) continue;
-    cellPath(ctx, cell);
-    ctx.stroke();
+  const highlightSet = new Set(highlightCells);
+
+  if (highlightSet.size === 1) {
+    // Single cell: stroke the full polygon (every edge is external)
+    const cell = cells[highlightCells[0]];
+    if (cell && cell.vertices.length >= 2) {
+      cellPath(ctx, cell);
+      ctx.stroke();
+    }
+  } else {
+    // Multi-cell: only stroke edges adjacent to non-highlighted cells
+    const drawnPairs = new Set<string>();
+    for (const ci of highlightCells) {
+      const cell = cells[ci];
+      if (!cell) continue;
+      for (const ni of cell.neighbors) {
+        if (highlightSet.has(ni)) continue;
+        const key = ci < ni ? `${ci}-${ni}` : `${ni}-${ci}`;
+        if (drawnPairs.has(key)) continue;
+        drawnPairs.add(key);
+
+        const neighbor = cells[ni];
+        if (!neighbor) continue;
+        const shared = findSharedWrapAwareVerts(cell, neighbor, width);
+        if (!shared) continue;
+
+        ctx.beginPath();
+        ctx.moveTo(shared[0][0], shared[0][1]);
+        ctx.lineTo(shared[1][0], shared[1][1]);
+        ctx.stroke();
+      }
+    }
   }
   ctx.restore();
 }
@@ -1321,7 +1348,7 @@ export function render(
 
     // Layer 9: Entity highlight (click-to-navigate)
     if (highlightCells && highlightCells.length > 0) {
-      drawHighlight(ctx, data.cells, highlightCells);
+      drawHighlight(ctx, data.cells, highlightCells, width);
     }
 
     ctx.restore();
