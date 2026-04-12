@@ -370,8 +370,11 @@ export class YearGenerator {
       }
     }
 
-    // 8. Cataclysms: rndSize(6, -3)
-    const cataclysmCount = rndSize(6, -3);
+    // 8. Cataclysms: rndSize(6, -3) clamped to 1 per 20 usable cities.
+    // The base roll (0–2) is unchanged for large worlds; the cap protects
+    // small-city-count worlds (ocean, ice) from disproportionate disasters.
+    const cataclysmCap = Math.floor(world.mapUsableCities.size / 20);
+    const cataclysmCount = Math.min(rndSize(6, -3), cataclysmCap);
     for (let i = 0; i < cataclysmCount; i++) {
       const c = cataclysmGenerator.generate(rng, year, world);
       if (c) year.cataclysms.push(c); else break;
