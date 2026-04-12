@@ -363,6 +363,59 @@ function thermalErosion(cells: Cell[], iterations: number, talusAngle: number): 
 }
 
 // ---------------------------------------------------------------------------
+// Continental shelf — BFS-based elevation boost for coastal water cells
+// ---------------------------------------------------------------------------
+
+function applyShelf(cells: Cell[], profile: TerrainProfile): void {
+  if (profile.shelfWidth <= 0) return;
+
+  // Find the elevation of the highest water cell (land/water boundary)
+  let waterCeiling = 0;
+  for (const cell of cells) {
+    if (cell.isWater && cell.elevation > waterCeiling) {
+      waterCeiling = cell.elevation;
+    }
+  }
+
+  // BFS from coastal land cells outward through water, tracking hop distance
+  const dist = new Int8Array(cells.length); // 0 = unvisited
+  const queue: number[] = [];
+
+  // Seed: all coastal land cells (land cells adjacent to water)
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    if (cell.isWater) continue;
+    for (const ni of cell.neighbors) {
+      if (cells[ni].isWater && dist[ni] === 0) {
+        dist[ni] = 1;
+        queue.push(ni);
+      }
+    }
+  }
+
+  // BFS expansion through water up to shelfWidth hops
+  let head = 0;
+  while (head < queue.length) {
+    const ci = queue[head++];
+    const d = dist[ci];
+    if (d >= profile.shelfWidth) continue;
+    for (const ni of cells[ci].neighbors) {
+      if (cells[ni].isWater && dist[ni] === 0) {
+        dist[ni] = d + 1;
+        queue.push(ni);
+      }
+    }
+  }
+
+  // Apply elevation boost: strongest at hop 1, fading to 0 at shelfWidth edge
+  for (const ci of queue) {
+    const d = dist[ci]; // 1-based distance
+    const factor = profile.shelfStrength * (1 - (d - 1) / profile.shelfWidth);
+    cells[ci].elevation += (waterCeiling - cells[ci].elevation) * factor;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main elevation assignment
 // ---------------------------------------------------------------------------
 
@@ -490,6 +543,9 @@ export function assignElevation(
   byElevation.forEach((cell, i) => {
     cell.isWater = i < targetWaterCount;
   });
+
+  // --- Step 5b: Continental shelf — boost coastal water elevations ---
+  applyShelf(cells, profile);
 
   // --- Step 6: Thermal erosion (smooth unrealistic cliffs) ---
   thermalErosion(cells, profile.thermalErosionIters, profile.thermalErosionTalus);

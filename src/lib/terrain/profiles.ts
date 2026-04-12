@@ -72,6 +72,11 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   // --- Biome overrides ---
   marshOverride: false,
 
+  // --- Continental shelf / shallow sea ---
+  shelfWidth: 3,
+  shelfStrength: 0.6,
+  shallowSeaThreshold: 0.1,
+
   // --- Depression fill / lakes ---
   lakeMaxSize: 20,
   lakeMinSize: 4,
@@ -157,6 +162,8 @@ export const PROFILES: Record<string, TerrainProfile> = {
     latAmplitude: 0.10,
     globalMoistureOffset: -0.05,
     riverFlowThreshold: 25,
+    // Frozen world → narrower shelf
+    shelfWidth: 2,
   },
 
   /** Lush greenhouse world. Dense forests from pole to pole, heavy rainfall, no deserts. */
@@ -257,5 +264,8 @@ export const PROFILES: Record<string, TerrainProfile> = {
     warmCurrentStrength: 0.16,
     latAmplitude: 0.35,
     continentalityStrength: 0.10,
+    // Archipelago → wider shelf around islands, slightly higher shallow sea threshold
+    shelfWidth: 5,
+    shallowSeaThreshold: 0.12,
   },
 };
