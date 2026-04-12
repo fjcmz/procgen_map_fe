@@ -371,6 +371,7 @@ export interface GenerateRequest {
   numSimYears?: number;
   profileName?: string;
   profileOverrides?: Partial<TerrainProfile>;
+  resourceRarityMode?: ResourceRarityMode;
 }
 
 export type WorkerMessage =
@@ -382,6 +383,15 @@ export type WorkerMessage =
 export type MapView = 'terrain' | 'political';
 
 export type PoliticalMode = 'countries' | 'empires';
+
+/**
+ * Controls the spawn probability of uncommon/rare/veryRare resources
+ * during world generation via `RARITY_WEIGHTS_BY_MODE` in `ResourceCatalog.ts`.
+ * - scarce:   common 100 / uncommon 40 / rare 15 / veryRare 8
+ * - natural:  common 100 / uncommon 40 / rare 30 / veryRare 16
+ * - abundant: common 120 / uncommon 60 / rare 25 / veryRare 15
+ */
+export type ResourceRarityMode = 'scarce' | 'natural' | 'abundant';
 
 /** 0 = Spring (baseline), 1 = Summer, 2 = Autumn, 3 = Winter */
 export type Season = 0 | 1 | 2 | 3;

@@ -6,7 +6,8 @@ import { worldGenerator } from './physical/WorldGenerator';
 import { continentGenerator } from './physical/ContinentGenerator';
 import { regionGenerator } from './physical/RegionGenerator';
 import { resourceGenerator } from './physical/ResourceGenerator';
-import { selectPrimary, isCommonUnlockedAtZero } from './physical/ResourceCatalog';
+import { selectPrimary, isCommonUnlockedAtZero, RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
+import type { ResourceRarity } from './physical/ResourceCatalog';
 import { cityGenerator } from './physical/CityGenerator';
 import { generateCityName, generateCountryName } from './nameGenerator';
 
@@ -231,7 +232,8 @@ function normalizeBorders(
 export function buildPhysicalWorld(
   cells: Cell[],
   width: number,
-  rng: () => number
+  rng: () => number,
+  rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[]; usedCityNames: Set<string> } {
   const usedCityNames = new Set<string>();
   const numCells = cells.length;
@@ -370,7 +372,7 @@ export function buildPhysicalWorld(
     // advances — see `specs/resources.md` Phase 3 and the plan file
     // `plans/mossy-tickling-taco.md`.
     for (const region of seedToRegion.values()) {
-      region.resources = resourceGenerator.generateForRegion(region, cells, rng);
+      region.resources = resourceGenerator.generateForRegion(region, cells, rng, rarityWeights);
       for (const r of region.resources) {
         if (isCommonUnlockedAtZero(r.type)) {
           region.discoveredResources.add(r.type);

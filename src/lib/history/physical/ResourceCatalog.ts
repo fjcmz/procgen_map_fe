@@ -139,12 +139,23 @@ export interface ResourceSpec {
 // Rarity tables (weight + abundance dice)
 // ---------------------------------------------------------------------------
 
-export const RARITY_WEIGHTS: Record<ResourceRarity, number> = {
-  common: 100,
-  uncommon: 30,
-  rare: 8,
-  veryRare: 2,
+/**
+ * Three named presets for resource spawn probability.
+ * The canonical type is `ResourceRarityMode` in `types.ts`.
+ * Keeping the Record key as a plain string union here avoids a circular
+ * import through Region.ts → types.ts.
+ */
+export const RARITY_WEIGHTS_BY_MODE: Record<'scarce' | 'natural' | 'abundant', Record<ResourceRarity, number>> = {
+  /** Rare resources spawn infrequently — a challenging world. */
+  scarce:   { common: 100, uncommon: 40, rare: 15,  veryRare: 8  },
+  /** Doubles the spawn chance of rare/veryRare vs. scarce. Default. */
+  natural:  { common: 100, uncommon: 40, rare: 30,  veryRare: 16 },
+  /** All tiers spawn more freely — a resource-rich world. */
+  abundant: { common: 120, uncommon: 60, rare: 25,  veryRare: 15 },
 };
+
+/** Convenience alias: the scarce-mode weights (used as the fallback default). */
+export const RARITY_WEIGHTS: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce;
 
 /**
  * Abundance dice shared by every rarity tier. Matches the legacy

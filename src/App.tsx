@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season, SelectedEntity } from './lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season, SelectedEntity, ResourceRarityMode } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { UnifiedOverlay } from './components/UnifiedOverlay';
@@ -45,6 +45,7 @@ export default function App() {
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [generateHistory, setGenerateHistory] = useState(true);
   const [numSimYears, setNumSimYears] = useState(5000);
+  const [resourceRarityMode, setResourceRarityMode] = useState<ResourceRarityMode>('natural');
   const [selectedYear, setSelectedYear] = useState(0);
   const [season, setSeason] = useState<Season>(0);
   const [viewTransform, setViewTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
@@ -249,8 +250,9 @@ export default function App() {
       profileName,
       generateHistory,
       numSimYears,
+      resourceRarityMode,
     });
-  }, [generating, seed, numCells, waterRatio, profileName, generateHistory, numSimYears]);
+  }, [generating, seed, numCells, waterRatio, profileName, generateHistory, numSimYears, resourceRarityMode]);
 
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -324,6 +326,8 @@ export default function App() {
         onGenerateHistoryToggle={() => setGenerateHistory(v => !v)}
         numSimYears={numSimYears}
         onNumSimYearsChange={setNumSimYears}
+        resourceRarityMode={resourceRarityMode}
+        onResourceRarityModeChange={setResourceRarityMode}
         onGenerate={handleGenerate}
         generating={generating}
         progress={progress}

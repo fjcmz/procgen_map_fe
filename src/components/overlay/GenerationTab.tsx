@@ -1,5 +1,5 @@
 import type { ChangeEvent } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../../lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, ResourceRarityMode } from '../../lib/types';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
 import { PROFILE_WATER_RATIOS } from '../../lib/terrain';
 
@@ -24,6 +24,8 @@ export interface GenerationTabProps {
   onGenerateHistoryToggle: () => void;
   numSimYears: number;
   onNumSimYearsChange: (n: number) => void;
+  resourceRarityMode: ResourceRarityMode;
+  onResourceRarityModeChange: (mode: ResourceRarityMode) => void;
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
@@ -92,6 +94,8 @@ export function GenerationTab({
   onGenerateHistoryToggle,
   numSimYears,
   onNumSimYearsChange,
+  resourceRarityMode,
+  onResourceRarityModeChange,
   onGenerate,
   generating,
   progress,
@@ -186,6 +190,29 @@ export function GenerationTab({
           ))}
         </select>
       </label>
+
+      <div style={styles.label}>
+        Resources
+        <div style={styles.viewToggleRow}>
+          {([
+            ['scarce', 'Scarce'],
+            ['natural', 'Natural'],
+            ['abundant', 'Abundant'],
+          ] as [ResourceRarityMode, string][]).map(([mode, label]) => (
+            <button
+              key={mode}
+              style={{
+                ...styles.viewBtn,
+                ...(resourceRarityMode === mode ? styles.viewBtnActive : {}),
+              }}
+              onClick={() => onResourceRarityModeChange(mode)}
+              disabled={generating}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
         <input

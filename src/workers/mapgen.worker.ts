@@ -2,6 +2,7 @@ import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, Terrain
 import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
+import { RARITY_WEIGHTS_BY_MODE } from '../lib/history/physical/ResourceCatalog';
 import { CityEntity, CITY_SIZE_TRADE_CAP, type CitySize } from '../lib/history/physical/CityEntity';
 
 function post(msg: WorkerMessage): void {
@@ -44,6 +45,10 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
   const profile: TerrainProfile = e.data.profileOverrides
     ? { ...profileBase, ...e.data.profileOverrides }
     : profileBase;
+
+  // Resolve resource rarity weights from mode (default: 'natural')
+  const rarityMode = e.data.resourceRarityMode ?? 'natural';
+  const rarityWeights = RARITY_WEIGHTS_BY_MODE[rarityMode];
 
   try {
     post({ type: 'PROGRESS', step: 'Building Voronoi diagram\u2026', pct: 5 });
@@ -109,7 +114,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
       const rng = seededPRNG(seed + '_history');
 
       post({ type: 'PROGRESS', step: 'Simulating history\u2026', pct: 72 });
-      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000);
+      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights);
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
@@ -119,7 +124,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     } else {
       post({ type: 'PROGRESS', step: 'Building world\u2026', pct: 65 });
       const rng = seededPRNG(seed + '_world');
-      const result = buildPhysicalWorld(cells, width, rng);
+      const result = buildPhysicalWorld(cells, width, rng, rarityWeights);
       regions = result.regionData;
       continents = result.continentData;
     }
