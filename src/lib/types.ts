@@ -45,6 +45,17 @@ export interface RegionResourceData {
   type: string;
   /** `Resource.original` — the natural endowment, time-invariant. */
   amount: number;
+  /**
+   * Tech field the owning country must invest in to unlock this resource for
+   * trade. Optional for backwards compatibility — missing means "unlocked at
+   * year 0 with no tech investment" (the old behavior before tech-gating).
+   */
+  requiredTechField?: TechField;
+  /**
+   * Minimum level of `requiredTechField` required to unlock. Optional for
+   * backwards compatibility — missing / 0 means always unlocked.
+   */
+  requiredTechLevel?: number;
 }
 
 export interface RegionData {
@@ -132,7 +143,7 @@ export type HistoryEventType =
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
   | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
   | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN'
-  | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT';
+  | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT' | 'DISCOVERY';
 
 export interface HistoryEvent {
   type: HistoryEventType;
@@ -176,6 +187,16 @@ export interface HistoryEvent {
   expansionCellCount?: number;
   /** SETTLEMENT-only: name of the city settled in expansion territory. */
   settlementCityName?: string;
+  /**
+   * DISCOVERY-only: the resource newly unlocked for trade in the region,
+   * and the tech gate that was crossed. Used by the Events tab and
+   * the locked-badge UI in the Details tab.
+   */
+  discoveredResource?: {
+    type: string;
+    field: TechField;
+    level: number;
+  };
 }
 
 export interface HistoryYear {

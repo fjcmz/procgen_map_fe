@@ -201,6 +201,33 @@ function getEmpireTechLevels(
 }
 
 /**
+ * Aggregated resource info per type — `amount` is the summed `Resource.original`
+ * across every region owned by the entity that contains this type; `locked` is
+ * true only if EVERY such region is still locked (any single unlocked region
+ * flips it to unlocked, since the entity can still trade it from there).
+ */
+export interface ResourceAggregate {
+  amount: number;
+  locked: boolean;
+}
+
+/**
+ * Build a locked-check for a given type by cross-referencing `region.resources`
+ * requirement fields against the current tech levels. Returns `true` when the
+ * entity's tech level is below the resource's requirement.
+ */
+function isResourceLocked(
+  r: NonNullable<RegionData['resources']>[number],
+  techLevels: Map<string, number>,
+): boolean {
+  const req = r.requiredTechField;
+  const lvl = r.requiredTechLevel ?? 0;
+  if (req == null || lvl <= 0) return false;
+  const current = techLevels.get(req) ?? 0;
+  return current < lvl;
+}
+
+/**
  * Aggregate Resource.original amounts across every region currently owned by
  * `countryIndex` at the selected year. Regions are atomically owned (Phase 6
  * model — conquests transfer whole regions), so we probe `region.cellIndices[0]`
@@ -210,15 +237,24 @@ function getCountryResources(
   countryIndex: number,
   ownershipAtYear: Int16Array | undefined,
   regions: RegionData[] | undefined,
-): Map<string, number> {
-  const acc = new Map<string, number>();
+  techLevels: Map<string, number>,
+): Map<string, ResourceAggregate> {
+  const acc = new Map<string, ResourceAggregate>();
   if (!ownershipAtYear || !regions) return acc;
   for (const region of regions) {
     if (region.cellIndices.length === 0) continue;
     if (ownershipAtYear[region.cellIndices[0]] !== countryIndex) continue;
     if (!region.resources) continue;
     for (const r of region.resources) {
-      acc.set(r.type, (acc.get(r.type) ?? 0) + r.amount);
+      const locked = isResourceLocked(r, techLevels);
+      const prev = acc.get(r.type);
+      if (prev) {
+        prev.amount += r.amount;
+        // Any unlocked region wins (entity can already exploit it somewhere).
+        if (!locked) prev.locked = false;
+      } else {
+        acc.set(r.type, { amount: r.amount, locked });
+      }
     }
   }
   return acc;
@@ -229,15 +265,23 @@ function getEmpireResources(
   countryIndices: Set<number>,
   ownershipAtYear: Int16Array | undefined,
   regions: RegionData[] | undefined,
-): Map<string, number> {
-  const acc = new Map<string, number>();
+  techLevels: Map<string, number>,
+): Map<string, ResourceAggregate> {
+  const acc = new Map<string, ResourceAggregate>();
   if (!ownershipAtYear || !regions) return acc;
   for (const region of regions) {
     if (region.cellIndices.length === 0) continue;
     if (!countryIndices.has(ownershipAtYear[region.cellIndices[0]])) continue;
     if (!region.resources) continue;
     for (const r of region.resources) {
-      acc.set(r.type, (acc.get(r.type) ?? 0) + r.amount);
+      const locked = isResourceLocked(r, techLevels);
+      const prev = acc.get(r.type);
+      if (prev) {
+        prev.amount += r.amount;
+        if (!locked) prev.locked = false;
+      } else {
+        acc.set(r.type, { amount: r.amount, locked });
+      }
     }
   }
   return acc;
@@ -506,8 +550,8 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
   );
 
   const resources = useMemo(
-    () => getCountryResources(countryIndex, ownershipAtYear, mapData.regions),
-    [countryIndex, ownershipAtYear, mapData.regions],
+    () => getCountryResources(countryIndex, ownershipAtYear, mapData.regions, techLevels),
+    [countryIndex, ownershipAtYear, mapData.regions, techLevels],
   );
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
@@ -701,9 +745,14 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
     [ownershipAtYear, mapData.cells, memberSet],
   );
 
+  const techLevels = useMemo(
+    () => getEmpireTechLevels(history.years, memberSet, selectedYear),
+    [history.years, memberSet, selectedYear],
+  );
+
   const resources = useMemo(
-    () => getEmpireResources(memberSet, ownershipAtYear, mapData.regions),
-    [memberSet, ownershipAtYear, mapData.regions],
+    () => getEmpireResources(memberSet, ownershipAtYear, mapData.regions, techLevels),
+    [memberSet, ownershipAtYear, mapData.regions, techLevels],
   );
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
@@ -715,11 +764,6 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
   const activeTradeCount = useMemo(
     () => getActiveTradeCount(history.tradeSnapshots, cityCellSet, history.numYears, selectedYear),
     [history.tradeSnapshots, cityCellSet, history.numYears, selectedYear],
-  );
-
-  const techLevels = useMemo(
-    () => getEmpireTechLevels(history.years, memberSet, selectedYear),
-    [history.years, memberSet, selectedYear],
   );
 
   if (!empEntry) {
@@ -883,17 +927,26 @@ function resourceDotColor(type: string): string {
   }
 }
 
-function ResourceList({ resources }: { resources: Map<string, number> }) {
+function ResourceList({ resources }: { resources: Map<string, ResourceAggregate> }) {
   const entries = useMemo(
-    () => Array.from(resources.entries()).sort((a, b) => b[1] - a[1]),
+    () => Array.from(resources.entries()).sort((a, b) => b[1].amount - a[1].amount),
     [resources],
   );
   return (
     <div style={styles.techGrid}>
-      {entries.map(([type, amount]) => (
-        <div key={type} style={styles.techRow}>
+      {entries.map(([type, { amount, locked }]) => (
+        <div
+          key={type}
+          style={{
+            ...styles.techRow,
+            opacity: locked ? 0.55 : 1,
+          }}
+          title={locked ? 'Locked — requires more tech to unlock for trade' : undefined}
+        >
           <span style={{ ...styles.techDot, background: resourceDotColor(type) }} />
-          <span style={styles.techLabel}>{formatResourceType(type)}</span>
+          <span style={styles.techLabel}>
+            {locked ? '\u{1F512} ' : ''}{formatResourceType(type)}
+          </span>
           <span style={styles.techLevel}>{amount}</span>
         </div>
       ))}

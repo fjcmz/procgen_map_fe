@@ -78,8 +78,15 @@ export class TradeGenerator {
     const sourceRegion = world.mapRegions.get(sourceCity.regionId)!;
     const targetRegion = world.mapRegions.get(targetCity.regionId)!;
 
-    const sourceResources = sourceRegion.resources.filter(r => r.available > TRADE_MIN);
-    const targetResources = targetRegion.resources.filter(r => r.available > TRADE_MIN);
+    // Tech-gated: a resource is tradeable only if it has enough stock AND
+    // has been discovered by the owning country. Discovery is per-region and
+    // monotonic (see `YearGenerator` step 9 and `Region.discoveredResources`).
+    const sourceResources = sourceRegion.resources.filter(r =>
+      r.available > TRADE_MIN && sourceRegion.discoveredResources.has(r.type)
+    );
+    const targetResources = targetRegion.resources.filter(r =>
+      r.available > TRADE_MIN && targetRegion.discoveredResources.has(r.type)
+    );
     if (sourceResources.length === 0 || targetResources.length === 0) return null;
 
     const res1 = sourceResources[Math.floor(rng() * sourceResources.length)];
