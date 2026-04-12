@@ -144,7 +144,10 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
       }
     }
 
-    // Bucket cities by country index, filtered to those founded by selectedYear.
+    // Bucket cities by owning country at the selected year.
+    // When ownershipAtYear is available, use it for dynamic attribution that
+    // matches the map's visual ownership (reflects conquests). Fall back to
+    // the static kingdomId when ownership data is unavailable.
     // Cities whose region never formed a country carry kingdomId === -1 and
     // go into the unassignedCities bucket instead (rendered as "Free Cities").
     const citiesByCountry = new Map<number, City[]>();
@@ -155,13 +158,30 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
         unassignedCities.push(city);
         continue;
       }
-      let list = citiesByCountry.get(city.kingdomId);
-      if (!list) { list = []; citiesByCountry.set(city.kingdomId, list); }
+      let owner: number;
+      if (ownershipAtYear) {
+        const cellOwner = ownershipAtYear[city.cellIndex];
+        if (cellOwner >= 0) {
+          owner = cellOwner;
+        } else {
+          // Cell is unclaimed (-1) or impassable (-2) at this year
+          unassignedCities.push(city);
+          continue;
+        }
+      } else {
+        owner = city.kingdomId;
+      }
+      let list = citiesByCountry.get(owner);
+      if (!list) { list = []; citiesByCountry.set(owner, list); }
       list.push(city);
     }
-    for (const list of citiesByCountry.values()) {
+    // Sort: capital of the *current* owning country first, then alphabetical
+    for (const [countryIdx, list] of citiesByCountry.entries()) {
+      const capitalCell = countries[countryIdx]?.capitalCellIndex;
       list.sort((a, b) => {
-        if (a.isCapital !== b.isCapital) return a.isCapital ? -1 : 1;
+        const aIsCap = a.cellIndex === capitalCell;
+        const bIsCap = b.cellIndex === capitalCell;
+        if (aIsCap !== bIsCap) return aIsCap ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
     }
@@ -213,7 +233,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     stateless.sort((a, b) => a.country.name.localeCompare(b.country.name));
 
     return { empires, stateless, statelessCityCount, unassignedCities };
-  }, [historyData, snapshot, cities, selectedYear]);
+  }, [historyData, snapshot, cities, selectedYear, ownershipAtYear]);
 
   const totalLiveCountries = tree.empires.reduce((s, e) => s + e.countries.length, 0) + tree.stateless.length;
 
@@ -230,10 +250,10 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
     return INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
   }, [citySizesAtYear, cityIdxMap]);
 
-  const renderCity = (city: City, dead: boolean) => {
+  const renderCity = (city: City, dead: boolean, isCapitalHere: boolean) => {
     const isRuinNow = city.isRuin && city.ruinYear <= selectedYear;
     const sizeLabel = isRuinNow ? 'ruin' : SIZE_LABELS[resolveCitySize(city)];
-    const capitalMark = isRuinNow ? '\u2022 ' : city.isCapital ? '\u2605 ' : '\u2022 ';
+    const capitalMark = isRuinNow ? '\u2022 ' : isCapitalHere ? '\u2605 ' : '\u2022 ';
     return (
       <div
         key={city.cellIndex}
@@ -256,7 +276,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           <span style={styles.cityName}>{city.name}</span>
         )}
         <span style={styles.citySize}>
-          {!isRuinNow && city.isCapital ? 'capital, ' : ''}{sizeLabel}
+          {!isRuinNow && isCapitalHere ? 'capital, ' : ''}{sizeLabel}
         </span>
         {onNavigate && (
           <button
@@ -310,7 +330,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           <div style={styles.cityList}>
             {node.cities.length === 0
               ? <div style={styles.emptyNote}>no cities yet</div>
-              : node.cities.map(c => renderCity(c, dead))}
+              : node.cities.map(c => renderCity(c, dead, c.cellIndex === node.country.capitalCellIndex))}
           </div>
         )}
       </div>
@@ -421,7 +441,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
             </button>
             {unassignedOpen && (
               <div style={styles.cityList}>
-                {tree.unassignedCities.map(c => renderCity(c, false))}
+                {tree.unassignedCities.map(c => renderCity(c, false, false))}
               </div>
             )}
           </div>
