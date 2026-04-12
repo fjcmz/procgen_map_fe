@@ -3,6 +3,7 @@ import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntr
 import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
+import { getEmpiresAtYear } from '../../lib/history';
 import type { City } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
@@ -18,19 +19,7 @@ interface DetailsTabProps {
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
-/** Look up the empire snapshot at or before the given year. */
-function lookupEmpireSnapshot(
-  snapshots: Record<number, EmpireSnapshotEntry[]>,
-  numYears: number,
-  year: number,
-): EmpireSnapshotEntry[] {
-  if (year >= numYears && snapshots[numYears]) return snapshots[numYears];
-  const floored = Math.max(0, Math.floor(year / 20) * 20);
-  for (let y = floored; y >= 0; y -= 20) {
-    if (snapshots[y]) return snapshots[y];
-  }
-  return [];
-}
+// Empire membership is resolved by getEmpiresAtYear (replays events between snapshots).
 
 /** Look up the population snapshot at or before the given year. */
 function lookupPopulationSnapshot(
@@ -333,7 +322,7 @@ export function DetailsTab({
   const history = mapData.history!;
 
   const empireSnap = useMemo(
-    () => lookupEmpireSnapshot(history.empireSnapshots, history.numYears, selectedYear),
+    () => getEmpiresAtYear(history, selectedYear),
     [history, selectedYear],
   );
 

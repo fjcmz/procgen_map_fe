@@ -624,16 +624,22 @@ function computeOwnership(
     }
   }
 
-  // Now apply conquests in chronological order up to this year
-  // We need to scan all years' conquers
+  // Now apply conquests in chronological order up to this year.
+  // Transitive: when C conquers B (who had conquered A), all regions
+  // owned by B (including A's formerly-conquered region) transfer to C.
   const timeline = yearObj.timeline;
   for (const y of timeline.years) {
     if (y.year > yearObj.year) break;
     for (const conquer of y.conquers) {
       const conqueredCountry = world.mapCountries.get(conquer.conquered) as CountryEvent | undefined;
       if (!conqueredCountry) continue;
-      // Transfer the conquered country's region to the conqueror
-      regionOwner.set(conqueredCountry.governingRegion, conquer.conqueror);
+      // Transfer ALL regions currently owned by the conquered to the conqueror.
+      // This handles transitive chains (C beats B who beat A → C gets A's region).
+      for (const [regionId, ownerId] of regionOwner) {
+        if (ownerId === conquer.conquered) {
+          regionOwner.set(regionId, conquer.conqueror);
+        }
+      }
     }
   }
 
@@ -650,11 +656,16 @@ function computeOwnership(
     }
   }
 
-  // Overlay expansion territory: replay expansion events up to this year
+  // Overlay expansion territory: replay expansion events up to this year.
+  // Track current owner of each expansion event's cells so transitive
+  // conquests work: when C conquers B who inherited A's expansions, C
+  // inherits them too.
+  const expansionOwner = new Map<string, string>(); // exp.countryId → current owner
   for (const y of timeline.years) {
     if (y.year > yearObj.year) break;
     for (const exp of y.expansions) {
-      const numIdx = countryMap.idToIndex.get(exp.countryId);
+      const owner = expansionOwner.get(exp.countryId) ?? exp.countryId;
+      const numIdx = countryMap.idToIndex.get(owner);
       if (numIdx === undefined) continue;
       for (const ci of exp.cellIndices) {
         if (ownership[ci] !== -2) {
@@ -662,17 +673,26 @@ function computeOwnership(
         }
       }
     }
-    // Conquests transfer expansion regions: the conqueror inherits expansion cells
+    // Conquests transfer expansion ownership transitively
     for (const conquer of y.conquers) {
-      const conqueredCountry = world.mapCountries.get(conquer.conquered) as CountryEvent | undefined;
-      if (!conqueredCountry) continue;
+      // Transfer all expansion events currently owned by the conquered
+      for (const [origId, ownerId] of expansionOwner) {
+        if (ownerId === conquer.conquered) {
+          expansionOwner.set(origId, conquer.conqueror);
+        }
+      }
+      // Also transfer the conquered country's own (original) expansion events
+      if (!expansionOwner.has(conquer.conquered)) {
+        expansionOwner.set(conquer.conquered, conquer.conqueror);
+      }
+      // Re-apply all expansion cells up to this year with updated ownership
       const conquerorIdx = countryMap.idToIndex.get(conquer.conqueror);
       if (conquerorIdx === undefined) continue;
-      // Find expansion regions that belonged to conquered and reassign
       for (const prevY of timeline.years) {
         if (prevY.year > y.year) break;
         for (const prevExp of prevY.expansions) {
-          if (prevExp.countryId === conquer.conquered) {
+          const currentOwner = expansionOwner.get(prevExp.countryId);
+          if (currentOwner === conquer.conqueror) {
             for (const ci of prevExp.cellIndices) {
               if (ownership[ci] !== -2) {
                 ownership[ci] = conquerorIdx;

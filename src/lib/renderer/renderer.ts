@@ -1,7 +1,7 @@
-import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, Road, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, EmpireSnapshotEntry, Season } from '../types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, Road, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, Season } from '../types';
 import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
-import { getOwnershipAtYear, getTradesAtYear, getRoadsAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
+import { getOwnershipAtYear, getEmpiresAtYear, getTradesAtYear, getRoadsAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
 import { getLegacyCategory } from '../history/physical/ResourceCatalog';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
@@ -314,23 +314,7 @@ function drawKingdomBorders(
   ctx.setLineDash([]);
 }
 
-// ── Empire snapshot lookup (mirrors HierarchyTab.lookupEmpireSnapshot) ──
-
-function lookupEmpireSnapshot(
-  historyData: HistoryData,
-  selectedYear: number,
-): EmpireSnapshotEntry[] {
-  const finalKey = historyData.numYears;
-  if (selectedYear >= finalKey && historyData.empireSnapshots[finalKey]) {
-    return historyData.empireSnapshots[finalKey];
-  }
-  const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
-  for (let y = floored; y >= 0; y -= 20) {
-    const snap = historyData.empireSnapshots[y];
-    if (snap) return snap;
-  }
-  return [];
-}
+// Empire membership is resolved by getEmpiresAtYear (replays events between snapshots).
 
 // ── Patterned borders (countries = stripes, empires = plaid) ────────
 
@@ -358,7 +342,7 @@ function drawPatternedBorders(
   // Build country→empire map for empire mode
   let countryToEmpireIdx: Map<number, number> | undefined;
   if (politicalMode === 'empires' && historyData && selectedYear !== undefined) {
-    const snapshot = lookupEmpireSnapshot(historyData, selectedYear);
+    const snapshot = getEmpiresAtYear(historyData, selectedYear);
     countryToEmpireIdx = new Map();
     // Sort by empireId for deterministic index assignment
     const sorted = [...snapshot].sort((a, b) => a.empireId.localeCompare(b.empireId));
