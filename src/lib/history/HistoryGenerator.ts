@@ -5,7 +5,7 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
@@ -235,12 +235,20 @@ function serializeYearEvents(
   // Illustrates
   for (const ill of year.illustrates) {
     const city = world.mapCities.get(ill.city);
+    const region = city ? world.mapRegions.get(city.regionId) : undefined;
+    const illCountryName = region?.countryId
+      ? resolveCountryName(countryMap, region.countryId)
+      : null;
     events.push({
       type: 'ILLUSTRATE',
       year: absYear,
       initiatorId: -1,
-      description: `A great ${ill.type} figure is born in ${city?.name ?? '?'}.`,
+      description: illCountryName
+        ? `A great ${ill.type} figure is born in ${city?.name ?? '?'} (${illCountryName}).`
+        : `A great ${ill.type} figure is born in ${city?.name ?? '?'}.`,
       locationCellIndex: city?.cellIndex,
+      discovererType: ill.type,
+      countryName: illCountryName ?? undefined,
     });
   }
 
@@ -822,6 +830,32 @@ function computeWonderSnapshots(world: World, absYear: number): WonderSnapshotEn
     }
   }
   return result;
+}
+
+/**
+ * Build the full illustrateDetails array — ALL illustrates ever born (including dead).
+ * Used by the IllustratesTab to render the illustrate list.
+ */
+function buildIllustrateDetails(world: World, countryMap: CountryIndexMap): IllustrateDetail[] {
+  const details: IllustrateDetail[] = [];
+  for (const ill of world.mapIllustrates.values()) {
+    const city = world.mapCities.get(ill.city);
+    const region = city ? world.mapRegions.get(city.regionId) : undefined;
+    const countryName = region?.countryId
+      ? resolveCountryName(countryMap, region.countryId)
+      : null;
+    details.push({
+      type: ill.type,
+      cityName: city?.name ?? '?',
+      cityCellIndex: city?.cellIndex ?? -1,
+      countryName,
+      birthYear: ill.birthYear,
+      deathYear: ill.diedOn,
+      deathCause: ill.deathCause,
+    });
+  }
+  details.sort((a, b) => a.birthYear - b.birthYear);
+  return details;
 }
 
 /**
@@ -1442,6 +1476,7 @@ export class HistoryGenerator {
       roadSnapshots,
       wonderSnapshots,
       wonderDetails: buildWonderDetails(world),
+      illustrateDetails: buildIllustrateDetails(world, countryMap),
       religionSnapshots,
       empireSnapshots,
       populationSnapshots,

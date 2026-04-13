@@ -269,6 +269,17 @@ export interface WonderDetail {
   destroyedOn: number | null;
 }
 
+/** Full illustrate detail for the IllustratesTab list — includes dead illustrates. */
+export interface IllustrateDetail {
+  type: 'religion' | 'science' | 'philosophy' | 'industry' | 'military' | 'art';
+  cityName: string;
+  cityCellIndex: number;
+  countryName: string | null;
+  birthYear: number;        // absolute year
+  deathYear: number | null;  // absolute year, null if still alive at end of sim
+  deathCause: string;        // 'natural', 'war', cataclysm description, or ''
+}
+
 export interface HistoryData {
   countries: Country[];
   years: HistoryYear[];
@@ -284,6 +295,8 @@ export interface HistoryData {
   wonderSnapshots: Record<number, WonderSnapshotEntry[]>;
   /** All wonders ever built (including destroyed), for the DetailsTab tree. */
   wonderDetails?: WonderDetail[];
+  /** All illustrates ever born (including dead), for the IllustratesTab list. */
+  illustrateDetails?: IllustrateDetail[];
   /** Cell indices of cities with active religions, snapshotted every 20 years. */
   religionSnapshots: Record<number, number[]>;
   /** Phase 4: empire membership at every 20th year, aligned with `snapshots`. */
