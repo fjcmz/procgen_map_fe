@@ -39,6 +39,8 @@ export class World {
   mapDeadCountries: Map<string, CountryEvent> = new Map();
   /** Global dedup set for wonder names — prevents duplicate names within a generation. */
   usedWonderNames: Set<string> = new Set();
+  /** Global dedup set for illustrate names — prevents duplicate names within a generation. */
+  usedIllustrateNames: Set<string> = new Set();
 
   constructor(rng: () => number) {
     this.id = IdUtil.id('world', rngHex(rng)) ?? 'world_unknown';

@@ -279,7 +279,10 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
                         <div style={styles.discovererRow}>
                           <span style={styles.discovererIcon}>{discovererIcon}</span>
                           <span style={styles.discovererDetail}>
-                            {ev.discovererType} figure
+                            {ev.discovererName && ev.discovererName !== 'unknown'
+                              ? <><strong>{ev.discovererName}</strong> ({ev.discovererType})</>
+                              : <>{ev.discovererType} figure</>
+                            }
                             {ev.discovererCityName && <> from <strong>{ev.discovererCityName}</strong></>}
                             {ev.discovererBirthYear != null && (
                               <>, born {ev.discovererBirthYear < 0 ? `${-ev.discovererBirthYear} BC` : `${ev.discovererBirthYear} AD`}</>

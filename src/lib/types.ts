@@ -275,6 +275,7 @@ export interface WonderDetail {
 
 /** Full illustrate detail for the IllustratesTab list — includes dead illustrates. */
 export interface IllustrateDetail {
+  name: string;              // procedurally generated human-readable name
   type: 'religion' | 'science' | 'philosophy' | 'industry' | 'military' | 'art';
   cityName: string;
   cityCellIndex: number;
