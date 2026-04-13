@@ -181,6 +181,10 @@ export interface HistoryEvent {
   discovererName?: string;
   /** TECH-only (Phase 3): illustrate type — 'science' | 'military' | 'philosophy' | 'industry' | 'religion' | 'art'. */
   discovererType?: string;
+  /** TECH-only: birth year (absolute) of the illustrate that made the discovery. */
+  discovererBirthYear?: number;
+  /** TECH-only: name of the city where the discovering illustrate was born. */
+  discovererCityName?: string;
   /** TECH/CONQUEST (Phase 3): resolved country display name at the time of the event. */
   countryName?: string;
   /** CONQUEST-only (Phase 3): tech delta acquired by the conqueror, when non-empty. Spec stretch §3: each entry may carry an optional `displayName` flavor string. */

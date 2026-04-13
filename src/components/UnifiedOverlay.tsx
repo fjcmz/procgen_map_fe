@@ -277,6 +277,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               <TechTab
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
+                onNavigate={props.onEntityNavigate}
               />
             )}
           </div>

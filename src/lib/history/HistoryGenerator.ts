@@ -463,6 +463,8 @@ function serializeYearEvents(
       displayName,
       discovererName: illustrate?.id ?? 'unknown',
       discovererType: illustrate?.type,
+      discovererBirthYear: illustrate?.birthYear,
+      discovererCityName: city?.name,
       countryName,
     });
   }
