@@ -65,6 +65,8 @@ export class ReligionGenerator {
 
       // Consume illustrate
       eligibleFounder.greatDeed = `Founded religion ${religion.id}`;
+      eligibleFounder.diedOn = absYear;
+      eligibleFounder.deathCause = 'retired';
       world.mapUsableIllustrates.delete(eligibleFounder.id);
 
       // Initialize founding city's adherence with random [0.10, 0.49]

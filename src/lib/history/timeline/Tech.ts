@@ -438,6 +438,8 @@ export class TechGenerator {
 
     // Consume illustrate
     illustrate.greatDeed = `Discovered ${field} level ${level}`;
+    illustrate.diedOn = absYear;
+    illustrate.deathCause = 'retired';
     world.mapUsableIllustrates.delete(illustrate.id);
 
     return tech;

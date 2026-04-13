@@ -190,7 +190,9 @@ export class YearGenerator {
     // Step 5: Kill/retire illustrates
     // Natural death: birthYear + yearsActive <= currentYear
     // War-related death: 15% chance if active war affects origin country
-    for (const [id, illustrate] of world.mapUsableIllustrates) {
+    // Snapshot the entries to avoid mutating the Map during iteration.
+    const usableIllustrates = Array.from(world.mapUsableIllustrates.entries());
+    for (const [id, illustrate] of usableIllustrates) {
       const ill = illustrate as Illustrate;
       // Natural death
       if (ill.birthYear + ill.yearsActive <= absYear) {
