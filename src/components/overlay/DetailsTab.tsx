@@ -532,7 +532,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
         <div style={styles.infoGrid}>
           {city && <InfoRow label="Size" value={resolveCitySize(city, mapData, citySizesAtYear)} />}
-          {city && <InfoRow label="Founded" value={`Year ${city.foundedYear}`} />}
+          {city && <InfoRow label="Founded" value={formatYear(history.startOfTime, city.foundedYear, convertYears)} />}
           {popSnap[cellIndex] != null && <InfoRow label="Population" value={formatPopulation(popSnap[cellIndex])} />}
           {country && (
             <InfoRow label="Country">
