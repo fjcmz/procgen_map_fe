@@ -37,7 +37,8 @@ export interface Wonder {
 
 /**
  * Sum of tiers of all standing (not destroyed) wonders belonging to a city.
- * Used by YearGenerator step 4 for growth-rate and carrying-capacity bonuses.
+ * Used by YearGenerator step 4 (growth-rate and carrying-capacity bonuses)
+ * and step 6 (religion adherence drift bonus).
  */
 export function getStandingWonderTierSum(world: World, city: CityEntity): number {
   let sum = 0;
