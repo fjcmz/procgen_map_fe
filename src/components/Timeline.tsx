@@ -7,9 +7,18 @@ interface TimelineProps {
   historyData: HistoryData;
   selectedYear: number;
   onYearChange: (year: number) => void;
+  convertYears: boolean;
 }
 
 const PLAY_INTERVAL_MS = 200;
+
+export function formatYear(startYear: number, year: number, conversion: boolean): string {
+  if (!conversion) return String(year);
+  const abs = startYear + year;
+  if (abs < 0) return `${-abs} BC`;
+  if (abs === 0) return '1 AD';
+  return `${abs} AD`;
+}
 
 export function formatPopulation(pop: number): string {
   if (pop >= 1_000_000_000) return `${(pop / 1_000_000_000).toFixed(1)}B`;
@@ -18,7 +27,7 @@ export function formatPopulation(pop: number): string {
   return String(pop);
 }
 
-export function Timeline({ historyData, selectedYear, onYearChange }: TimelineProps) {
+export function Timeline({ historyData, selectedYear, onYearChange, convertYears }: TimelineProps) {
   const [playing, setPlaying] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -78,12 +87,12 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
         <div style={styles.header} data-drag-handle>
           <span style={styles.title}>History</span>
           <span style={styles.info}>
-            Year {selectedYear} / {maxYear} &middot; Pop: {formatPopulation(worldPopulation)} &middot; {livingCount}/{totalCount} nations
+            {formatYear(historyData.startOfTime, selectedYear, convertYears)} / {formatYear(historyData.startOfTime, maxYear, convertYears)} &middot; Pop: {formatPopulation(worldPopulation)} &middot; {livingCount}/{totalCount} nations
           </span>
         </div>
 
         <div style={styles.sliderRow}>
-          <span style={styles.yearLabel}>0</span>
+          <span style={styles.yearLabel}>{formatYear(historyData.startOfTime, 0, convertYears)}</span>
           <input
             type="range"
             min={0}
@@ -95,7 +104,7 @@ export function Timeline({ historyData, selectedYear, onYearChange }: TimelinePr
             }}
             style={styles.slider}
           />
-          <span style={styles.yearLabel}>{maxYear}</span>
+          <span style={styles.yearLabel}>{formatYear(historyData.startOfTime, maxYear, convertYears)}</span>
         </div>
 
         <div style={styles.controls}>

@@ -44,6 +44,7 @@ export default function App() {
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [generateHistory, setGenerateHistory] = useState(true);
+  const [convertYears, setConvertYears] = useState(true);
   const [numSimYears, setNumSimYears] = useState(5000);
   const [resourceRarityMode, setResourceRarityMode] = useState<ResourceRarityMode>('natural');
   const [selectedYear, setSelectedYear] = useState(0);
@@ -368,6 +369,8 @@ export default function App() {
         onLayerToggle={handleLayerToggle}
         generateHistory={generateHistory}
         onGenerateHistoryToggle={() => setGenerateHistory(v => !v)}
+        convertYears={convertYears}
+        onConvertYearsToggle={() => setConvertYears(v => !v)}
         numSimYears={numSimYears}
         onNumSimYearsChange={setNumSimYears}
         resourceRarityMode={resourceRarityMode}
@@ -405,6 +408,7 @@ export default function App() {
           historyData={mapData.history}
           selectedYear={selectedYear}
           onYearChange={setSelectedYear}
+          convertYears={convertYears}
         />
       )}
     </>

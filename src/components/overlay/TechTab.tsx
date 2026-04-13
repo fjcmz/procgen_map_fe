@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryData, HistoryEvent, TechField } from '../../lib/types';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS } from './eventStyles';
+import { formatYear } from '../Timeline';
 
 interface TechTabProps {
   historyData: HistoryData;
   selectedYear: number;
+  convertYears: boolean;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
@@ -29,13 +31,7 @@ const DISCOVERER_ICONS: Record<string, string> = {
   art: '\uD83C\uDFA8',          // palette
 };
 
-function formatAbsYear(relYear: number, startOfTime: number): string {
-  const abs = startOfTime + relYear;
-  if (abs < 0) return `${-abs} BC`;
-  return `${abs} AD`;
-}
-
-export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps) {
+export function TechTab({ historyData, selectedYear, convertYears, onNavigate }: TechTabProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -141,9 +137,9 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
     // X-axis: "Y0" at left, "Y{max}" at right.
     ctx.textBaseline = 'top';
     ctx.textAlign = 'left';
-    ctx.fillText('Y0', PAD_L, PAD_T + plotH + 3);
+    ctx.fillText(formatYear(historyData.startOfTime, 0, convertYears), PAD_L, PAD_T + plotH + 3);
     ctx.textAlign = 'right';
-    ctx.fillText(`Y${numYears - 1}`, PAD_L + plotW, PAD_T + plotH + 3);
+    ctx.fillText(formatYear(historyData.startOfTime, numYears - 1, convertYears), PAD_L + plotW, PAD_T + plotH + 3);
 
     // Year cursor — vertical line at selectedYear, drawn last so it stays
     // on top of the polylines and axis labels.
@@ -154,7 +150,7 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
     ctx.moveTo(cursorX + 0.5, PAD_T);
     ctx.lineTo(cursorX + 0.5, PAD_T + plotH);
     ctx.stroke();
-  }, [historyData.techTimeline, historyData.numYears, selectedYear, chartWidth]);
+  }, [historyData.techTimeline, historyData.numYears, historyData.startOfTime, selectedYear, chartWidth, convertYears]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -198,7 +194,7 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
       <div style={styles.miniHeader}>
         <span style={styles.miniTitle}>Tech</span>
         <span style={styles.miniCount}>
-          Peak Lvl {peakLevel} &middot; {techEvents.length} discoveries &middot; Year {selectedYear}
+          Peak Lvl {peakLevel} &middot; {techEvents.length} discoveries &middot; {formatYear(historyData.startOfTime, selectedYear, convertYears)}
         </span>
       </div>
 
@@ -254,7 +250,7 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
                 onClick={locatable ? () => onNavigate([ev.locationCellIndex!], ev.locationCellIndex!) : undefined}
               >
                 <span style={styles.eventYear}>
-                  {formatAbsYear(item.year, historyData.startOfTime)}
+                  {formatYear(historyData.startOfTime, item.year, convertYears)}
                 </span>
                 <span style={{ ...styles.eventField, color: fieldColor }}>
                   {isTechLoss ? '\uD83D\uDCDA' : '\uD83D\uDD2C'}
@@ -285,7 +281,7 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
                             }
                             {ev.discovererCityName && <> from <strong>{ev.discovererCityName}</strong></>}
                             {ev.discovererBirthYear != null && (
-                              <>, born {ev.discovererBirthYear < 0 ? `${-ev.discovererBirthYear} BC` : `${ev.discovererBirthYear} AD`}</>
+                              <>, born {formatYear(0, ev.discovererBirthYear, convertYears)}</>
                             )}
                           </span>
                         </div>

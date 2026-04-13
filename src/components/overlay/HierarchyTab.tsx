@@ -2,11 +2,13 @@ import { useCallback, useMemo, useState } from 'react';
 import type { City, Country, EmpireSnapshotEntry, HistoryData, SelectedEntity } from '../../lib/types';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import { getEmpiresAtYear } from '../../lib/history';
+import { formatYear } from '../Timeline';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
   cities: City[];
   selectedYear: number;
+  convertYears: boolean;
   ownershipAtYear?: Int16Array;
   citySizesAtYear?: Uint8Array;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
@@ -40,7 +42,7 @@ interface Tree {
   unassignedCities: City[];
 }
 
-export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
+export function HierarchyTab({ historyData, cities, selectedYear, convertYears, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
   // All top-level nodes (empires, stateless, free cities) default to collapsed.
   // Countries also default to collapsed.
   // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless' | 'unassigned'.
@@ -431,7 +433,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, ownershipAtYea
           {tree.empires.length} {tree.empires.length === 1 ? 'empire' : 'empires'}
           {' · '}
           {totalLiveCountries} {totalLiveCountries === 1 ? 'country' : 'countries'}
-          {' · Y'}{selectedYear}
+          {' · '}{formatYear(historyData.startOfTime, selectedYear, convertYears)}
         </span>
       </div>
 

@@ -1,10 +1,12 @@
 import { useMemo, useRef, useEffect, useState } from 'react';
 import type { HistoryData, IllustrateDetail } from '../../lib/types';
 import { EVENT_ICONS } from './eventStyles';
+import { formatYear } from '../Timeline';
 
 interface IllustratesTabProps {
   historyData: HistoryData;
   selectedYear: number;
+  convertYears: boolean;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
@@ -26,15 +28,9 @@ const TYPE_ICONS: Record<IllustrateDetail['type'], string> = {
   art: '\uD83C\uDFA8',
 };
 
-function formatAbsYear(absYear: number): string {
-  if (absYear < 0) return `${-absYear} BC`;
-  if (absYear === 0) return '1 AD';
-  return `${absYear} AD`;
-}
-
 type FilterType = 'all' | IllustrateDetail['type'];
 
-export function IllustratesTab({ historyData, selectedYear, onNavigate }: IllustratesTabProps) {
+export function IllustratesTab({ historyData, selectedYear, convertYears, onNavigate }: IllustratesTabProps) {
   const [filter, setFilter] = useState<FilterType>('all');
   const [showDead, setShowDead] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
@@ -145,9 +141,9 @@ export function IllustratesTab({ historyData, selectedYear, onNavigate }: Illust
                   {ill.countryName ? ` (${ill.countryName})` : ''}
                 </span>
                 <span style={styles.detailYears}>
-                  {formatAbsYear(ill.birthYear)}
+                  {formatYear(0, ill.birthYear, convertYears)}
                   {isDead && ill.deathYear != null
-                    ? ` \u2013 ${formatAbsYear(ill.deathYear)}`
+                    ? ` \u2013 ${formatYear(0, ill.deathYear, convertYears)}`
                     : ' \u2013 alive'}
                 </span>
                 {isDead && ill.deathCause && (

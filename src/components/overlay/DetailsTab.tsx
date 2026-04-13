@@ -5,7 +5,7 @@ import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from 
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import { getEmpiresAtYear } from '../../lib/history';
 import type { City } from '../../lib/types';
-import { formatPopulation } from '../Timeline';
+import { formatPopulation, formatYear } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
@@ -14,6 +14,7 @@ interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
   mapData: MapData;
   selectedYear: number;
+  convertYears: boolean;
   ownershipAtYear?: Int16Array;
   citySizesAtYear?: Uint8Array;
   onSelectEntity: (entity: SelectedEntity | null) => void;
@@ -315,6 +316,7 @@ export function DetailsTab({
   selectedEntity,
   mapData,
   selectedYear,
+  convertYears,
   ownershipAtYear,
   citySizesAtYear,
   onSelectEntity,
@@ -362,6 +364,7 @@ export function DetailsTab({
         mapData={mapData}
         history={history}
         selectedYear={selectedYear}
+        convertYears={convertYears}
         empireSnap={empireSnap}
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
@@ -380,6 +383,7 @@ export function DetailsTab({
         mapData={mapData}
         history={history}
         selectedYear={selectedYear}
+        convertYears={convertYears}
         empireSnap={empireSnap}
         snapKey={snapKey}
         ownershipAtYear={ownershipAtYear}
@@ -398,6 +402,7 @@ export function DetailsTab({
       mapData={mapData}
       history={history}
       selectedYear={selectedYear}
+      convertYears={convertYears}
       empireSnap={empireSnap}
       snapKey={snapKey}
       ownershipAtYear={ownershipAtYear}
@@ -422,6 +427,7 @@ interface SubProps {
   mapData: MapData;
   history: NonNullable<MapData['history']>;
   selectedYear: number;
+  convertYears: boolean;
   empireSnap: EmpireSnapshotEntry[];
   snapKey: number;
   citySizesAtYear?: Uint8Array;
@@ -432,7 +438,7 @@ interface SubProps {
 }
 
 // ── City Details ──
-function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { cellIndex: number }) {
+function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { cellIndex: number }) {
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
@@ -590,7 +596,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
             <div style={styles.sectionLabel}>Recent Events ({events.length} total)</div>
             <div style={styles.eventList}>
               {recentEvents.map((ev, i) => (
-                <EventRow key={i} event={ev} startOfTime={history.startOfTime} />
+                <EventRow key={i} event={ev} startOfTime={history.startOfTime} convertYears={convertYears} />
               ))}
             </div>
           </>
@@ -601,7 +607,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
 }
 
 // ── Country Details ──
-function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { countryIndex: number }) {
+function CountryDetails({ countryIndex, mapData, history, selectedYear, convertYears, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { countryIndex: number }) {
   const country = history.countries[countryIndex];
   const empire = findEmpireForCountry(empireSnap, countryIndex);
 
@@ -828,7 +834,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
             <div style={styles.sectionLabel}>Recent Events ({events.length} total)</div>
             <div style={styles.eventList}>
               {recentEvents.map((ev, i) => (
-                <EventRow key={i} event={ev} startOfTime={history.startOfTime} />
+                <EventRow key={i} event={ev} startOfTime={history.startOfTime} convertYears={convertYears} />
               ))}
             </div>
           </>
@@ -1072,18 +1078,12 @@ function InfoRow({ label, value, children }: { label: string; value?: string; ch
   );
 }
 
-function formatAbsYear(relYear: number, startOfTime: number): string {
-  const abs = startOfTime + relYear;
-  if (abs < 0) return `${-abs} BC`;
-  return `${abs} AD`;
-}
-
-function EventRow({ event, startOfTime }: { event: HistoryEvent; startOfTime: number }) {
+function EventRow({ event, startOfTime, convertYears }: { event: HistoryEvent; startOfTime: number; convertYears: boolean }) {
   const color = EVENT_COLORS[event.type] ?? '#888';
   const icon = EVENT_ICONS[event.type] ?? '\u2022';
   return (
     <div style={{ ...styles.eventRow, borderLeft: `3px solid ${color}` }}>
-      <span style={styles.eventYear}>{formatAbsYear(event.year, startOfTime)}</span>
+      <span style={styles.eventYear}>{formatYear(startOfTime, event.year, convertYears)}</span>
       <span style={styles.eventIcon}>{icon}</span>
       <span style={styles.eventDesc}>{event.description}</span>
     </div>
