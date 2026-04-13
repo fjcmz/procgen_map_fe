@@ -39,6 +39,18 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
   // so the canvas doesn't flash empty before the ResizeObserver fires.
   const [chartWidth, setChartWidth] = useState<number>(() => 240);
 
+  // Which tech fields are hidden (toggled off) in the legend. Empty = all visible.
+  const [hiddenFields, setHiddenFields] = useState<Set<TechField>>(new Set());
+
+  const toggleField = (field: TechField) => {
+    setHiddenFields(prev => {
+      const next = new Set(prev);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return next;
+    });
+  };
+
   // Observe the container and push the inner width into state. The effect
   // runs once on mount (stable dependency list); cleanup disconnects.
   useEffect(() => {
@@ -90,6 +102,7 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
     // to avoid divide-by-zero on empty histories.
     let yMax = 1;
     for (const field of Object.keys(timeline.byField) as TechField[]) {
+      if (hiddenFields.has(field)) continue;
       const arr = timeline.byField[field];
       const peak = arr.length > 0 ? arr[arr.length - 1] : 0;
       if (peak > yMax) yMax = peak;
@@ -112,6 +125,7 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
     ctx.lineWidth = 1.25;
     ctx.lineJoin = 'round';
     for (const field of Object.keys(TECH_FIELD_COLORS) as TechField[]) {
+      if (hiddenFields.has(field)) continue;
       const arr = timeline.byField[field];
       if (!arr || arr.length === 0) continue;
       ctx.strokeStyle = TECH_FIELD_COLORS[field];
@@ -150,7 +164,7 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
     ctx.moveTo(cursorX + 0.5, PAD_T);
     ctx.lineTo(cursorX + 0.5, PAD_T + plotH);
     ctx.stroke();
-  }, [historyData.techTimeline, historyData.numYears, historyData.startOfTime, selectedYear, chartWidth, convertYears]);
+  }, [historyData.techTimeline, historyData.numYears, historyData.startOfTime, selectedYear, chartWidth, convertYears, hiddenFields]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -163,6 +177,7 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
     let peak = 0;
     const idx = Math.min(selectedYear, historyData.numYears - 1);
     for (const field of Object.keys(timeline.byField) as TechField[]) {
+      if (hiddenFields.has(field)) continue;
       const arr = timeline.byField[field];
       const val = idx >= 0 && idx < arr.length ? arr[idx] : 0;
       if (val > peak) peak = val;
@@ -177,12 +192,13 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
       if (yearData.year > selectedYear) break;
       for (const ev of yearData.events) {
         if (ev.type === 'TECH' || ev.type === 'TECH_LOSS') {
+          if (ev.field && hiddenFields.has(ev.field as TechField)) continue;
           result.push({ year: yearData.year, event: ev });
         }
       }
     }
     return result;
-  }, [historyData.years, selectedYear]);
+  }, [historyData.years, selectedYear, hiddenFields]);
 
   // Auto-scroll event list to bottom on year change.
   useEffect(() => {
@@ -199,17 +215,33 @@ export function TechTab({ historyData, selectedYear, convertYears, onNavigate }:
       </div>
 
       <div style={styles.legend}>
-        {(Object.keys(TECH_FIELD_COLORS) as TechField[]).map(field => (
-          <span key={field} style={styles.legendItem}>
+        {(Object.keys(TECH_FIELD_COLORS) as TechField[]).map(field => {
+          const isHidden = hiddenFields.has(field);
+          return (
             <span
+              key={field}
               style={{
-                ...styles.swatch,
-                background: TECH_FIELD_COLORS[field],
+                ...styles.legendItem,
+                cursor: 'pointer',
+                opacity: isHidden ? 0.35 : 1,
+                textDecoration: isHidden ? 'line-through' : 'none',
+                userSelect: 'none',
               }}
-            />
-            {TECH_FIELD_LABELS[field]}
-          </span>
-        ))}
+              onClick={() => toggleField(field)}
+              title={`${isHidden ? 'Show' : 'Hide'} ${TECH_FIELD_LABELS[field]}`}
+            >
+              <span
+                style={{
+                  ...styles.swatch,
+                  background: isHidden
+                    ? 'rgba(128,128,128,0.3)'
+                    : TECH_FIELD_COLORS[field],
+                }}
+              />
+              {TECH_FIELD_LABELS[field]}
+            </span>
+          );
+        })}
       </div>
 
       <canvas
