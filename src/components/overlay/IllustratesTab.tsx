@@ -120,6 +120,7 @@ export function IllustratesTab({ historyData, selectedYear, onNavigate }: Illust
                 <span style={styles.typeIcon} title={ill.type}>
                   {TYPE_ICONS[ill.type]}
                 </span>
+                <span style={styles.illustrateName}>{ill.name}</span>
                 <span style={{ ...styles.typeBadge, background: color }}>
                   {ill.type}
                 </span>
@@ -237,6 +238,11 @@ const styles: Record<string, React.CSSProperties> = {
   typeIcon: {
     fontSize: 13,
     lineHeight: 1,
+  },
+  illustrateName: {
+    fontWeight: 'bold',
+    color: '#2a1a00',
+    fontSize: 11,
   },
   typeBadge: {
     color: '#fff',

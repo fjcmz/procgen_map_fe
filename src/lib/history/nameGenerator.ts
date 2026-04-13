@@ -189,3 +189,84 @@ export function generateEmpireName(rng: () => number, founderCountryName: string
   const template = EMPIRE_TEMPLATES[Math.floor(rng() * EMPIRE_TEMPLATES.length)];
   return template.replace('{name}', founderCountryName);
 }
+
+// ── Illustrate Name Generator ───────────────────────────────────────────────
+
+/** ~80 given names drawn from diverse cultural inspirations. */
+const GIVEN_NAMES = [
+  // Classical / Mediterranean
+  'Theron', 'Calla', 'Lysander', 'Myrene', 'Cassius', 'Selene', 'Otho', 'Dion',
+  'Cyrene', 'Arista', 'Kyros', 'Elara', 'Solon', 'Maia', 'Hector', 'Damia',
+  // Northern / Germanic / Celtic
+  'Sigrid', 'Bjorn', 'Astrid', 'Eirik', 'Torven', 'Freya', 'Ingrid', 'Aldric',
+  'Seren', 'Thorne', 'Kael', 'Briga', 'Dagmar', 'Leif', 'Brynna', 'Halvard',
+  // East Asian-inspired
+  'Yuki', 'Ming', 'Sora', 'Kenji', 'Lien', 'Haruki', 'Mei', 'Sakura',
+  'Jin', 'Hana', 'Aya', 'Zhen', 'Kaito', 'Aoi', 'Yun', 'Ren',
+  // Arabic / Semitic-inspired
+  'Zahir', 'Amira', 'Rashid', 'Nadia', 'Farid', 'Samira', 'Khalil', 'Layla',
+  'Idris', 'Zara', 'Hakim', 'Tariq', 'Safiya', 'Soraya', 'Naim', 'Jalila',
+  // South Asian / Oceanic
+  'Arun', 'Priya', 'Koa', 'Moana', 'Tala', 'Mira', 'Vela', 'Kai',
+  'Dara', 'Hira', 'Isra', 'Noor', 'Orla', 'Uma', 'Rua', 'Ilan',
+];
+
+/** ~60 fantasy-flavored surnames. */
+const ILLUSTRATE_SURNAMES = [
+  'Ashworth', 'Brindle', 'Corven', 'Duskhollow', 'Embervale', 'Fernwick',
+  'Greymoor', 'Halloran', 'Ironmark', 'Jadewind', 'Kestren', 'Lyndmere',
+  'Morvayne', 'Nighthollow', 'Oakenshield', 'Pyreforge', 'Quillhaven', 'Ravenholm',
+  'Stonewall', 'Thornvale', 'Undermere', 'Vailcroft', 'Windhaven', 'Yarrow',
+  'Ashford', 'Blackthorn', 'Coldmire', 'Dawnridge', 'Everstone', 'Frostburn',
+  'Goldweald', 'Heathbrook', 'Ivywood', 'Jasperfield', 'Keelbrook', 'Larkspur',
+  'Moonvane', 'Nethercross', 'Oldengrave', 'Penmark', 'Queensridge', 'Rosethane',
+  'Silverglen', 'Tidewick', 'Umberfall', 'Vanmere', 'Whiteholm', 'Xenarth',
+  'Ashenmoor', 'Brightwater', 'Copperleaf', 'Deepforge', 'Elmcrest', 'Firestone',
+  'Greenvale', 'Havenmoor', 'Ironwood', 'Kingsvale', 'Lakemere', 'Mosswick',
+];
+
+/** ~40 epithet/title strings used ~30% of the time instead of a surname. */
+const ILLUSTRATE_EPITHETS = [
+  'the Wise', 'the Bold', 'the Illumined', 'the Wanderer', 'the Just',
+  'the Keen', 'the Resolute', 'the Silent', 'the Radiant', 'the Unbroken',
+  'the Swift', 'the Learned', 'the Vigilant', 'the Serene', 'the Ardent',
+  'the Dreamer', 'the Valiant', 'the Eternal', 'the Temperate', 'the Fierce',
+  'Fireheart', 'Stormborn', 'Dawnbringer', 'Nightwalker', 'Starweaver',
+  'Ironhand', 'Sunkeeper', 'Frostmind', 'Goldentongue', 'Shadowmend',
+  'Brightforge', 'Stonecaller', 'Windshaper', 'Deepseeker', 'Flamescribe',
+  'Earthsinger', 'Skywarden', 'Tidecaller', 'Ashborne', 'Thornwright',
+];
+
+function generateRawIllustrateName(rng: () => number): string {
+  const given = GIVEN_NAMES[Math.floor(rng() * GIVEN_NAMES.length)];
+  // 30% epithet, 70% surname
+  const useEpithet = rng() < 0.3;
+  if (useEpithet) {
+    const epithet = ILLUSTRATE_EPITHETS[Math.floor(rng() * ILLUSTRATE_EPITHETS.length)];
+    return `${given} ${epithet}`;
+  }
+  const surname = ILLUSTRATE_SURNAMES[Math.floor(rng() * ILLUSTRATE_SURNAMES.length)];
+  return `${given} ${surname}`;
+}
+
+/**
+ * Generate a unique illustrate name using given name + surname/epithet.
+ * Checks against `usedNames` set and retries up to 50 times.
+ * Falls back to a numeric suffix if all retries fail.
+ * ~80 given × (60 surnames + 40 epithets) = 8,000 possible combinations.
+ */
+export function generateIllustrateName(rng: () => number, usedNames: Set<string>): string {
+  let name = generateRawIllustrateName(rng);
+  let attempts = 0;
+  while (usedNames.has(name) && attempts < 50) {
+    name = generateRawIllustrateName(rng);
+    attempts++;
+  }
+  if (usedNames.has(name)) {
+    let suffix = 2;
+    while (usedNames.has(`${name} ${suffix}`)) suffix++;
+    name = `${name} ${suffix}`;
+  }
+  usedNames.add(name);
+  return name;
+}

@@ -3,6 +3,7 @@ import type { World } from '../physical/World';
 import type { Year } from './Year';
 import { cityVisitor } from '../physical/CityVisitor';
 import type { CityEntity } from '../physical/CityEntity';
+import { generateIllustrateName } from '../nameGenerator';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -43,6 +44,7 @@ function pickIllustrateType(rng: () => number): IllustrateType {
 
 export interface Illustrate {
   readonly id: string;
+  readonly name: string;
   readonly type: IllustrateType;
   readonly city: string; // origin city ID
   yearsActive: number;
@@ -65,12 +67,14 @@ export class IllustrateGenerator {
     if (!city) return null;
 
     const type = pickIllustrateType(rng);
+    const name = generateIllustrateName(rng, world.usedIllustrateNames);
     const [n, sides] = ILLUSTRATE_ACTIVE_ROLLS[type];
     const yearsActive = roll(rng, n, sides);
     const absYear = year.year;
 
     const illustrate: Illustrate = {
       id: IdUtil.id('illustrate', absYear, type, rngHex(rng)) ?? 'illustrate_unknown',
+      name,
       type,
       city: city.id,
       yearsActive,

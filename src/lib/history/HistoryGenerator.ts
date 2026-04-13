@@ -115,25 +115,34 @@ function buildTechDescription(args: {
   countryName?: string;
   cityName?: string;
   illustrateType?: IllustrateType;
+  illustrateName?: string;
   field: string;
   level: number;
   displayName?: string;
 }): string {
-  const { countryName, cityName, illustrateType, field, level, displayName } = args;
+  const { countryName, cityName, illustrateType, illustrateName, field, level, displayName } = args;
   const noun = illustrateType ? ILLUSTRATE_NOUN[illustrateType] : undefined;
   const techPhrase = displayName
     ? `${displayName} (${field} L${level})`
     : `${field} level ${level}`;
   if (countryName) {
     const by = noun
-      ? cityName
-        ? ` (by a ${noun} in ${cityName})`
-        : ` (by a ${noun})`
+      ? illustrateName
+        ? cityName
+          ? ` (by ${illustrateName}, a ${noun} in ${cityName})`
+          : ` (by ${illustrateName}, a ${noun})`
+        : cityName
+          ? ` (by a ${noun} in ${cityName})`
+          : ` (by a ${noun})`
       : '';
     return `${countryName} discovers ${techPhrase}${by}.`;
   }
   if (cityName) {
-    const by = noun ? ` (by a ${noun})` : '';
+    const by = noun
+      ? illustrateName
+        ? ` (by ${illustrateName}, a ${noun})`
+        : ` (by a ${noun})`
+      : '';
     return `${cityName} discovers ${techPhrase}${by}.`;
   }
   if (displayName) {
@@ -244,9 +253,10 @@ function serializeYearEvents(
       year: absYear,
       initiatorId: -1,
       description: illCountryName
-        ? `A great ${ill.type} figure is born in ${city?.name ?? '?'} (${illCountryName}).`
-        : `A great ${ill.type} figure is born in ${city?.name ?? '?'}.`,
+        ? `${ill.name}, a great ${ill.type} figure, is born in ${city?.name ?? '?'} (${illCountryName}).`
+        : `${ill.name}, a great ${ill.type} figure, is born in ${city?.name ?? '?'}.`,
       locationCellIndex: city?.cellIndex,
+      discovererName: ill.name,
       discovererType: ill.type,
       countryName: illCountryName ?? undefined,
     });
@@ -474,6 +484,7 @@ function serializeYearEvents(
         countryName,
         cityName: city?.name,
         illustrateType: illustrate?.type,
+        illustrateName: illustrate?.name,
         field: t.field,
         level: t.level,
         displayName,
@@ -482,7 +493,7 @@ function serializeYearEvents(
       field: t.field,
       level: t.level,
       displayName,
-      discovererName: illustrate?.id ?? 'unknown',
+      discovererName: illustrate?.name ?? 'unknown',
       discovererType: illustrate?.type,
       discovererBirthYear: illustrate?.birthYear,
       discovererCityName: city?.name,
@@ -868,6 +879,7 @@ function buildIllustrateDetails(world: World, countryMap: CountryIndexMap): Illu
       ? resolveCountryName(countryMap, region.countryId)
       : null;
     details.push({
+      name: ill.name,
       type: ill.type,
       cityName: city?.name ?? '?',
       cityCellIndex: city?.cellIndex ?? -1,
