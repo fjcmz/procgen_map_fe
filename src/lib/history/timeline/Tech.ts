@@ -4,6 +4,7 @@ import type { Year } from './Year';
 import type { Illustrate, IllustrateType } from './Illustrate';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Spirit } from './Country';
+import { getCountryStandingWonderTierSum } from './Wonder';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -270,8 +271,9 @@ export class TechGenerator {
       if (results.length >= N) break;
       const country = world.mapCountries.get(countryId);
       if (!country) continue;
-      // Per-country roll: min(1, illustrateCount / 5)
-      const chance = Math.min(1, illustrates.length / 5);
+      // Per-country roll: min(1, illustrateCount / 5 + 0.05 × wonderTierSum)
+      const wonderTierSum = getCountryStandingWonderTierSum(world, countryId);
+      const chance = Math.min(1, illustrates.length / 5 + 0.05 * wonderTierSum);
       if (rng() >= chance) continue;
 
       // Pick discoverer uniform random over the bucket
