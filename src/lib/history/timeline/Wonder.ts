@@ -36,6 +36,19 @@ export interface Wonder {
 }
 
 /**
+ * Sum of tiers of all standing (not destroyed) wonders belonging to a city.
+ * Used by YearGenerator step 4 for growth-rate and carrying-capacity bonuses.
+ */
+export function getStandingWonderTierSum(world: World, city: CityEntity): number {
+  let sum = 0;
+  for (const wonderId of city.wonders) {
+    const wonder = world.mapUsableWonders.get(wonderId);
+    if (wonder) sum += wonder.tier;
+  }
+  return sum;
+}
+
+/**
  * Collect all available resources across the entity hierarchy
  * (region → country → empire) for a given city, respecting discovery gates.
  *
