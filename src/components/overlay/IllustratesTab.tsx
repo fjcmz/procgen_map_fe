@@ -122,7 +122,7 @@ export function IllustratesTab({ historyData, selectedYear, convertYears, onNavi
                 </span>
                 {isDead && (
                   <span style={styles.deadBadge} title={`Died: ${ill.deathCause || 'unknown'}`}>
-                    \u2020
+                    {'\u2020'}
                   </span>
                 )}
                 {ill.cityCellIndex >= 0 && onNavigate && (
