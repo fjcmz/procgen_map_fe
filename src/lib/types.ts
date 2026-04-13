@@ -156,7 +156,7 @@ export type SelectedEntity =
 export type HistoryEventType =
   | 'WAR' | 'CONQUEST' | 'MERGE' | 'COLLAPSE' | 'EXPANSION'
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
-  | 'WONDER' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
+  | 'WONDER' | 'WONDER_DESTROYED' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
   | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN'
   | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT' | 'DISCOVERY';
 
