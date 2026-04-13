@@ -532,7 +532,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
         <div style={styles.infoGrid}>
           {city && <InfoRow label="Size" value={resolveCitySize(city, mapData, citySizesAtYear)} />}
-          {city && <InfoRow label="Founded" value={`Year ${city.foundedYear}`} />}
+          {city && <InfoRow label="Founded" value={formatYear(history.startOfTime, city.foundedYear, convertYears)} />}
           {popSnap[cellIndex] != null && <InfoRow label="Population" value={formatPopulation(popSnap[cellIndex])} />}
           {country && (
             <InfoRow label="Country">
@@ -587,7 +587,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
             >
               {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({cityWonders.length})
             </button>
-            {wondersOpen && <WonderList wonders={cityWonders} />}
+            {wondersOpen && <WonderList wonders={cityWonders} convertYears={convertYears} />}
           </>
         )}
 
@@ -782,7 +782,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, convertY
             >
               {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({countryWonders.length})
             </button>
-            {wondersOpen && <WonderListGrouped wonders={countryWonders} />}
+            {wondersOpen && <WonderListGrouped wonders={countryWonders} convertYears={convertYears} />}
           </>
         )}
 
@@ -845,7 +845,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, convertY
 }
 
 // ── Empire Details ──
-function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, ownershipAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { empireId: string }) {
+function EmpireDetails({ empireId, history, mapData, selectedYear, convertYears, empireSnap, ownershipAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { empireId: string }) {
   const empEntry = empireSnap.find(e => e.empireId === empireId);
 
   const founderCountry = empEntry ? history.countries[empEntry.founderCountryIndex] : undefined;
@@ -1020,7 +1020,7 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
             >
               {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({empireWonders.length})
             </button>
-            {wondersOpen && <WonderListGrouped wonders={empireWonders} />}
+            {wondersOpen && <WonderListGrouped wonders={empireWonders} convertYears={convertYears} />}
           </>
         )}
 
@@ -1116,11 +1116,10 @@ function resourceDotColor(type: string): string {
 
 // ── Wonder List ──
 
-function WonderList({ wonders }: { wonders: WonderDetail[] }) {
+function WonderList({ wonders, convertYears }: { wonders: WonderDetail[]; convertYears: boolean }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 0' }}>
       {wonders.map((w, i) => {
-        const displayYear = w.builtOn;
         const tierName = WONDER_TIER_NAMES[w.tier] ?? `Tier ${w.tier}`;
         const isDestroyed = w.destroyedOn !== null;
         return (
@@ -1137,11 +1136,11 @@ function WonderList({ wonders }: { wonders: WonderDetail[] }) {
             <span style={{ color: '#d4a800' }}>{'\u2605'} </span>
             <span style={{ fontWeight: 500 }}>{w.name}</span>
             <span style={{ color: '#999', marginLeft: 4 }}>
-              Tier {w.tier} {tierName} (Y{displayYear})
+              Tier {w.tier} {tierName} ({formatYear(0, w.builtOn, convertYears)})
             </span>
             {isDestroyed && (
               <span style={{ color: '#c44', marginLeft: 4 }}>
-                [Destroyed Y{w.destroyedOn}]
+                [Destroyed {formatYear(0, w.destroyedOn!, convertYears)}]
               </span>
             )}
           </div>
@@ -1155,8 +1154,10 @@ function WonderList({ wonders }: { wonders: WonderDetail[] }) {
 
 function WonderListGrouped({
   wonders,
+  convertYears,
 }: {
   wonders: WonderDetail[];
+  convertYears: boolean;
 }) {
   const groups = useMemo(() => {
     const map = new Map<string, WonderDetail[]>();
@@ -1176,7 +1177,7 @@ function WonderListGrouped({
           <div style={{ fontSize: 11, fontWeight: 600, paddingLeft: 4, color: '#bbb' }}>
             {cityName}
           </div>
-          <WonderList wonders={cityWonders} />
+          <WonderList wonders={cityWonders} convertYears={convertYears} />
         </div>
       ))}
     </div>
