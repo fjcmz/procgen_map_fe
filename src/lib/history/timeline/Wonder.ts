@@ -50,6 +50,21 @@ export function getStandingWonderTierSum(world: World, city: CityEntity): number
 }
 
 /**
+ * Sum of tiers of all standing wonders across every city belonging to a country.
+ * Used by TechGenerator to boost tech discovery chance (+0.05 per tier level).
+ */
+export function getCountryStandingWonderTierSum(world: World, countryId: string): number {
+  let sum = 0;
+  for (const city of world.mapUsableCities.values()) {
+    const region = world.mapRegions.get(city.regionId);
+    if (region?.countryId === countryId) {
+      sum += getStandingWonderTierSum(world, city);
+    }
+  }
+  return sum;
+}
+
+/**
  * Collect all available resources across the entity hierarchy
  * (region → country → empire) for a given city, respecting discovery gates.
  *
