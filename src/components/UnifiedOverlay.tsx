@@ -6,10 +6,11 @@ import { EventsTab } from './overlay/EventsTab';
 import { HierarchyTab } from './overlay/HierarchyTab';
 import { TechTab } from './overlay/TechTab';
 import { DetailsTab } from './overlay/DetailsTab';
+import { IllustratesTab } from './overlay/IllustratesTab';
 
-export type OverlayTab = 'generation' | 'events' | 'details' | 'hierarchy' | 'tech';
+export type OverlayTab = 'generation' | 'events' | 'details' | 'hierarchy' | 'illustrates' | 'tech';
 
-const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'details', 'hierarchy', 'tech'];
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'details', 'hierarchy', 'illustrates', 'tech'];
 
 interface UnifiedOverlayProps {
   // Generation tab — same shape as the old ControlsProps
@@ -61,6 +62,7 @@ const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
   events: 560,
   details: 320,
   hierarchy: 280,
+  illustrates: 300,
   tech: 360,
 };
 
@@ -69,6 +71,7 @@ const TAB_LABELS: Record<OverlayTab, string> = {
   events: 'Events',
   details: 'Details',
   hierarchy: 'Realm',
+  illustrates: 'Figures',
   tech: 'Tech',
 };
 
@@ -120,6 +123,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
     events: hasHistory,
     details: hasHistory,
     hierarchy: hasHistory,
+    illustrates: hasHistory && (props.mapData?.history?.illustrateDetails ?? []).length > 0,
     tech: hasTechTimeline,
   };
 
@@ -127,7 +131,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
-      const idx = ['1', '2', '3', '4', '5'].indexOf(e.key);
+      const idx = ['1', '2', '3', '4', '5', '6'].indexOf(e.key);
       if (idx === -1) return;
       const target = VALID_TABS[idx];
       if (!tabEnabled[target]) return;
@@ -260,6 +264,13 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 citySizesAtYear={props.citySizesAtYear}
                 onNavigate={props.onEntityNavigate}
                 onSelectEntity={props.onSelectEntity}
+              />
+            )}
+            {activeTab === 'illustrates' && props.mapData?.history && (
+              <IllustratesTab
+                historyData={props.mapData.history}
+                selectedYear={props.selectedYear}
+                onNavigate={props.onEntityNavigate}
               />
             )}
             {activeTab === 'tech' && props.mapData?.history?.techTimeline && (
