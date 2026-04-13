@@ -55,18 +55,8 @@ interface UnifiedOverlayProps {
   onSelectEntity: (entity: SelectedEntity | null) => void;
 }
 
-/**
- * Per-tab width constants. The Tech tab gets wider to give the polyline chart
- * more horizontal room; the other tabs share a narrower default.
- */
-const OVERLAY_WIDTHS: Record<OverlayTab, number> = {
-  generation: 280,
-  events: 560,
-  details: 320,
-  hierarchy: 280,
-  illustrates: 300,
-  tech: 360,
-};
+/** Fixed overlay width — wide enough for the widest tab (Events at 560 px). */
+const OVERLAY_WIDTH = 560;
 
 const TAB_LABELS: Record<OverlayTab, string> = {
   generation: 'Gen',
@@ -150,12 +140,10 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasHistory, hasTechTimeline]);
 
-  const width = OVERLAY_WIDTHS[activeTab];
-
   return (
     <Draggable
       defaultPosition={{ top: 16, right: 16 }}
-      style={{ ...styles.panel, width }}
+      style={{ ...styles.panel, width: OVERLAY_WIDTH }}
       storageKey="overlay.position"
       responsiveDock={{ breakpoint: 600 }}
     >
@@ -311,7 +299,6 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 10,
     userSelect: 'none',
-    transition: 'width 180ms ease-out',
   },
   titleRow: {
     display: 'flex',
