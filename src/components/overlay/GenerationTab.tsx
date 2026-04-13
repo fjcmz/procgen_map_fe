@@ -22,6 +22,8 @@ export interface GenerationTabProps {
   onLayerToggle: (key: keyof LayerVisibility) => void;
   generateHistory: boolean;
   onGenerateHistoryToggle: () => void;
+  convertYears: boolean;
+  onConvertYearsToggle: () => void;
   numSimYears: number;
   onNumSimYearsChange: (n: number) => void;
   resourceRarityMode: ResourceRarityMode;
@@ -92,6 +94,8 @@ export function GenerationTab({
   onLayerToggle,
   generateHistory,
   onGenerateHistoryToggle,
+  convertYears,
+  onConvertYearsToggle,
   numSimYears,
   onNumSimYearsChange,
   resourceRarityMode,
@@ -223,6 +227,17 @@ export function GenerationTab({
         />
         Generate History
       </label>
+
+      {generateHistory && (
+        <label style={styles.toggle}>
+          <input
+            type="checkbox"
+            checked={convertYears}
+            onChange={onConvertYearsToggle}
+          />
+          Convert years (BC/AD)
+        </label>
+      )}
 
       {generateHistory && (
         <label style={styles.label}>

@@ -32,6 +32,8 @@ interface UnifiedOverlayProps {
   onLayerToggle: (key: keyof LayerVisibility) => void;
   generateHistory: boolean;
   onGenerateHistoryToggle: () => void;
+  convertYears: boolean;
+  onConvertYearsToggle: () => void;
   numSimYears: number;
   onNumSimYearsChange: (n: number) => void;
   resourceRarityMode: ResourceRarityMode;
@@ -223,6 +225,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onLayerToggle={props.onLayerToggle}
                 generateHistory={props.generateHistory}
                 onGenerateHistoryToggle={props.onGenerateHistoryToggle}
+                convertYears={props.convertYears}
+                onConvertYearsToggle={props.onConvertYearsToggle}
                 numSimYears={props.numSimYears}
                 onNumSimYearsChange={props.onNumSimYearsChange}
                 resourceRarityMode={props.resourceRarityMode}
@@ -239,6 +243,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               <EventsTab
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
+                convertYears={props.convertYears}
                 onNavigate={props.onEntityNavigate}
                 selectedEntity={props.selectedEntity}
                 onSelectEntity={props.onSelectEntity}
@@ -249,6 +254,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 selectedEntity={props.selectedEntity}
                 mapData={props.mapData}
                 selectedYear={props.selectedYear}
+                convertYears={props.convertYears}
                 ownershipAtYear={props.ownershipAtYear}
                 citySizesAtYear={props.citySizesAtYear}
                 onSelectEntity={props.onSelectEntity}
@@ -260,6 +266,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 historyData={props.mapData.history}
                 cities={props.mapData.cities}
                 selectedYear={props.selectedYear}
+                convertYears={props.convertYears}
                 ownershipAtYear={props.ownershipAtYear}
                 citySizesAtYear={props.citySizesAtYear}
                 onNavigate={props.onEntityNavigate}
@@ -270,6 +277,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               <IllustratesTab
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
+                convertYears={props.convertYears}
                 onNavigate={props.onEntityNavigate}
               />
             )}
@@ -277,6 +285,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
               <TechTab
                 historyData={props.mapData.history}
                 selectedYear={props.selectedYear}
+                convertYears={props.convertYears}
                 onNavigate={props.onEntityNavigate}
               />
             )}

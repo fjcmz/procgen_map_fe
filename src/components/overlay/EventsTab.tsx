@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HistoryData, HistoryEvent, SelectedEntity } from '../../lib/types';
-import { formatPopulation } from '../Timeline';
+import { formatPopulation, formatYear } from '../Timeline';
 import { EVENT_ICONS, EVENT_COLORS, EVENT_TYPE_GROUPS } from './eventStyles';
 import { getEmpiresAtYear } from '../../lib/history';
 
 interface EventsTabProps {
   historyData: HistoryData;
   selectedYear: number;
+  convertYears: boolean;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
   selectedEntity?: SelectedEntity | null;
   onSelectEntity?: (entity: SelectedEntity | null) => void;
@@ -25,13 +26,7 @@ function eventMatchesEntity(ev: HistoryEvent, entity: SelectedEntity, empireMemb
   }
 }
 
-function formatAbsYear(relYear: number, startOfTime: number): string {
-  const abs = startOfTime + relYear;
-  if (abs < 0) return `${-abs} BC`;
-  return `${abs} AD`;
-}
-
-export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntity, onSelectEntity }: EventsTabProps) {
+export function EventsTab({ historyData, selectedYear, convertYears, onNavigate, selectedEntity, onSelectEntity }: EventsTabProps) {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [filterExpanded, setFilterExpanded] = useState(false);
@@ -110,7 +105,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
       <div style={styles.miniHeader}>
         <span style={styles.miniTitle}>Events</span>
         <span style={styles.miniCount}>
-          {cumulativeEvents.length} events &middot; {formatAbsYear(selectedYear, historyData.startOfTime)}
+          {cumulativeEvents.length} events &middot; {formatYear(historyData.startOfTime, selectedYear, convertYears)}
         </span>
       </div>
 
@@ -222,7 +217,7 @@ export function EventsTab({ historyData, selectedYear, onNavigate, selectedEntit
                 }}
                 onClick={locatable ? () => onNavigate([item.event.locationCellIndex!], item.event.locationCellIndex!) : undefined}
               >
-                <span style={styles.logYear}>{formatAbsYear(item.year, historyData.startOfTime)}</span>
+                <span style={styles.logYear}>{formatYear(historyData.startOfTime, item.year, convertYears)}</span>
                 <span style={styles.eventIcon}>{EVENT_ICONS[item.event.type] ?? '\u2022'}</span>
                 <span style={styles.logDesc}>{item.event.description}</span>
               </div>
