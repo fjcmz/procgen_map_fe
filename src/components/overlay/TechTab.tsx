@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import type { HistoryData, TechField } from '../../lib/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { HistoryData, HistoryEvent, TechField } from '../../lib/types';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS } from './eventStyles';
 
 interface TechTabProps {
   historyData: HistoryData;
   selectedYear: number;
+  onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 // Fixed vertical real estate — the spec calls for 120–160 px; 140 leaves
@@ -18,7 +19,23 @@ const PAD_R = 6;
 const PAD_T = 6;
 const PAD_B = 16;
 
-export function TechTab({ historyData, selectedYear }: TechTabProps) {
+/** Icon per discoverer (illustrate) type. */
+const DISCOVERER_ICONS: Record<string, string> = {
+  science: '\uD83D\uDD2D',     // telescope
+  military: '\u2694\uFE0F',     // swords
+  philosophy: '\uD83D\uDCDC',   // scroll
+  industry: '\u2699\uFE0F',     // gear
+  religion: '\u2626\uFE0F',     // orthodox cross
+  art: '\uD83C\uDFA8',          // palette
+};
+
+function formatAbsYear(relYear: number, startOfTime: number): string {
+  const abs = startOfTime + relYear;
+  if (abs < 0) return `${-abs} BC`;
+  return `${abs} AD`;
+}
+
+export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -139,6 +156,8 @@ export function TechTab({ historyData, selectedYear }: TechTabProps) {
     ctx.stroke();
   }, [historyData.techTimeline, historyData.numYears, selectedYear, chartWidth]);
 
+  const logEndRef = useRef<HTMLDivElement>(null);
+
   // Peak-level readout for the mini-header — matches the yMax derivation
   // inside the draw effect so the number in the header always matches the
   // top of the Y-axis.
@@ -155,12 +174,31 @@ export function TechTab({ historyData, selectedYear }: TechTabProps) {
     return peak;
   })();
 
+  // Collect TECH and TECH_LOSS events up to selectedYear for the discovery log.
+  const techEvents = useMemo(() => {
+    const result: { year: number; event: HistoryEvent }[] = [];
+    for (const yearData of historyData.years) {
+      if (yearData.year > selectedYear) break;
+      for (const ev of yearData.events) {
+        if (ev.type === 'TECH' || ev.type === 'TECH_LOSS') {
+          result.push({ year: yearData.year, event: ev });
+        }
+      }
+    }
+    return result;
+  }, [historyData.years, selectedYear]);
+
+  // Auto-scroll event list to bottom on year change.
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [selectedYear]);
+
   return (
     <div ref={containerRef} style={styles.root}>
       <div style={styles.miniHeader}>
         <span style={styles.miniTitle}>Tech</span>
         <span style={styles.miniCount}>
-          Peak Lvl {peakLevel} &middot; Year {selectedYear}
+          Peak Lvl {peakLevel} &middot; {techEvents.length} discoveries &middot; Year {selectedYear}
         </span>
       </div>
 
@@ -186,6 +224,71 @@ export function TechTab({ historyData, selectedYear }: TechTabProps) {
           height: TECH_CHART_HEIGHT,
         }}
       />
+
+      <div style={styles.eventList}>
+        {techEvents.length === 0 ? (
+          <div style={styles.noEvents}>No tech discoveries yet.</div>
+        ) : (
+          techEvents.map((item, i) => {
+            const ev = item.event;
+            const fieldColor = ev.field
+              ? TECH_FIELD_COLORS[ev.field as TechField] ?? '#888'
+              : '#888';
+            const locatable = onNavigate && ev.locationCellIndex != null;
+            const discovererIcon = ev.discovererType
+              ? DISCOVERER_ICONS[ev.discovererType] ?? '\u2022'
+              : null;
+            const isTechLoss = ev.type === 'TECH_LOSS';
+
+            return (
+              <div
+                key={i}
+                style={{
+                  ...styles.eventRow,
+                  borderLeft: `3px solid ${isTechLoss ? '#a04040' : fieldColor}`,
+                  background: item.year === selectedYear
+                    ? `${fieldColor}22`
+                    : `${fieldColor}0d`,
+                  ...(locatable ? styles.eventRowClickable : {}),
+                }}
+                onClick={locatable ? () => onNavigate([ev.locationCellIndex!], ev.locationCellIndex!) : undefined}
+              >
+                <span style={styles.eventYear}>
+                  {formatAbsYear(item.year, historyData.startOfTime)}
+                </span>
+                <span style={{ ...styles.eventField, color: fieldColor }}>
+                  {isTechLoss ? '\uD83D\uDCDA' : '\uD83D\uDD2C'}
+                </span>
+                <span style={styles.eventBody}>
+                  {isTechLoss ? (
+                    <span style={styles.techLossText}>{ev.description}</span>
+                  ) : (
+                    <>
+                      <span style={styles.eventName}>
+                        {ev.displayName ?? `${ev.field} L${ev.level}`}
+                      </span>
+                      {ev.field && (
+                        <span style={{ ...styles.eventFieldLabel, color: fieldColor }}>
+                          {' '}{TECH_FIELD_LABELS[ev.field as TechField] ?? ev.field} L{ev.level}
+                        </span>
+                      )}
+                      {ev.countryName && (
+                        <span style={styles.eventCountry}> — {ev.countryName}</span>
+                      )}
+                      {discovererIcon && ev.discovererType && (
+                        <span style={styles.eventDiscoverer}>
+                          {' '}{discovererIcon} {ev.discovererType}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </span>
+              </div>
+            );
+          })
+        )}
+        <div ref={logEndRef} />
+      </div>
     </div>
   );
 }
@@ -195,6 +298,8 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     gap: 6,
+    maxHeight: 'calc(100vh - 180px)',
+    overflow: 'hidden',
   },
   miniHeader: {
     display: 'flex',
@@ -239,5 +344,75 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'block',
     border: '1px solid #8b6040',
     borderRadius: 3,
+    flexShrink: 0,
+  },
+  eventList: {
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    paddingRight: 2,
+    borderTop: '1px solid #d4b896',
+    paddingTop: 6,
+  },
+  noEvents: {
+    fontSize: 11,
+    color: '#9a7a50',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 12,
+  },
+  eventRow: {
+    display: 'flex',
+    gap: 5,
+    alignItems: 'flex-start',
+    fontSize: 10,
+    color: '#2a1a00',
+    lineHeight: 1.4,
+    padding: '2px 4px 2px 5px',
+    borderRadius: 3,
+  },
+  eventRowClickable: {
+    cursor: 'pointer',
+  },
+  eventYear: {
+    flexShrink: 0,
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#7a5a30',
+    minWidth: 44,
+  },
+  eventField: {
+    flexShrink: 0,
+    fontSize: 11,
+  },
+  eventBody: {
+    flex: 1,
+    fontSize: 10,
+    lineHeight: 1.4,
+  },
+  eventName: {
+    fontWeight: 'bold',
+    color: '#2a1a00',
+  },
+  eventFieldLabel: {
+    fontSize: 9,
+    fontWeight: 'normal',
+  },
+  eventCountry: {
+    color: '#5a3a10',
+    fontSize: 10,
+  },
+  eventDiscoverer: {
+    color: '#7a5a30',
+    fontSize: 9,
+    fontStyle: 'italic',
+  },
+  techLossText: {
+    color: '#804040',
+    fontStyle: 'italic',
+    fontSize: 10,
   },
 };
