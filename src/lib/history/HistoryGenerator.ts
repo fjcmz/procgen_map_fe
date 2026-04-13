@@ -5,7 +5,7 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail } from '../types';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
@@ -19,6 +19,7 @@ import type { CountryEvent } from './timeline/Country';
 import type { TechField } from './timeline/Tech';
 import { getCountryTechLevel } from './timeline/Tech';
 import { nameForLevel } from './timeline/techNames';
+import { WONDER_TIER_NAMES } from './timeline/wonderNames';
 import type { IllustrateType } from './timeline/Illustrate';
 import { generateCountryName, generateEmpireName } from './nameGenerator';
 import type { CityEntity } from './physical/CityEntity';
@@ -246,12 +247,15 @@ function serializeYearEvents(
   // Wonders
   for (const w of year.wonders) {
     const city = world.mapCities.get(w.city);
+    const tierName = WONDER_TIER_NAMES[w.tier] ?? `Tier ${w.tier}`;
     events.push({
       type: 'WONDER',
       year: absYear,
       initiatorId: -1,
-      description: `A wonder is built in ${city?.name ?? '?'}.`,
+      description: `${w.name} (Tier ${w.tier} ${tierName}) is built in ${city?.name ?? '?'}.`,
       locationCellIndex: city?.cellIndex,
+      wonderName: w.name,
+      wonderTier: w.tier,
     });
   }
 
@@ -799,17 +803,47 @@ function computeExpansionFlags(
 }
 
 /**
- * Return cell indices of cities that have a standing wonder at the given absolute year.
+ * Return rich snapshot entries for cities that have a standing wonder at the given absolute year.
  */
-function computeWonderCells(world: World, absYear: number): number[] {
-  const result: number[] = [];
+function computeWonderSnapshots(world: World, absYear: number): WonderSnapshotEntry[] {
+  const result: WonderSnapshotEntry[] = [];
   for (const wonder of world.mapWonders.values()) {
     if (wonder.builtOn > absYear) continue;
     if (wonder.destroyedOn !== null && wonder.destroyedOn <= absYear) continue;
     const city = world.mapCities.get(wonder.city);
-    if (city) result.push(city.cellIndex);
+    if (city) {
+      result.push({
+        cellIndex: city.cellIndex,
+        name: wonder.name,
+        tier: wonder.tier,
+        builtOn: wonder.builtOn,
+        cityName: city.name,
+      });
+    }
   }
   return result;
+}
+
+/**
+ * Build the full wonderDetails array — ALL wonders ever built (including destroyed).
+ * Used by the DetailsTab to render the complete wonder tree per entity.
+ */
+function buildWonderDetails(world: World): WonderDetail[] {
+  const details: WonderDetail[] = [];
+  for (const wonder of world.mapWonders.values()) {
+    const city = world.mapCities.get(wonder.city);
+    details.push({
+      name: wonder.name,
+      tier: wonder.tier,
+      cityName: city?.name ?? '?',
+      cityCellIndex: city?.cellIndex ?? -1,
+      builtOn: wonder.builtOn,
+      destroyedOn: wonder.destroyedOn,
+    });
+  }
+  // Sort by builtOn ascending for consistent display
+  details.sort((a, b) => a.builtOn - b.builtOn);
+  return details;
 }
 
 /**
@@ -878,7 +912,7 @@ export class HistoryGenerator {
     const historyYears: HistoryYear[] = [];
     const snapshots: Record<number, Int16Array> = {};
     const tradeSnapshots: Record<number, TradeRouteEntry[]> = {};
-    const wonderSnapshots: Record<number, number[]> = {};
+    const wonderSnapshots: Record<number, WonderSnapshotEntry[]> = {};
     const religionSnapshots: Record<number, number[]> = {};
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
     const populationSnapshots: Record<number, Record<number, number>> = {};
@@ -1119,7 +1153,7 @@ export class HistoryGenerator {
         snapshots[i] = new Int16Array(ownership);
         tradeSnapshots[i] = Array.from(activeTradeEntries.values());
         roadSnapshots[i] = [...activeRoads];
-        wonderSnapshots[i] = computeWonderCells(world, yearObj.year);
+        wonderSnapshots[i] = computeWonderSnapshots(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
         expansionSnapshots[i] = new Uint8Array(expFlags);
@@ -1141,7 +1175,7 @@ export class HistoryGenerator {
       snapshots[yearsToSerialize] = prevOwnership;
       tradeSnapshots[yearsToSerialize] = Array.from(activeTradeEntries.values());
       roadSnapshots[yearsToSerialize] = [...activeRoads];
-      wonderSnapshots[yearsToSerialize] = computeWonderCells(world, finalAbsYear);
+      wonderSnapshots[yearsToSerialize] = computeWonderSnapshots(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
       const finalYearObj = timeline.years[yearsToSerialize - 1];
@@ -1407,6 +1441,7 @@ export class HistoryGenerator {
       tradeSnapshots,
       roadSnapshots,
       wonderSnapshots,
+      wonderDetails: buildWonderDetails(world),
       religionSnapshots,
       empireSnapshots,
       populationSnapshots,

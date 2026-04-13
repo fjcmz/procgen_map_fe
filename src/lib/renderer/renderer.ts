@@ -1,7 +1,7 @@
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Cell, Road, RegionData, HistoryEvent, HistoryData, TradeRouteEntry, Season } from '../types';
 import { BIOME_INFO, getVegetationDensity, modulateBiomeColor, getSeasonalBiome, getPermafrostAlpha } from '../terrain/biomes';
 import { getNoisyEdge, initNoisyEdges } from './noisyEdges';
-import { getOwnershipAtYear, getEmpiresAtYear, getTradesAtYear, getRoadsAtYear, getWondersAtYear, getReligionsAtYear } from '../history/history';
+import { getOwnershipAtYear, getEmpiresAtYear, getTradesAtYear, getRoadsAtYear, getWonderCellsAtYear, getReligionsAtYear } from '../history/history';
 import { getLegacyCategory } from '../history/physical/ResourceCatalog';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
@@ -1251,7 +1251,7 @@ export function render(
       : undefined;
   const wonderCells =
     layers.wonderMarkers && data.history && selectedYear !== undefined
-      ? getWondersAtYear(data.history, selectedYear)
+      ? getWonderCellsAtYear(data.history, selectedYear)
       : undefined;
   const religionCells =
     layers.religionMarkers && data.history && selectedYear !== undefined

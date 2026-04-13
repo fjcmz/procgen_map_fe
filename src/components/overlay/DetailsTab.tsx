@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry, Cell, TradeRouteEntry, RegionData } from '../../lib/types';
+import type { MapData, SelectedEntity, HistoryEvent, Country, EmpireSnapshotEntry, Cell, TradeRouteEntry, RegionData, WonderDetail } from '../../lib/types';
 import type { TechField } from '../../lib/history/timeline/Tech';
 import { TECH_FIELD_COLORS, TECH_FIELD_LABELS, EVENT_ICONS, EVENT_COLORS } from './eventStyles';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
@@ -8,6 +8,7 @@ import type { City } from '../../lib/types';
 import { formatPopulation } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
+import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -454,8 +455,17 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
     return [];
   }, [history, selectedYear]);
 
-  const hasWonder = wonderSnap.includes(cellIndex);
+  const hasWonder = wonderSnap.some(w => w.cellIndex === cellIndex);
   const hasReligion = religionSnap.includes(cellIndex);
+
+  // Wonders for this city from wonderDetails (includes destroyed)
+  const cityWonders = useMemo(() => {
+    if (!history.wonderDetails) return [];
+    return history.wonderDetails.filter(
+      w => w.cityCellIndex === cellIndex && w.builtOn <= (history.startOfTime + selectedYear),
+    );
+  }, [history.wonderDetails, cellIndex, selectedYear, history.startOfTime]);
+  const [wondersOpen, setWondersOpen] = useState(false);
 
   const events = useMemo(
     () => getCellEvents(history.years, cellIndex, selectedYear),
@@ -538,7 +548,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
               </button>
             </InfoRow>
           )}
-          {hasWonder && <InfoRow label="Wonder" value="Yes" />}
+          {hasWonder && <InfoRow label="Wonders" value={String(cityWonders.length)} />}
           {hasReligion && <InfoRow label="Religion" value="Present" />}
           {city?.ownedCells && (
             <InfoRow label="Territory" value={`${city.ownedCells.filter(oc => oc.yearAdded <= selectedYear).length} cells`} />
@@ -557,6 +567,21 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, empireSnap, sn
               {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({cityResources.size})
             </button>
             {resourcesOpen && <ResourceList resources={cityResources} />}
+          </>
+        )}
+
+        {/* Wonders in this city */}
+        {cityWonders.length > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setWondersOpen(v => !v)}
+              aria-expanded={wondersOpen}
+            >
+              {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({cityWonders.length})
+            </button>
+            {wondersOpen && <WonderList wonders={cityWonders} />}
           </>
         )}
 
@@ -633,6 +658,15 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
     [countryIndex, ownershipAtYear, mapData.regions, techLevels, mapData.cities, selectedYear],
   );
   const [resourcesOpen, setResourcesOpen] = useState(false);
+
+  // Wonders for this country's cities (includes destroyed)
+  const countryWonders = useMemo(() => {
+    if (!history.wonderDetails) return [];
+    return history.wonderDetails.filter(
+      w => cityCellSet.has(w.cityCellIndex) && w.builtOn <= (history.startOfTime + selectedYear),
+    );
+  }, [history.wonderDetails, cityCellSet, selectedYear, history.startOfTime]);
+  const [wondersOpen, setWondersOpen] = useState(false);
 
   const eventCounts = useMemo(
     () => getEntityEventCounts(history.years, cityCellSet, countrySet, selectedYear),
@@ -728,6 +762,21 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, empireSn
               {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({resources.size})
             </button>
             {resourcesOpen && <ResourceList resources={resources} />}
+          </>
+        )}
+
+        {/* Wonders across this country's cities */}
+        {countryWonders.length > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setWondersOpen(v => !v)}
+              aria-expanded={wondersOpen}
+            >
+              {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({countryWonders.length})
+            </button>
+            {wondersOpen && <WonderListGrouped wonders={countryWonders} />}
           </>
         )}
 
@@ -851,6 +900,15 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
   );
   const [resourcesOpen, setResourcesOpen] = useState(false);
 
+  // Wonders across all empire member cities (includes destroyed)
+  const empireWonders = useMemo(() => {
+    if (!history.wonderDetails) return [];
+    return history.wonderDetails.filter(
+      w => cityCellSet.has(w.cityCellIndex) && w.builtOn <= (history.startOfTime + selectedYear),
+    );
+  }, [history.wonderDetails, cityCellSet, selectedYear, history.startOfTime]);
+  const [wondersOpen, setWondersOpen] = useState(false);
+
   const eventCounts = useMemo(
     () => getEntityEventCounts(history.years, cityCellSet, memberSet, selectedYear),
     [history.years, cityCellSet, memberSet, selectedYear],
@@ -942,6 +1000,21 @@ function EmpireDetails({ empireId, history, mapData, selectedYear, empireSnap, o
               {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({resources.size})
             </button>
             {resourcesOpen && <ResourceList resources={resources} />}
+          </>
+        )}
+
+        {/* Wonders across all empire member cities */}
+        {empireWonders.length > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setWondersOpen(v => !v)}
+              aria-expanded={wondersOpen}
+            >
+              {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({empireWonders.length})
+            </button>
+            {wondersOpen && <WonderListGrouped wonders={empireWonders} />}
           </>
         )}
 
@@ -1039,6 +1112,75 @@ function resourceDotColor(type: string): string {
   } catch {
     return '#888';
   }
+}
+
+// ── Wonder List ──
+
+function WonderList({ wonders }: { wonders: WonderDetail[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 0' }}>
+      {wonders.map((w, i) => {
+        const displayYear = w.builtOn;
+        const tierName = WONDER_TIER_NAMES[w.tier] ?? `Tier ${w.tier}`;
+        const isDestroyed = w.destroyedOn !== null;
+        return (
+          <div
+            key={i}
+            style={{
+              fontSize: 11,
+              lineHeight: '16px',
+              paddingLeft: 8,
+              textDecoration: isDestroyed ? 'line-through' : undefined,
+              opacity: isDestroyed ? 0.6 : 1,
+            }}
+          >
+            <span style={{ color: '#d4a800' }}>{'\u2605'} </span>
+            <span style={{ fontWeight: 500 }}>{w.name}</span>
+            <span style={{ color: '#999', marginLeft: 4 }}>
+              Tier {w.tier} {tierName} (Y{displayYear})
+            </span>
+            {isDestroyed && (
+              <span style={{ color: '#c44', marginLeft: 4 }}>
+                [Destroyed Y{w.destroyedOn}]
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Wonder List Grouped ──
+
+function WonderListGrouped({
+  wonders,
+}: {
+  wonders: WonderDetail[];
+}) {
+  const groups = useMemo(() => {
+    const map = new Map<string, WonderDetail[]>();
+    for (const w of wonders) {
+      const key = w.cityName;
+      let arr = map.get(key);
+      if (!arr) { arr = []; map.set(key, arr); }
+      arr.push(w);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [wonders]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 0' }}>
+      {groups.map(([cityName, cityWonders]) => (
+        <div key={cityName}>
+          <div style={{ fontSize: 11, fontWeight: 600, paddingLeft: 4, color: '#bbb' }}>
+            {cityName}
+          </div>
+          <WonderList wonders={cityWonders} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ResourceList({ resources }: { resources: Map<string, ResourceAggregate> }) {
