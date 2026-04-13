@@ -219,6 +219,8 @@ export class YearGenerator {
     // bonus is city-scoped (applies to any religion in an `art` city) while the
     // government bonus is religion-scoped (travels with the religion), so drift
     // is now computed per (city × religion) rather than per city.
+    // Wonder bonus (Wonders_bonuses.md §3): +0.005 × standingWonderTierSum,
+    // city-scoped like art. Sacred sites attract pilgrims.
     const computeGovBonus = (religion: Religion | undefined): number => {
       if (!religion?.originCountry) return 0;
       const origin = world.mapCountries.get(religion.originCountry) as CountryEvent | undefined;
@@ -229,12 +231,13 @@ export class YearGenerator {
     for (const city of world.mapUsableCities.values()) {
       if (city.religions.size === 0) continue;
       const artBonus = getCityTechLevel(world, city, 'art') > 0 ? 0.02 : 0;
+      const wonderBonus = 0.005 * getStandingWonderTierSum(world, city);
       if (city.religions.size === 1) {
         // Single-religion: adherence drifts toward dominance until 0.9
         for (const [relId, adherence] of city.religions) {
           if (adherence < 0.9) {
             const religion = world.mapReligions.get(relId) as Religion | undefined;
-            const drift = 0.05 + artBonus + computeGovBonus(religion);
+            const drift = 0.05 + artBonus + wonderBonus + computeGovBonus(religion);
             city.religions.set(relId, Math.min(0.9, adherence + drift));
           }
         }
