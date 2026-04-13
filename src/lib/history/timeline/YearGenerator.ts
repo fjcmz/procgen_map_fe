@@ -11,7 +11,7 @@ import type { Illustrate } from './Illustrate';
 import { religionGenerator } from './Religion';
 import type { Religion } from './Religion';
 import { tradeGenerator } from './Trade';
-import { wonderGenerator } from './Wonder';
+import { wonderGenerator, getStandingWonderTierSum } from './Wonder';
 import { cataclysmGenerator } from './Cataclysm';
 import { warGenerator } from './War';
 import type { War } from './War';
@@ -73,11 +73,19 @@ export class YearGenerator {
           const energyMult = 1 + 0.05 * Math.min(energyLevel, 10);
           capacity *= 1 + growthLevel * 0.12 * energyMult;
         }
+        // Wonder bonuses: standing wonders boost capacity and growth rate
+        const wonderTierSum = getStandingWonderTierSum(world, city);
+        if (wonderTierSum > 0) {
+          capacity *= 1 + 0.05 * wonderTierSum;
+        }
         // Logistic growth: rate decelerates as population approaches capacity
+        const effectiveGrowthRate = wonderTierSum > 0
+          ? growthRate * (1 + 0.02 * wonderTierSum)
+          : growthRate;
         const logisticFactor = 1 - city.currentPopulation / capacity;
         city.currentPopulation = Math.max(
           city.currentPopulation,
-          Math.floor(city.currentPopulation * (1 + growthRate * logisticFactor))
+          Math.floor(city.currentPopulation * (1 + effectiveGrowthRate * logisticFactor))
         );
       }
     }
