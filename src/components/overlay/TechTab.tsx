@@ -276,9 +276,16 @@ export function TechTab({ historyData, selectedYear, onNavigate }: TechTabProps)
                         <span style={styles.eventCountry}> — {ev.countryName}</span>
                       )}
                       {discovererIcon && ev.discovererType && (
-                        <span style={styles.eventDiscoverer}>
-                          {' '}{discovererIcon} {ev.discovererType}
-                        </span>
+                        <div style={styles.discovererRow}>
+                          <span style={styles.discovererIcon}>{discovererIcon}</span>
+                          <span style={styles.discovererDetail}>
+                            {ev.discovererType} figure
+                            {ev.discovererCityName && <> from <strong>{ev.discovererCityName}</strong></>}
+                            {ev.discovererBirthYear != null && (
+                              <>, born {ev.discovererBirthYear < 0 ? `${-ev.discovererBirthYear} BC` : `${ev.discovererBirthYear} AD`}</>
+                            )}
+                          </span>
+                        </div>
                       )}
                     </>
                   )}
@@ -405,7 +412,17 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#5a3a10',
     fontSize: 10,
   },
-  eventDiscoverer: {
+  discovererRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 3,
+    marginTop: 1,
+  },
+  discovererIcon: {
+    fontSize: 10,
+    flexShrink: 0,
+  },
+  discovererDetail: {
     color: '#7a5a30',
     fontSize: 9,
     fontStyle: 'italic',
