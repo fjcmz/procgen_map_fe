@@ -22,6 +22,7 @@ export const EVENT_ICONS: Record<string, string> = {
   COUNTRY: '\uD83C\uDFDB\uFE0F',
   ILLUSTRATE: '\u2B50',
   WONDER: '\uD83C\uDFDB',
+  WONDER_DESTROYED: '\uD83D\uDCA5',
   RELIGION: '\u2626\uFE0F',
   TRADE: '\uD83D\uDCB0',
   CATACLYSM: '\uD83C\uDF0B',
@@ -45,6 +46,7 @@ export const EVENT_COLORS: Record<string, string> = {
   COUNTRY: '#6040b0',
   ILLUSTRATE: '#a0a000',
   WONDER: '#d4a800',
+  WONDER_DESTROYED: '#8b6508',
   RELIGION: '#8040a0',
   TRADE: '#20a040',
   CATACLYSM: '#d03010',
@@ -59,7 +61,7 @@ export const EVENT_COLORS: Record<string, string> = {
 
 export const EVENT_TYPE_GROUPS: { label: string; types: HistoryEventType[] }[] = [
   { label: 'Civilization', types: ['FOUNDATION', 'CONTACT', 'COUNTRY', 'EMPIRE'] },
-  { label: 'Culture',      types: ['ILLUSTRATE', 'WONDER', 'RELIGION', 'TECH', 'TECH_LOSS'] },
+  { label: 'Culture',      types: ['ILLUSTRATE', 'WONDER', 'WONDER_DESTROYED', 'RELIGION', 'TECH', 'TECH_LOSS'] },
   { label: 'Economy',      types: ['TRADE'] },
   { label: 'Conflict',     types: ['WAR', 'CONQUEST'] },
   { label: 'Disasters',    types: ['CATACLYSM', 'COLLAPSE'] },

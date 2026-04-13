@@ -267,6 +267,27 @@ function serializeYearEvents(
     });
   }
 
+  // Wonder destructions — scan all wonders for any destroyed this year.
+  // The destruction is recorded on the Wonder object by CataclysmGenerator;
+  // we resolve the cause from the year's cataclysms to build the description.
+  for (const w of world.mapWonders.values()) {
+    if (w.destroyedOn !== absYear) continue;
+    const city = world.mapCities.get(w.city);
+    const tierName = WONDER_TIER_NAMES[w.tier] ?? `Tier ${w.tier}`;
+    // Resolve cataclysm type from the year's cataclysms via destroyCause ID
+    const causingCat = year.cataclysms.find(c => c.id === w.destroyCause);
+    const causeDesc = causingCat ? `destroyed by ${causingCat.strength} ${causingCat.type}` : 'destroyed';
+    events.push({
+      type: 'WONDER_DESTROYED',
+      year: absYear,
+      initiatorId: -1,
+      description: `${w.name} (Tier ${w.tier} ${tierName}) in ${city?.name ?? '?'} is ${causeDesc}.`,
+      locationCellIndex: city?.cellIndex,
+      wonderName: w.name,
+      wonderTier: w.tier,
+    });
+  }
+
   // Religions
   // Spec stretch §4: resolve the religion's origin country at serialization
   // time, compute which tech bonuses (art / government) are currently
