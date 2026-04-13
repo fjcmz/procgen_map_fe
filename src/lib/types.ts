@@ -198,6 +198,10 @@ export interface HistoryEvent {
   };
   /** RELIGION-only (spec stretch §4): which origin-country tech bonuses are boosting this religion's propagation (art ×0.02 adherence drift, government up to ×0.03 drift + Path 2 outward-expansion weighting). `'none'` is omitted rather than stored. */
   propagationReason?: 'art' | 'government' | 'both';
+  /** WONDER-only: display name of the wonder that was built. */
+  wonderName?: string;
+  /** WONDER-only: tier of the wonder (1-10). */
+  wonderTier?: number;
   /** TERRITORIAL_EXPANSION-only: number of cells claimed in this expansion event. */
   expansionCellCount?: number;
   /** SETTLEMENT-only: name of the city settled in expansion territory. */
@@ -246,6 +250,25 @@ export interface EmpireSnapshotEntry {
   memberCountryIndices: number[];
 }
 
+/** Rich wonder snapshot entry — replaces the old plain cell-index snapshots. */
+export interface WonderSnapshotEntry {
+  cellIndex: number;
+  name: string;
+  tier: number;
+  builtOn: number;       // absolute year
+  cityName: string;
+}
+
+/** Full wonder detail for the DetailsTab tree — includes destroyed wonders. */
+export interface WonderDetail {
+  name: string;
+  tier: number;
+  cityName: string;
+  cityCellIndex: number;
+  builtOn: number;          // absolute year
+  destroyedOn: number | null;
+}
+
 export interface HistoryData {
   countries: Country[];
   years: HistoryYear[];
@@ -257,8 +280,10 @@ export interface HistoryData {
   tradeSnapshots: Record<number, TradeRouteEntry[]>;
   /** Roads built so far, snapshotted every 20 years. Monotonically growing. */
   roadSnapshots: Record<number, Road[]>;
-  /** Cell indices of cities with standing wonders, snapshotted every 20 years. */
-  wonderSnapshots: Record<number, number[]>;
+  /** Standing wonders with metadata, snapshotted every 20 years. */
+  wonderSnapshots: Record<number, WonderSnapshotEntry[]>;
+  /** All wonders ever built (including destroyed), for the DetailsTab tree. */
+  wonderDetails?: WonderDetail[];
   /** Cell indices of cities with active religions, snapshotted every 20 years. */
   religionSnapshots: Record<number, number[]>;
   /** Phase 4: empire membership at every 20th year, aligned with `snapshots`. */

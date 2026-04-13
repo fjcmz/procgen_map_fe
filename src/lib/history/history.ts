@@ -691,18 +691,29 @@ export function getTradesAtYear(
 }
 
 /**
- * Return cell indices of cities with standing wonders at a given year, using the nearest snapshot.
+ * Return rich wonder snapshot entries for standing wonders at a given year, using the nearest snapshot.
  */
 export function getWondersAtYear(
   historyData: HistoryData,
   targetYear: number,
-): number[] {
+): import('../types').WonderSnapshotEntry[] {
   const snapshotYears = Object.keys(historyData.wonderSnapshots)
     .map(Number)
     .filter(y => y <= targetYear)
     .sort((a, b) => b - a);
   const baseYear = snapshotYears.length > 0 ? snapshotYears[0] : 0;
   return historyData.wonderSnapshots[baseYear] ?? [];
+}
+
+/**
+ * Return cell indices of cities with standing wonders at a given year.
+ * Compatibility helper for the renderer (which only needs cell indices).
+ */
+export function getWonderCellsAtYear(
+  historyData: HistoryData,
+  targetYear: number,
+): number[] {
+  return getWondersAtYear(historyData, targetYear).map(w => w.cellIndex);
 }
 
 /**
