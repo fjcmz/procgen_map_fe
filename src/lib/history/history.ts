@@ -271,6 +271,7 @@ export function buildPhysicalWorld(
 
   for (const continentCells of validContinentGroups) {
     const continent = continentGenerator.generate(rng, world);
+    const continentCellSet = new Set(continentCells);
 
     // Target ~30 cells per region, minimum 1
     const targetRegionCount = Math.max(1, Math.floor(continentCells.length / 30));
@@ -308,7 +309,7 @@ export function buildPhysicalWorld(
       const idx = bfsQueue[bfsHead++];
       const owner = cellRegionSeed.get(idx)!;
       for (const ni of cells[idx].neighbors) {
-        if (!cells[ni].isWater && !cellRegionSeed.has(ni) && continentCells.includes(ni)) {
+        if (!cells[ni].isWater && !cellRegionSeed.has(ni) && continentCellSet.has(ni)) {
           cellRegionSeed.set(ni, owner);
           bfsQueue.push(ni);
         }
@@ -487,6 +488,39 @@ export function buildPhysicalWorld(
     continentData.push({ id: continent.id, regionIds: continentRegionIds });
 
     world.addContinent(continent);
+  }
+
+  // --- Step 5: Absorb orphan land cells into nearest existing region ---
+  // Small land groups (< 10 cells) were filtered out in Step 1 and never
+  // entered the region assignment loop.  BFS outward from every cell that
+  // already owns a regionId; when an unassigned, non-water neighbor is
+  // found, it inherits the spreading cell's regionId.  Because BFS
+  // radiates uniformly, each orphan ends up in the geographically closest
+  // region.  This pass uses NO rng() calls, so it cannot perturb the
+  // downstream RNG sequence or affect sweep determinism.
+  {
+    const orphanQueue: number[] = [];
+    for (let i = 0; i < numCells; i++) {
+      if (cells[i].regionId) orphanQueue.push(i);
+    }
+    const rdMap = new Map<string, RegionData>();
+    for (const rd of regionData) rdMap.set(rd.id, rd);
+
+    let oHead = 0;
+    while (oHead < orphanQueue.length) {
+      const idx = orphanQueue[oHead++];
+      const rid = cells[idx].regionId!;
+      for (const ni of cells[idx].neighbors) {
+        if (!cells[ni].isWater && !cells[ni].regionId) {
+          cells[ni].regionId = rid;
+          const region = world.mapRegions.get(rid);
+          if (region) region.cellIndices.push(ni);
+          const rd = rdMap.get(rid);
+          if (rd) rd.cellIndices.push(ni);
+          orphanQueue.push(ni);
+        }
+      }
+    }
   }
 
   return { world, regionData, continentData, usedCityNames };
