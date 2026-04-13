@@ -146,6 +146,8 @@ export class CityEntity {
   trades: string[] = [];
   illustrates: string[] = [];
   wonders: string[] = [];
+  /** Cached sum of standing wonder tiers — maintained by YearGenerator step 4. */
+  wonderTierSum: number = 0;
   religions: Map<string, number> = new Map();
   cataclysms: string[] = [];
   /** Cells owned by this city. Keys are cell indices, values are the year the cell was claimed. */
@@ -178,6 +180,9 @@ export class CityEntity {
     for (const field of TRADE_TECH_FIELDS) {
       const tech = this.knownTechs.get(field);
       if (tech) capacity *= 1 + tech.level / 10;
+    }
+    if (this.wonderTierSum > 0) {
+      capacity *= 1 + 0.05 * this.wonderTierSum;
     }
     return Math.round(capacity);
   }

@@ -75,6 +75,7 @@ export class YearGenerator {
         }
         // Wonder bonuses: standing wonders boost capacity and growth rate
         const wonderTierSum = getStandingWonderTierSum(world, city);
+        city.wonderTierSum = wonderTierSum;
         if (wonderTierSum > 0) {
           capacity *= 1 + 0.05 * wonderTierSum;
         }
