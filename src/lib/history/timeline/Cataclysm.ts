@@ -310,11 +310,17 @@ export class CataclysmGenerator {
     }
     applyTechLoss(cataclysm, affectedCountries, world, rng);
 
-    // Secondary effect: Illustrate death (50% chance)
-    if (rng() < 0.5 && world.mapUsableIllustrates.size > 0) {
-      const usableIllustrates = Array.from(world.mapUsableIllustrates.values()) as Illustrate[];
-      const victim = usableIllustrates[Math.floor(rng() * usableIllustrates.length)];
-      if (victim) {
+    // Secondary effect: Illustrate death (50% chance, scoped to affected cities)
+    if (rng() < 0.5) {
+      const affectedIllustrates: Illustrate[] = [];
+      for (const city of affectedCities) {
+        for (const illId of city.illustrates) {
+          const ill = world.mapUsableIllustrates.get(illId) as Illustrate | undefined;
+          if (ill) affectedIllustrates.push(ill);
+        }
+      }
+      if (affectedIllustrates.length > 0) {
+        const victim = affectedIllustrates[Math.floor(rng() * affectedIllustrates.length)];
         victim.diedOn = absYear;
         victim.deathCause = `Killed in ${type}`;
         world.mapUsableIllustrates.delete(victim.id);
