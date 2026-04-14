@@ -6,6 +6,7 @@ import type { Region } from '../physical/Region';
 import type { Resource } from '../physical/Resource';
 import type { ResourceType } from '../physical/ResourceCatalog';
 import { getCityTechLevel, type TechField } from './Tech';
+import type { Empire } from './Empire';
 import {
   WONDER_TIER_RESOURCES,
   pickWonderName,
@@ -62,6 +63,28 @@ export function getCountryStandingWonderTierSum(world: World, countryId: string)
     }
   }
   return sum;
+}
+
+/**
+ * Count of standing wonders across all cities belonging to an empire's member
+ * countries (including expansion regions). Used by ConquerGenerator to reduce
+ * the government-tech dissolution probability — prestigious monuments hold
+ * empires together.
+ */
+export function getEmpireStandingWonderCount(world: World, empire: Empire): number {
+  const memberIds = empire.countries;
+  let count = 0;
+  for (const city of world.mapUsableCities.values()) {
+    const region = world.mapRegions.get(city.regionId);
+    if (!region) continue;
+    if ((region.countryId && memberIds.has(region.countryId)) ||
+        (region.expansionOwnerId && memberIds.has(region.expansionOwnerId))) {
+      for (const wonderId of city.wonders) {
+        if (world.mapUsableWonders.has(wonderId)) count++;
+      }
+    }
+  }
+  return count;
 }
 
 /**
