@@ -50,6 +50,18 @@ export function getStandingWonderTierSum(world: World, city: CityEntity): number
 }
 
 /**
+ * Count of standing (not destroyed) wonders belonging to a city.
+ * Used by Cataclysm resilience (Point 7): infrastructure saves lives.
+ */
+export function getStandingWonderCount(world: World, city: CityEntity): number {
+  let count = 0;
+  for (const wonderId of city.wonders) {
+    if (world.mapUsableWonders.has(wonderId)) count++;
+  }
+  return count;
+}
+
+/**
  * Sum of tiers of all standing wonders across every city belonging to a country.
  * Used by TechGenerator to boost tech discovery chance (+0.05 per tier level).
  */

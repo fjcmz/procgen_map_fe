@@ -6,6 +6,7 @@ import { computeCitySize } from '../physical/CityEntity';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Illustrate } from './Illustrate';
 import type { Wonder } from './Wonder';
+import { getStandingWonderCount } from './Wonder';
 import type { CountryEvent } from './Country';
 import type { TechField } from './Tech';
 import { getCityTechLevel, getCountryTechLevel, getCountryEffectiveTechs } from './Tech';
@@ -274,7 +275,7 @@ export class CataclysmGenerator {
     // Local: always applies to epicenter
     affectedCities.add(epicenterCity);
 
-    // Apply casualties (Phase 1: `biology` tech mitigates slow-onset disasters)
+    // Apply casualties (biology tech mitigates slow-onset disasters; standing wonders mitigate all types)
     const biologyApplies = BIOLOGY_MITIGATED.has(type);
     let totalKilled = 0;
     const citiesToRuin: CityEntity[] = [];
@@ -284,6 +285,11 @@ export class CataclysmGenerator {
       if (biologyApplies) {
         const bioLevel = getCityTechLevel(world, city, 'biology');
         mitigation = Math.min(0.5, 0.1 * bioLevel);
+      }
+      // Point 7: standing wonders reduce cataclysm kill ratios (all types)
+      const wonderCount = getStandingWonderCount(world, city);
+      if (wonderCount > 0) {
+        mitigation = Math.min(0.75, mitigation + 0.05 * wonderCount);
       }
       const result = applyCasualties(city, killRatio, world, mitigation);
       totalKilled += result.killed;
