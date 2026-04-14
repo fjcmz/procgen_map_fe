@@ -5,6 +5,7 @@ import type { War } from './War';
 import type { CountryEvent } from './Country';
 import type { Empire } from './Empire';
 import { mergeAllTechs, getNewTechs, getCountryTechLevel, type TechField } from './Tech';
+import { getCountryStandingWonderTierSum } from './Wonder';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -53,7 +54,11 @@ export class ConquerGenerator {
 
     const aggMil = getCountryTechLevel(world, aggressorCountry, 'military');
     const defMil = getCountryTechLevel(world, defenderCountry, 'military');
-    const militaryBias = Math.max(-0.4, Math.min(0.4, (aggMil - defMil) * 0.05));
+    // Wonder defense bonus (Wonders_bonuses.md §5): defender's standing wonders
+    // reduce the aggressor's win probability by 0.02 per tier level.
+    const defWonderTiers = getCountryStandingWonderTierSum(world, defenderCountry.id);
+    const wonderDefenseBonus = 0.02 * defWonderTiers;
+    const militaryBias = Math.max(-0.4, Math.min(0.4, (aggMil - defMil) * 0.05 - wonderDefenseBonus));
     const winnerIsAggressor = rng() < 0.5 + militaryBias;
     const conquerorCountry = winnerIsAggressor ? aggressorCountry : defenderCountry;
     const conqueredCountry = winnerIsAggressor ? defenderCountry : aggressorCountry;
