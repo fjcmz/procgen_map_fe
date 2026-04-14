@@ -1,7 +1,6 @@
 import { IdUtil } from '../IdUtil';
 import type { World } from '../physical/World';
 import type { Year } from './Year';
-import { cityVisitor } from '../physical/CityVisitor';
 import type { CityEntity } from '../physical/CityEntity';
 import { generateIllustrateName } from '../nameGenerator';
 
@@ -23,6 +22,9 @@ const ILLUSTRATE_WEIGHTS: Record<IllustrateType, number> = {
   religion: 2, science: 3, philosophy: 2, industry: 5, military: 5, art: 3,
 };
 const ILLUSTRATE_TOTAL = (Object.values(ILLUSTRATE_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
+
+/** Wonder Attraction: per-tier-sum weight bonus for illustrate city selection. */
+const WONDER_ATTRACTION_FACTOR = 0.25;
 
 const ILLUSTRATE_ACTIVE_ROLLS: Record<IllustrateType, [number, number]> = {
   religion: [5, 10],
@@ -58,13 +60,26 @@ export interface Illustrate {
 
 export class IllustrateGenerator {
   generate(rng: () => number, year: Year, world: World): Illustrate | null {
-    // Eligible city: founded and size in {large, metropolis, megalopolis}
-    const city = cityVisitor.selectRandomUsable(
-      world,
-      c => c.founded && (c.size === 'large' || c.size === 'metropolis' || c.size === 'megalopolis'),
-      rng
-    );
-    if (!city) return null;
+    // Wonder Attraction: cities with standing wonders get higher selection weight.
+    // Weight = 1 + 0.25 × wonderTierSum. Consumes exactly 1 rng call.
+    const candidates: Array<{ city: CityEntity; weight: number }> = [];
+    let totalWeight = 0;
+    for (const c of world.mapUsableCities.values()) {
+      if (!c.founded) continue;
+      if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis') continue;
+      const w = 1 + WONDER_ATTRACTION_FACTOR * c.wonderTierSum;
+      candidates.push({ city: c, weight: w });
+      totalWeight += w;
+    }
+    if (candidates.length === 0) return null;
+
+    // Weighted roulette selection (mirrors Wonder.ts pattern)
+    let r = rng() * totalWeight;
+    let city: CityEntity = candidates[candidates.length - 1].city;
+    for (const cand of candidates) {
+      r -= cand.weight;
+      if (r <= 0) { city = cand.city; break; }
+    }
 
     const type = pickIllustrateType(rng);
     const name = generateIllustrateName(rng, world.usedIllustrateNames);
