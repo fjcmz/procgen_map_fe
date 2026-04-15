@@ -229,14 +229,7 @@ export class WonderGenerator {
       // Cooldown: 50yr base, reduced by 1 per 2 growth tech levels, min 10
       const growthLevel = getCityTechLevel(world, c, 'growth');
       const cooldown = Math.max(10, 50 - Math.floor(growthLevel / 2));
-      if (c.wonders.length > 0) {
-        let mostRecentBuilt = -Infinity;
-        for (const wid of c.wonders) {
-          const w = world.mapWonders.get(wid);
-          if (w && w.builtOn > mostRecentBuilt) mostRecentBuilt = w.builtOn;
-        }
-        if (absYear - mostRecentBuilt < cooldown) continue;
-      }
+      if (absYear - c.mostRecentWonderBuilt < cooldown) continue;
 
       // Max standing wonders: floor(government / 5), minimum 1
       const govLevel = getCityTechLevel(world, c, 'government');
@@ -306,6 +299,7 @@ export class WonderGenerator {
     };
 
     city.wonders.push(wonder.id);
+    city.mostRecentWonderBuilt = absYear;
     world.mapWonders.set(wonder.id, wonder);
     world.mapUsableWonders.set(wonder.id, wonder);
 

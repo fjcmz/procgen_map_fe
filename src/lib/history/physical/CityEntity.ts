@@ -146,6 +146,8 @@ export class CityEntity {
   trades: string[] = [];
   illustrates: string[] = [];
   wonders: string[] = [];
+  /** Absolute year of the most recent wonder built in this city (standing or destroyed). Set by WonderGenerator. */
+  mostRecentWonderBuilt: number = -Infinity;
   /** Cached sum of standing wonder tiers — maintained by YearGenerator step 4. */
   wonderTierSum: number = 0;
   religions: Map<string, number> = new Map();
