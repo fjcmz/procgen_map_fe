@@ -5,6 +5,7 @@ import type { CityEntity } from '../physical/CityEntity';
 import type { Trade } from './Trade';
 import type { Illustrate } from './Illustrate';
 import type { CountryEvent } from './Country';
+import type { Wonder } from './Wonder';
 import { TRADE_USE } from '../physical/Resource';
 
 function rngHex(rng: () => number): string {
@@ -21,6 +22,7 @@ export interface Ruin {
   originCity?: CityEntity;
   dissolvedCountry?: string;      // country ID if this ruin caused dissolution
   relocatedIllustrates?: string[];  // illustrate IDs that were moved
+  destroyedWonders?: string[];     // wonder IDs destroyed when the city was ruined
 }
 
 /**
@@ -29,9 +31,10 @@ export interface Ruin {
  * 2. Remove from active simulation maps
  * 3. Sever all contacts
  * 4. End all active trades
- * 5. Relocate living illustrates to other cities
- * 6. Reassign capital if this was the capital
- * 7. Dissolve the country if no non-ruin cities remain
+ * 5. Destroy all standing wonders in this city
+ * 6. Relocate living illustrates to other cities
+ * 7. Reassign capital if this was the capital
+ * 8. Dissolve the country if no non-ruin cities remain
  */
 export function ruinifyCity(
   city: CityEntity,
@@ -78,13 +81,19 @@ export function ruinifyCity(
   // 4. End all active trades involving this city
   _endCityTrades(city, ruin, absYear, year);
 
-  // 5. Relocate living illustrates
+  // 5. Destroy all standing wonders in this city
+  const destroyedWonders = _destroyCityWonders(city, world, absYear, ruin.id);
+  if (destroyedWonders.length > 0) {
+    (ruin as { destroyedWonders?: string[] }).destroyedWonders = destroyedWonders;
+  }
+
+  // 6. Relocate living illustrates
   const relocated = _relocateIllustrates(city, world, rng);
   if (relocated.length > 0) {
     (ruin as { relocatedIllustrates?: string[] }).relocatedIllustrates = relocated;
   }
 
-  // 6–7. Capital reassignment / country dissolution
+  // 7–8. Capital reassignment / country dissolution
   const region = world.mapRegions.get(city.regionId);
   if (region?.isCountry && region.countryId) {
     const country = world.mapCountries.get(region.countryId) as CountryEvent | undefined;
@@ -138,6 +147,29 @@ function _endCityTrades(city: CityEntity, ruin: Ruin, absYear: number, year: Yea
   for (const trade of year.trades as Trade[]) {
     endTrade(trade);
   }
+}
+
+/**
+ * Destroy all standing wonders belonging to a ruined city.
+ * Sets destroyedOn / destroyCause on each wonder and removes from mapUsableWonders.
+ * Does NOT clear city.wonders — that array is a permanent record for serialization.
+ */
+function _destroyCityWonders(
+  city: CityEntity,
+  world: World,
+  absYear: number,
+  ruinId: string,
+): string[] {
+  const destroyed: string[] = [];
+  for (const wonderId of city.wonders) {
+    const wonder = world.mapUsableWonders.get(wonderId) as Wonder | undefined;
+    if (!wonder) continue; // already destroyed
+    wonder.destroyedOn = absYear;
+    wonder.destroyCause = ruinId;
+    world.mapUsableWonders.delete(wonderId);
+    destroyed.push(wonderId);
+  }
+  return destroyed;
 }
 
 /**

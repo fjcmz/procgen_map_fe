@@ -278,15 +278,27 @@ function serializeYearEvents(
   }
 
   // Wonder destructions — scan all wonders for any destroyed this year.
-  // The destruction is recorded on the Wonder object by CataclysmGenerator;
-  // we resolve the cause from the year's cataclysms to build the description.
+  // The destruction is recorded on the Wonder object by CataclysmGenerator
+  // or by ruinifyCity; we resolve the cause to build the description.
   for (const w of world.mapWonders.values()) {
     if (w.destroyedOn !== absYear) continue;
     const city = world.mapCities.get(w.city);
     const tierName = WONDER_TIER_NAMES[w.tier] ?? `Tier ${w.tier}`;
-    // Resolve cataclysm type from the year's cataclysms via destroyCause ID
+    // Resolve cause: check cataclysms first, then ruins (city destruction)
     const causingCat = year.cataclysms.find(c => c.id === w.destroyCause);
-    const causeDesc = causingCat ? `destroyed by ${causingCat.strength} ${causingCat.type}` : 'destroyed';
+    let causeDesc: string;
+    if (causingCat) {
+      causeDesc = `destroyed by ${causingCat.strength} ${causingCat.type}`;
+    } else {
+      const causingRuin = year.ruins.find(r => r.id === w.destroyCause);
+      if (causingRuin) {
+        causeDesc = causingRuin.cause === 'cataclysm'
+          ? 'lost when its city was destroyed by cataclysm'
+          : 'lost when its city was abandoned';
+      } else {
+        causeDesc = 'destroyed';
+      }
+    }
     events.push({
       type: 'WONDER_DESTROYED',
       year: absYear,
