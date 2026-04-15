@@ -5,7 +5,7 @@ import type { War } from './War';
 import type { CountryEvent } from './Country';
 import type { Empire } from './Empire';
 import { mergeAllTechs, getNewTechs, getCountryTechLevel, type TechField } from './Tech';
-import { getCountryStandingWonderTierSum } from './Wonder';
+import { getCountryStandingWonderTierSum, getEmpireStandingWonderCount } from './Wonder';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -118,11 +118,14 @@ export class ConquerGenerator {
     this._handleEmpireEffects(conqueredCountry, conquerorCountry, world);
 
     // Phase 1 `government` tech: if the winner's empire integration is weaker
-    // than the loser's, the conqueror's empire may dissolve entirely. Small
-    // 15% chance, gated on (a) the conqueror is currently in an empire and
-    // (b) conquerorGov < conqueredGov.
+    // than the loser's, the conqueror's empire may dissolve entirely.
+    // Base 15% chance, reduced by 2% per standing wonder across the empire
+    // (prestigious monuments hold empires together). Gated on (a) the
+    // conqueror is currently in an empire and (b) conquerorGov < conqueredGov.
     if (conquerorCountry.memberOf) {
-      if (preConquerorGov < preConqueredGov && rng() < 0.15) {
+      const wonderCount = getEmpireStandingWonderCount(world, conquerorCountry.memberOf);
+      const dissolutionProb = Math.max(0, 0.15 - 0.02 * wonderCount);
+      if (preConquerorGov < preConqueredGov && dissolutionProb > 0 && rng() < dissolutionProb) {
         this._dissolveEmpire(conquerorCountry.memberOf, absYear);
       }
     }
