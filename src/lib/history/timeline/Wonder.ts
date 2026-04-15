@@ -228,7 +228,7 @@ export class WonderGenerator {
 
       // Cooldown: 50yr base, reduced by 1 per 2 growth tech levels, min 10
       const growthLevel = getCityTechLevel(world, c, 'growth');
-      const cooldown = Math.max(10, 50 - Math.floor(growthLevel / 2));
+      const cooldown = Math.max(10, 100 - Math.floor(growthLevel / 2));
       if (absYear - c.mostRecentWonderBuilt < cooldown) continue;
 
       // Max standing wonders: floor(government / 5), minimum 1
