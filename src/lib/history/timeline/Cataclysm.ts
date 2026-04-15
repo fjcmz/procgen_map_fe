@@ -67,6 +67,15 @@ const STRENGTH_WEIGHTS: Record<CataclysmStrength, number> = {
 };
 const STRENGTH_TOTAL = (Object.values(STRENGTH_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
 
+const ALL_TECH_FIELDS: readonly TechField[] = [
+  'science', 'military', 'industry', 'energy', 'growth',
+  'exploration', 'biology', 'art', 'government',
+];
+
+const WONDER_DESTROY_BASE_CHANCE: Record<CataclysmStrength, number> = {
+  local: 0.30, regional: 0.55, continental: 0.80, global: 0.95,
+};
+
 function pickCataclysmType(rng: () => number): CataclysmType {
   let r = rng() * CATACLYSM_TYPE_TOTAL;
   for (const [type, info] of Object.entries(CATACLYSM_TYPES) as [CataclysmType, CataclysmTypeInfo][]) {
@@ -327,17 +336,34 @@ export class CataclysmGenerator {
       }
     }
 
-    // Secondary effect: Wonder destruction
+    // Secondary effect: Wonder destruction (probabilistic, strength- and tech-gated)
     if (typeInfo.canDestroyWonder && world.mapUsableWonders.size > 0) {
-      const usableWonders = Array.from(world.mapUsableWonders.values()) as Wonder[];
-      // Find a wonder in an affected city
-      const destroyableWonder = usableWonders.find(w =>
-        Array.from(affectedCities).some(c => c.wonders.includes(w.id))
-      );
-      if (destroyableWonder) {
-        destroyableWonder.destroyedOn = absYear;
-        destroyableWonder.destroyCause = cataclysm.id;
-        world.mapUsableWonders.delete(destroyableWonder.id);
+      // Collect all standing wonders in affected cities
+      const wonderPool: Wonder[] = [];
+      for (const city of affectedCities) {
+        for (const wonderId of city.wonders) {
+          const w = world.mapUsableWonders.get(wonderId);
+          if (w) wonderPool.push(w);
+        }
+      }
+      if (wonderPool.length > 0) {
+        // Pick a random wonder from the scoped pool
+        const targetWonder = wonderPool[Math.floor(rng() * wonderPool.length)];
+        // Compute tech-reduced destruction chance from the wonder's host city
+        const hostCity = world.mapCities.get(targetWonder.city) as CityEntity | undefined;
+        let totalTech = 0;
+        if (hostCity) {
+          for (const field of ALL_TECH_FIELDS) {
+            totalTech += getCityTechLevel(world, hostCity, field);
+          }
+        }
+        const baseChance = WONDER_DESTROY_BASE_CHANCE[strength];
+        const destroyChance = Math.max(0.05, baseChance - 0.02 * totalTech);
+        if (rng() < destroyChance) {
+          targetWonder.destroyedOn = absYear;
+          targetWonder.destroyCause = cataclysm.id;
+          world.mapUsableWonders.delete(targetWonder.id);
+        }
       }
     }
 
