@@ -245,6 +245,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 convertYears={props.convertYears}
                 ownershipAtYear={props.ownershipAtYear}
                 citySizesAtYear={props.citySizesAtYear}
+                seed={props.seed}
                 onSelectEntity={props.onSelectEntity}
                 onNavigate={props.onEntityNavigate}
               />
