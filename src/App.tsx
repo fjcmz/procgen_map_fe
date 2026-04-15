@@ -199,10 +199,11 @@ export default function App() {
       }
     } else if (entity.type === 'empire') {
       if (!mapData.history || !ownershipAtYear) return;
-      // Find empire snapshot to get member countries
-      const snapYear = entity.snapshotYear;
-      const empSnap = mapData.history.empireSnapshots[snapYear];
-      const empEntry = empSnap?.find(e => e.empireId === entity.empireId);
+      // Replay empire membership to the exact selected year (snapshots only
+      // exist at multiples of 20 + the final year, so a direct dictionary
+      // lookup would miss inter-snapshot years).
+      const empireSnaps = getEmpiresAtYear(mapData.history, selectedYear);
+      const empEntry = empireSnaps.find(e => e.empireId === entity.empireId);
       if (!empEntry) return;
       const memberSet = new Set(empEntry.memberCountryIndices);
       const cells: number[] = [];

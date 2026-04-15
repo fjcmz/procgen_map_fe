@@ -709,7 +709,7 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, convertY
         <div style={styles.entityNameRow}>
           <div style={styles.entityName}>
             {country.name}
-            {!country.isAlive && <span style={styles.deadBadge}> (fallen)</span>}
+            {(country.diedYear !== undefined ? country.diedYear <= selectedYear : !country.isAlive) && <span style={styles.deadBadge}> (fallen)</span>}
           </div>
           {onNavigate && ownershipAtYear && (
             <button

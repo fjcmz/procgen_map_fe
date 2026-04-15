@@ -25,6 +25,8 @@ export interface Conquer {
    * surface the delta in the event log without re-resolving Tech objects.
    */
   acquiredTechList?: Array<{ field: TechField; level: number }>;
+  /** Set when this conquest triggered a government-tech empire dissolution. */
+  dissolvedEmpireId?: string;
   year?: Year;
   inWar?: War;
   conquerorCountry?: CountryEvent;
@@ -126,6 +128,7 @@ export class ConquerGenerator {
       const wonderCount = getEmpireStandingWonderCount(world, conquerorCountry.memberOf);
       const dissolutionProb = Math.max(0, 0.15 - 0.02 * wonderCount);
       if (preConquerorGov < preConqueredGov && dissolutionProb > 0 && rng() < dissolutionProb) {
+        conquer.dissolvedEmpireId = conquerorCountry.memberOf.id;
         this._dissolveEmpire(conquerorCountry.memberOf, absYear);
       }
     }

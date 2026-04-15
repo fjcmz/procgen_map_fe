@@ -605,18 +605,24 @@ export function getEmpiresAtYear(
     if (yearData.year <= baseYear) continue;
     if (yearData.year > targetYear) break;
 
-    const conquests: Array<{ conqueror: number; conquered: number }> = [];
+    const conquests: Array<{ conqueror: number; conquered: number; dissolvedEmpireId?: string }> = [];
     const empireFounders: number[] = [];
+    const dissolvedCountries: number[] = []; // countries dissolved via RUIN events
     for (const ev of yearData.events) {
       if (ev.type === 'CONQUEST' && ev.targetId !== undefined) {
-        conquests.push({ conqueror: ev.initiatorId, conquered: ev.targetId });
+        conquests.push({ conqueror: ev.initiatorId, conquered: ev.targetId, dissolvedEmpireId: ev.dissolvedEmpireId });
       } else if (ev.type === 'EMPIRE') {
         empireFounders.push(ev.initiatorId);
+      } else if (ev.type === 'RUIN' && ev.targetId !== undefined) {
+        // RUIN events with a targetId indicate the dissolved country's index.
+        // The country must be removed from its empire (and the empire dissolved
+        // if it shrinks to ≤1 members).
+        dissolvedCountries.push(ev.targetId);
       }
     }
 
     // Process conquests
-    for (const { conqueror, conquered } of conquests) {
+    for (const { conqueror, conquered, dissolvedEmpireId } of conquests) {
       const conqueredEmpireId = countryToEmpire.get(conquered);
       if (conqueredEmpireId) {
         const members = empireMembers.get(conqueredEmpireId);
@@ -637,6 +643,35 @@ export function getEmpiresAtYear(
           members.add(conquered);
           countryToEmpire.set(conquered, conquerorEmpireId);
         }
+      }
+      // Government-tech dissolution: the 15% stability roll in ConquerGenerator
+      // can dissolve the conqueror's empire right after the conquest. This has
+      // no explicit event type — it's stamped on the CONQUEST event itself.
+      if (dissolvedEmpireId) {
+        const members = empireMembers.get(dissolvedEmpireId);
+        if (members) {
+          for (const m of members) countryToEmpire.delete(m);
+          empireMembers.delete(dissolvedEmpireId);
+          empireEntries.delete(dissolvedEmpireId);
+        }
+      }
+    }
+
+    // Process country dissolutions (from RUIN events): remove the dissolved
+    // country from its empire, dissolving the empire if it shrinks to ≤1.
+    for (const countryIdx of dissolvedCountries) {
+      const empireId = countryToEmpire.get(countryIdx);
+      if (empireId) {
+        const members = empireMembers.get(empireId);
+        if (members) {
+          members.delete(countryIdx);
+          if (members.size <= 1) {
+            for (const m of members) countryToEmpire.delete(m);
+            empireMembers.delete(empireId);
+            empireEntries.delete(empireId);
+          }
+        }
+        countryToEmpire.delete(countryIdx);
       }
     }
 
@@ -795,7 +830,7 @@ export function generateHistory(
   const usedNames = new Set<string>();
   const countries: Country[] = capitalCells.map((cell, i) => {
     const name = generateCountryName(rng, usedNames);
-    return { id: i, name, capitalCellIndex: cell.index, isAlive: true };
+    return { id: i, name, capitalCellIndex: cell.index, isAlive: true, foundedYear: 0 };
   });
 
   // Ownership: -2 = impassable, -1 = unclaimed, >= 0 = countryId

@@ -572,6 +572,7 @@ function serializeYearEvents(
       targetCellIndex: cqdRegion?.cities[0]?.cellIndex,
       countryName: cqrName,
       acquiredTechs: acquired.length > 0 ? acquired : undefined,
+      dissolvedEmpireId: c.dissolvedEmpireId,
     });
   }
 
@@ -596,10 +597,16 @@ function serializeYearEvents(
     if (ruin.dissolvedCountry) {
       description += ` Its nation dissolved.`;
     }
+    // Resolve the dissolved country's numeric index so the client-side
+    // getEmpiresAtYear replay can remove it from its empire.
+    const dissolvedCountryIdx = ruin.dissolvedCountry
+      ? countryMap.idToIndex.get(ruin.dissolvedCountry)
+      : undefined;
     events.push({
       type: 'RUIN',
       year: absYear,
       initiatorId: -1,
+      targetId: dissolvedCountryIdx,
       description,
       locationCellIndex: city?.cellIndex,
     });
@@ -1283,6 +1290,19 @@ export class HistoryGenerator {
     }
 
     // Phase 5: Build Country[] for UI
+    // Pre-index country dissolution years from RUIN events that dissolved a country.
+    // A country dies when all its region's cities become ruins, triggering _dissolveCountry.
+    const countryDiedAbsYear = new Map<string, number>();
+    for (let yi = 0; yi < yearsToSerialize; yi++) {
+      const yearObj2 = timeline.years[yi];
+      if (!yearObj2) continue;
+      for (const ruin of yearObj2.ruins) {
+        if (ruin.dissolvedCountry) {
+          countryDiedAbsYear.set(ruin.dissolvedCountry, yearObj2.year);
+        }
+      }
+    }
+
     const countries = countryMap.indexToCountry.map((entry, idx) => {
       const country = (world.mapCountries.get(entry.id) ?? world.mapDeadCountries.get(entry.id)) as CountryEvent | undefined;
       const region = world.mapRegions.get(entry.regionId);
@@ -1290,11 +1310,20 @@ export class HistoryGenerator {
       // Country is alive if it's still in mapCountries (not dissolved) at the final year
       const isAlive = !!country && !world.mapDeadCountries.has(entry.id)
         && country.foundedOn <= (timeline.years[yearsToSerialize - 1]?.year ?? 0);
+      const foundedYear = country
+        ? country.foundedOn - timeline.startOfTime
+        : 0;
+      const diedAbsYear = countryDiedAbsYear.get(entry.id);
+      const diedYear = diedAbsYear !== undefined
+        ? diedAbsYear - timeline.startOfTime
+        : undefined;
       return {
         id: idx,
         name: entry.name,
         capitalCellIndex: capitalCell,
         isAlive,
+        foundedYear,
+        diedYear,
       };
     });
 

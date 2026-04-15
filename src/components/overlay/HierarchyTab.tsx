@@ -171,10 +171,14 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     let statelessCityCount = 0;
 
     for (const country of countries) {
+      // Skip countries not yet founded at the selected year
+      if (country.foundedYear > selectedYear) continue;
       const countryCities = citiesByCountry.get(country.id) ?? [];
-      // Skip countries that have no cities AND are not alive — these are
-      // usually placeholder rows at default-0 capital cells.
-      if (!country.isAlive && countryCities.length === 0) continue;
+      // Skip countries that have no cities AND are dead at the selected year.
+      // Use diedYear when available for year-accurate filtering; fall back to
+      // the static isAlive flag (final-year state) when diedYear is absent.
+      const aliveAtYear = country.diedYear === undefined || country.diedYear > selectedYear;
+      if (!aliveAtYear && countryCities.length === 0) continue;
       const node: CountryNode = { country, cities: countryCities };
       const emp = countryToEmpire.get(country.id);
       if (emp) {
@@ -335,7 +339,9 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     const key = `cty:${node.country.id}`;
     const isOpen = isExpanded(key);
     const isFounder = founderIdx !== null && node.country.id === founderIdx;
-    const dead = !node.country.isAlive;
+    const dead = node.country.diedYear !== undefined
+      ? node.country.diedYear <= selectedYear
+      : !node.country.isAlive;
     return (
       <div key={key} style={styles.countryBlock}>
         <button

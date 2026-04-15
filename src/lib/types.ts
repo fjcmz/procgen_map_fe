@@ -145,6 +145,10 @@ export interface Country {
   capitalCellIndex: number;
   isAlive: boolean;
   absorbedById?: number;
+  /** Year index (0-based, relative to simulation start) when this country was founded. */
+  foundedYear: number;
+  /** Year index when this country died (all cities ruined), or undefined if still alive at final year. */
+  diedYear?: number;
 }
 
 /** Discriminated union representing a user-selected entity on the map. */
@@ -206,6 +210,8 @@ export interface HistoryEvent {
   wonderName?: string;
   /** WONDER-only: tier of the wonder (1-10). */
   wonderTier?: number;
+  /** CONQUEST-only: empire ID dissolved due to this conquest's government-tech stability check. */
+  dissolvedEmpireId?: string;
   /** TERRITORIAL_EXPANSION-only: number of cells claimed in this expansion event. */
   expansionCellCount?: number;
   /** SETTLEMENT-only: name of the city settled in expansion territory. */
