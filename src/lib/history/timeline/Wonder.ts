@@ -214,6 +214,8 @@ export class WonderGenerator {
     // Phase 1: Build candidates with feasible tier and weight
     const candidates: Array<{ city: CityEntity; weight: number; tier: number }> = [];
 
+    const absYear = year.year;
+
     for (const c of world.mapUsableCities.values()) {
       // City size gate: must be large, metropolis, or megalopolis
       if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis') continue;
@@ -223,6 +225,16 @@ export class WonderGenerator {
       for (const field of ALL_TECH_FIELDS) {
         totalTech += getCityTechLevel(world, c, field);
       }
+
+      // Cooldown: 50yr base, reduced by 1 per 2 growth tech levels, min 10
+      const growthLevel = getCityTechLevel(world, c, 'growth');
+      const cooldown = Math.max(10, 50 - Math.floor(growthLevel / 2));
+      if (absYear - c.mostRecentWonderBuilt < cooldown) continue;
+
+      // Max standing wonders: floor(government / 5), minimum 1
+      const govLevel = getCityTechLevel(world, c, 'government');
+      const maxStanding = Math.max(1, Math.floor(govLevel / 5));
+      if (getStandingWonderCount(world, c) >= maxStanding) continue;
 
       // Max tier from tech: tier N requires N*10 total tech levels
       let maxTier = Math.min(10, Math.floor(totalTech / 10));
@@ -274,7 +286,6 @@ export class WonderGenerator {
     const name = pickWonderName(rng, tier, world.usedWonderNames);
 
     // Phase 5: Create the Wonder
-    const absYear = year.year;
     const wonder: Wonder = {
       id: IdUtil.id('wonder', absYear, rngHex(rng)) ?? 'wonder_unknown',
       city: city.id,
@@ -288,6 +299,7 @@ export class WonderGenerator {
     };
 
     city.wonders.push(wonder.id);
+    city.mostRecentWonderBuilt = absYear;
     world.mapWonders.set(wonder.id, wonder);
     world.mapUsableWonders.set(wonder.id, wonder);
 
