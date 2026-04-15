@@ -9,6 +9,8 @@ import { formatPopulation, formatYear } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
+import { CityMapPopup } from '../CityMapPopup';
+import { deriveCityEnvironment } from '../../lib/citymap/cityMapGenerator';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -17,6 +19,7 @@ interface DetailsTabProps {
   convertYears: boolean;
   ownershipAtYear?: Int16Array;
   citySizesAtYear?: Uint8Array;
+  seed: string;
   onSelectEntity: (entity: SelectedEntity | null) => void;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
@@ -319,6 +322,7 @@ export function DetailsTab({
   convertYears,
   ownershipAtYear,
   citySizesAtYear,
+  seed,
   onSelectEntity,
   onNavigate,
 }: DetailsTabProps) {
@@ -370,6 +374,7 @@ export function DetailsTab({
         ownershipAtYear={ownershipAtYear}
         citySizesAtYear={citySizesAtYear}
         popSnap={popSnap}
+        seed={seed}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -389,6 +394,7 @@ export function DetailsTab({
         ownershipAtYear={ownershipAtYear}
         citySizesAtYear={citySizesAtYear}
         popSnap={popSnap}
+        seed={seed}
         onSelectEntity={onSelectEntity}
         onNavigate={onNavigate}
       />
@@ -408,6 +414,7 @@ export function DetailsTab({
       ownershipAtYear={ownershipAtYear}
       citySizesAtYear={citySizesAtYear}
       popSnap={popSnap}
+      seed={seed}
       onSelectEntity={onSelectEntity}
       onNavigate={onNavigate}
     />
@@ -433,16 +440,18 @@ interface SubProps {
   citySizesAtYear?: Uint8Array;
   ownershipAtYear?: Int16Array;
   popSnap: Record<number, number>;
+  seed: string;
   onSelectEntity: (entity: SelectedEntity | null) => void;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
 }
 
 // ── City Details ──
-function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, onSelectEntity, onNavigate }: SubProps & { cellIndex: number }) {
+function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, empireSnap, snapKey, ownershipAtYear, citySizesAtYear, popSnap, seed, onSelectEntity, onNavigate }: SubProps & { cellIndex: number }) {
   const city = mapData.cities.find(c => c.cellIndex === cellIndex);
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [showCityMap, setShowCityMap] = useState(false);
   const empire = country ? findEmpireForCountry(empireSnap, country.id) : undefined;
 
   const wonderSnap = useMemo(() => {
@@ -508,6 +517,20 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
   const recentEvents = events.slice(-15);
 
+  const cityEnvironment = useMemo(() => {
+    if (!city) return null;
+    const wonderCellIndices = wonderSnap.map(w => w.cellIndex);
+    return deriveCityEnvironment(
+      city,
+      mapData.cells,
+      mapData,
+      citySizesAtYear,
+      selectedYear,
+      wonderCellIndices,
+      religionSnap,
+    );
+  }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);
+
   return (
     <div style={styles.root}>
       <div style={styles.miniHeader}>
@@ -521,13 +544,22 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
             {city?.isCapital && <span title="Capital">{'\u2605'} </span>}
             {city?.name ?? `Cell #${cellIndex}`}
           </div>
-          {onNavigate && (
-            <button
-              style={styles.locateBtn}
-              onClick={() => onNavigate([cellIndex], cellIndex)}
-              title="Locate on map"
-            >{'\u25CE'}</button>
-          )}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            {city && cityEnvironment && (
+              <button
+                style={styles.cityMapBtn}
+                onClick={() => setShowCityMap(true)}
+                title="View City Map"
+              >Map</button>
+            )}
+            {onNavigate && (
+              <button
+                style={styles.locateBtn}
+                onClick={() => onNavigate([cellIndex], cellIndex)}
+                title="Locate on map"
+              >{'\u25CE'}</button>
+            )}
+          </div>
         </div>
 
         <div style={styles.infoGrid}>
@@ -602,6 +634,16 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           </>
         )}
       </div>
+
+      {city && cityEnvironment && (
+        <CityMapPopup
+          isOpen={showCityMap}
+          onClose={() => setShowCityMap(false)}
+          cityName={city.name}
+          environment={cityEnvironment}
+          seed={seed}
+        />
+      )}
     </div>
   );
 }
@@ -1327,6 +1369,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 14,
     color: '#2a1a00',
     padding: '2px 0',
+  },
+  cityMapBtn: {
+    flexShrink: 0,
+    background: 'none',
+    border: '1px solid #c4a46a',
+    borderRadius: 3,
+    cursor: 'pointer',
+    fontSize: 10,
+    color: '#5a3a10',
+    padding: '1px 5px',
+    lineHeight: 1.4,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
   },
   locateBtn: {
     flexShrink: 0,
