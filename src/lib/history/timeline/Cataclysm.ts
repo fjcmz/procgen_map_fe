@@ -358,7 +358,7 @@ export class CataclysmGenerator {
           }
         }
         const baseChance = WONDER_DESTROY_BASE_CHANCE[strength];
-        const destroyChance = Math.max(0.05, baseChance - 0.02 * totalTech);
+        const destroyChance = Math.max(0.01, baseChance - 0.02 * totalTech - 0.02 * targetWonder.tier);
         if (rng() < destroyChance) {
           targetWonder.destroyedOn = absYear;
           targetWonder.destroyCause = cataclysm.id;
