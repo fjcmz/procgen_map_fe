@@ -65,7 +65,7 @@ export interface CityMapData {
 
 // ── Constants ──
 
-const CANVAS_SIZE = 500;
+const CANVAS_SIZE = 720;
 const CITY_MARGIN = CANVAS_SIZE * 0.15; // fringe area
 
 const DISTRICT_COUNTS: Record<CitySize, number> = {
