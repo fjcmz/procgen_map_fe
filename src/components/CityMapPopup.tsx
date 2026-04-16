@@ -23,7 +23,7 @@ export function CityMapPopup({ isOpen, onClose, cityName, environment, seed }: C
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const size = 500;
+    const size = 720;
     canvas.width = size * dpr;
     canvas.height = size * dpr;
     canvas.style.width = `${size}px`;
