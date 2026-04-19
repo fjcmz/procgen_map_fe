@@ -8,10 +8,10 @@ The public surface (deriveCityEnvironment, generateCityMap(seed, cityName, env),
 ## Approach
 
 ### 1. Extend CityEnvironment to carry counts, not booleans
-src/lib/citymap/cityMapGenerator.ts — replace hasWonder: boolean / hasReligion: boolean with wonderCount: number / religionCount: number. Update deriveCityEnvironment to count occurrences:
-wonderCount = wonderCellIndices?.filter(i => i === city.cellIndex).length ?? 0
-religionCount = religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0
-src/components/overlay/DetailsTab.tsx:520-532 already passes the full arrays — no call-site change needed.
+    * src/lib/citymap/cityMapGenerator.ts — replace hasWonder: boolean / hasReligion: boolean with wonderCount: number / religionCount: number. Update deriveCityEnvironment to count occurrences:
+        * wonderCount = wonderCellIndices?.filter(i => i === city.cellIndex).length ?? 0
+        * religionCount = religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0
+    * src/components/overlay/DetailsTab.tsx:520-532 already passes the full arrays — no call-site change needed.
 
 
 ### 2. Replace the generator with a tile-grid pipeline
