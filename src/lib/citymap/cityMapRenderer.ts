@@ -28,6 +28,9 @@ export function renderCityMap(
   // Layer 2: faint cadastral grid (4-tile groupings ≈ 180 px for 720 px canvas)
   drawCadastralGrid(ctx, S, data.grid);
 
+  // Layer 11: walls + towers + gates
+  drawWalls(ctx, data);
+
   // Ruin overlay
   if (env.isRuin) drawRuinOverlay(ctx, S, rng);
 
@@ -55,6 +58,116 @@ function drawCadastralGrid(
     ctx.lineTo(size, y);
   }
   ctx.stroke();
+}
+
+function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (data.wallPath.length < 2) return;
+  const { tileSize, w: gridW } = data.grid;
+  const px = (c: [number, number]): [number, number] => [c[0] * tileSize, c[1] * tileSize];
+
+  // Wall thickness scales gently with grid density (3 px on tiny grids → 5 px on big ones).
+  const wallWidth = Math.max(3, Math.min(5, Math.round(tileSize * 0.22)));
+
+  // Gate edges to skip when stroking the wall.
+  const gateKeys = new Set<string>();
+  for (const g of data.gates) {
+    const [a, b] = g.edge;
+    gateKeys.add(`${a[0]},${a[1]}|${b[0]},${b[1]}`);
+    gateKeys.add(`${b[0]},${b[1]}|${a[0]},${a[1]}`);
+  }
+
+  // Stroke wall segments (skipping gate gaps).
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = wallWidth;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  for (let i = 0; i < data.wallPath.length - 1; i++) {
+    const a = data.wallPath[i];
+    const b = data.wallPath[i + 1];
+    const k = `${a[0]},${a[1]}|${b[0]},${b[1]}`;
+    if (gateKeys.has(k)) continue;
+    const [ax, ay] = px(a);
+    const [bx, by] = px(b);
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+  }
+  ctx.stroke();
+
+  // Tower circles at convex corners (where the wall turns clockwise = outward bump).
+  const towerR = Math.max(2.5, wallWidth * 0.85);
+  ctx.fillStyle = INK;
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1;
+  const seen = new Set<string>();
+  const len = data.wallPath.length;
+  // wallPath is closed (last == first). Use modular indexing on len-1 unique nodes.
+  const n = len - 1;
+  for (let i = 0; i < n; i++) {
+    const prev = data.wallPath[(i - 1 + n) % n];
+    const curr = data.wallPath[i];
+    const next = data.wallPath[(i + 1) % n];
+    const dx1 = curr[0] - prev[0];
+    const dy1 = curr[1] - prev[1];
+    const dx2 = next[0] - curr[0];
+    const dy2 = next[1] - curr[1];
+    if (dx1 === dx2 && dy1 === dy2) continue; // straight, no turn
+    // CW turn (convex bump) on a y-down screen has positive cross product.
+    const cross = dx1 * dy2 - dy1 * dx2;
+    if (cross <= 0) continue;
+    const k = `${curr[0]},${curr[1]}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    const [cx, cy] = px(curr);
+    ctx.beginPath();
+    ctx.arc(cx, cy, towerR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Always plant a tower flanking each gate so the opening reads clearly.
+  for (const g of data.gates) {
+    for (const c of g.edge) {
+      const k = `${c[0]},${c[1]}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const [cx, cy] = px(c);
+      ctx.beginPath();
+      ctx.arc(cx, cy, towerR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // Gate door dashes: short tick marks on each side of the gap, perpendicular to the wall.
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1.5, wallWidth * 0.5);
+  for (const g of data.gates) {
+    const [a, b] = g.edge;
+    const [ax, ay] = px(a);
+    const [bx, by] = px(b);
+    const ex = bx - ax;
+    const ey = by - ay;
+    const elen = Math.hypot(ex, ey) || 1;
+    // Inward perpendicular (toward city center) for visual cue.
+    const cxTile = (gridW - 1) / 2;
+    const cyTile = (gridW - 1) / 2;
+    const midTx = (a[0] + b[0]) / 2;
+    const midTy = (a[1] + b[1]) / 2;
+    let nx = -ey / elen;
+    let ny = ex / elen;
+    if ((cxTile - midTx) * nx + (cyTile - midTy) * ny < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    const dashLen = tileSize * 0.45;
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(ax + nx * dashLen, ay + ny * dashLen);
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + nx * dashLen, by + ny * dashLen);
+    ctx.stroke();
+  }
 }
 
 function drawRuinOverlay(
