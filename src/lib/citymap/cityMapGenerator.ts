@@ -801,6 +801,383 @@ function findBridges(
   return bridges;
 }
 
+// ── Block flood-fill ──
+
+function computeWaterTiles(
+  river: { edges: [[number, number], [number, number]][]; islands: Set<string> } | null,
+): Set<string> {
+  const waterTiles = new Set<string>();
+  if (!river) return waterTiles;
+  for (const [a, b] of river.edges) {
+    if (a[1] === b[1]) {
+      const tx = Math.min(a[0], b[0]);
+      const k1 = tileKey(tx, a[1] - 1);
+      const k2 = tileKey(tx, a[1]);
+      if (!river.islands.has(k1)) waterTiles.add(k1);
+      if (!river.islands.has(k2)) waterTiles.add(k2);
+    } else {
+      const ty = Math.min(a[1], b[1]);
+      const k1 = tileKey(a[0] - 1, ty);
+      const k2 = tileKey(a[0], ty);
+      if (!river.islands.has(k1)) waterTiles.add(k1);
+      if (!river.islands.has(k2)) waterTiles.add(k2);
+    }
+  }
+  return waterTiles;
+}
+
+function buildBarrierSet(
+  wallPath: [number, number][],
+  roads: [number, number][][],
+  streets: [number, number][][],
+  river: { edges: [[number, number], [number, number]][]; islands: Set<string> } | null,
+): Set<string> {
+  const barriers = new Set<string>();
+  for (let i = 0; i < wallPath.length - 1; i++) {
+    const a = wallPath[i];
+    const b = wallPath[i + 1];
+    barriers.add(edgeKey(a[0], a[1], b[0], b[1]));
+  }
+  for (const road of roads) {
+    for (let i = 0; i < road.length - 1; i++) {
+      barriers.add(edgeKey(road[i][0], road[i][1], road[i + 1][0], road[i + 1][1]));
+    }
+  }
+  for (const street of streets) {
+    for (let i = 0; i < street.length - 1; i++) {
+      barriers.add(edgeKey(street[i][0], street[i][1], street[i + 1][0], street[i + 1][1]));
+    }
+  }
+  if (river) {
+    for (const [a, b] of river.edges) {
+      barriers.add(edgeKey(a[0], a[1], b[0], b[1]));
+    }
+  }
+  return barriers;
+}
+
+function generateBlocks(
+  interior: Set<string>,
+  waterTiles: Set<string>,
+  barriers: Set<string>,
+  gridW: number,
+  env: CityEnvironment,
+  rng: () => number,
+): CityBlock[] {
+  const visited = new Set<string>();
+  const blocks: CityBlock[] = [];
+
+  for (let y = 0; y < gridW; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const k = tileKey(x, y);
+      if (visited.has(k)) continue;
+      visited.add(k);
+      if (waterTiles.has(k)) continue;
+
+      const tiles: [number, number][] = [];
+      const queue: [number, number][] = [[x, y]];
+      while (queue.length > 0) {
+        const [tx, ty] = queue.shift()!;
+        tiles.push([tx, ty]);
+        // Right neighbor: shared edge (tx+1, ty) → (tx+1, ty+1)
+        const rightEdge = edgeKey(tx + 1, ty, tx + 1, ty + 1);
+        // Left neighbor: shared edge (tx, ty) → (tx, ty+1)
+        const leftEdge = edgeKey(tx, ty, tx, ty + 1);
+        // Bottom neighbor: shared edge (tx, ty+1) → (tx+1, ty+1)
+        const bottomEdge = edgeKey(tx, ty + 1, tx + 1, ty + 1);
+        // Top neighbor: shared edge (tx, ty) → (tx+1, ty)
+        const topEdge = edgeKey(tx, ty, tx + 1, ty);
+        const neighbors: [number, number, string][] = [
+          [tx + 1, ty, rightEdge],
+          [tx - 1, ty, leftEdge],
+          [tx, ty + 1, bottomEdge],
+          [tx, ty - 1, topEdge],
+        ];
+        for (const [nx, ny, e] of neighbors) {
+          if (nx < 0 || nx >= gridW || ny < 0 || ny >= gridW) continue;
+          const nk = tileKey(nx, ny);
+          if (visited.has(nk)) continue;
+          if (barriers.has(e)) continue;
+          if (waterTiles.has(nk)) { visited.add(nk); continue; }
+          visited.add(nk);
+          queue.push([nx, ny]);
+        }
+      }
+
+      if (tiles.length > 0) {
+        blocks.push({ tiles, role: 'residential', name: '' });
+      }
+    }
+  }
+
+  assignBlockRoles(blocks, interior, env, gridW);
+  const usedNames = new Set<string>();
+  for (let i = 0; i < blocks.length; i++) {
+    blocks[i].name = generateBlockName(i, blocks[i].role, rng, usedNames);
+  }
+  return blocks;
+}
+
+function blockCentroid(b: CityBlock): [number, number] {
+  let sx = 0, sy = 0;
+  for (const [x, y] of b.tiles) {
+    sx += x + 0.5;
+    sy += y + 0.5;
+  }
+  return [sx / b.tiles.length, sy / b.tiles.length];
+}
+
+function assignBlockRoles(
+  blocks: CityBlock[],
+  interior: Set<string>,
+  env: CityEnvironment,
+  gridW: number,
+): void {
+  const cx = (gridW - 1) / 2 + 0.5;
+  const cy = (gridW - 1) / 2 + 0.5;
+
+  const interiorBlocks: CityBlock[] = [];
+  const exteriorBlocks: CityBlock[] = [];
+  for (const b of blocks) {
+    const inside = b.tiles.filter(t => interior.has(tileKey(t[0], t[1]))).length;
+    if (inside * 2 >= b.tiles.length) interiorBlocks.push(b);
+    else exteriorBlocks.push(b);
+  }
+
+  const isHarborBlock = (b: CityBlock): boolean => {
+    if (!env.waterSide) return false;
+    const [bx, by] = blockCentroid(b);
+    const threshold = gridW * 0.3;
+    switch (env.waterSide) {
+      case 'north': return by < threshold;
+      case 'south': return by > gridW - threshold;
+      case 'west': return bx < threshold;
+      case 'east': return bx > gridW - threshold;
+    }
+  };
+
+  const scored = interiorBlocks.map(b => {
+    const [bx, by] = blockCentroid(b);
+    return { b, d: Math.hypot(bx - cx, by - cy) };
+  }).sort((a, b) => a.d - b.d);
+
+  const marketCount =
+    env.size === 'small' ? 1 :
+    env.size === 'medium' ? 1 :
+    env.size === 'large' ? 2 :
+    env.size === 'metropolis' ? 2 : 3;
+
+  for (let i = 0; i < scored.length; i++) {
+    const entry = scored[i];
+    if (i === 0) entry.b.role = 'civic';
+    else if (i <= marketCount) entry.b.role = 'market';
+    else if (isHarborBlock(entry.b)) entry.b.role = 'harbor';
+    else entry.b.role = 'residential';
+  }
+
+  const slumThreshold = Math.max(6, Math.round(gridW / 4));
+  for (const b of exteriorBlocks) {
+    let touchesInterior = false;
+    for (const [x, y] of b.tiles) {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (interior.has(tileKey(x + dx, y + dy))) { touchesInterior = true; break; }
+      }
+      if (touchesInterior) break;
+    }
+    b.role = touchesInterior && b.tiles.length <= slumThreshold ? 'slum' : 'agricultural';
+  }
+}
+
+// ── Medieval name combiner ──
+
+const NAME_PREFIXES = [
+  'ELM', 'OAK', 'ASH', 'ROSE', 'BRIAR', 'THORN',
+  'BLUE', 'RED', 'GOLD', 'GREEN', 'WHITE', 'BLACK', 'SILVER', 'COPPER', 'IRON',
+  'OLD', 'NEW', 'HIGH', 'LOW', 'FAR',
+  'STONE', 'BRICK', 'GLASS', 'BREAD', 'SALT', 'WINE', 'CORN',
+  'KING', 'QUEEN', 'BISHOP', 'ABBEY', 'GUILD',
+];
+
+const SUFFIXES_CIVIC = ['CROSS', 'COURT', 'SQUARE', 'GATE'];
+const SUFFIXES_MARKET = ['MARKET', 'CROSS', 'SQUARE', 'ROW'];
+const SUFFIXES_HARBOR = ['DOCKS', 'QUAY', 'WHARF', 'BANK'];
+const SUFFIXES_RESIDENTIAL = ['LANE', 'ROW', 'END', 'HOLM', 'SIDE', 'YARD', 'HILL', 'HEATH', 'GATE'];
+const SUFFIXES_SLUM = ['ROW', 'END', 'HEATH', 'LANE', 'SIDE'];
+const SUFFIXES_AGRI = ['FIELDS', 'CROFT', 'MEADOW', 'ACRES'];
+
+function suffixesForRole(role: DistrictRole): string[] {
+  switch (role) {
+    case 'civic': return SUFFIXES_CIVIC;
+    case 'market': return SUFFIXES_MARKET;
+    case 'harbor': return SUFFIXES_HARBOR;
+    case 'slum': return SUFFIXES_SLUM;
+    case 'agricultural': return SUFFIXES_AGRI;
+    default: return SUFFIXES_RESIDENTIAL;
+  }
+}
+
+function generateBlockName(
+  index: number,
+  role: DistrictRole,
+  rng: () => number,
+  used: Set<string>,
+): string {
+  const suffixes = suffixesForRole(role);
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const prefix = NAME_PREFIXES[Math.floor(rng() * NAME_PREFIXES.length)];
+    const suffix = suffixes[Math.floor(rng() * suffixes.length)];
+    const joiner = rng() < 0.35 ? ' ' : '';
+    const name = prefix + joiner + suffix;
+    if (!used.has(name)) {
+      used.add(name);
+      return name;
+    }
+  }
+  const fallback = `DISTRICT ${index + 1}`;
+  used.add(fallback);
+  return fallback;
+}
+
+// ── Open spaces ──
+
+function generateOpenSpaces(
+  blocks: CityBlock[],
+  waterTiles: Set<string>,
+  reservedTiles: Set<string>,
+  env: CityEnvironment,
+  gridW: number,
+  rng: () => number,
+): { kind: 'square' | 'market' | 'park'; tiles: [number, number][] }[] {
+  const spaces: { kind: 'square' | 'market' | 'park'; tiles: [number, number][] }[] = [];
+  const cx = (gridW - 1) / 2 + 0.5;
+  const cy = (gridW - 1) / 2 + 0.5;
+
+  const isFree = (t: [number, number]): boolean =>
+    !reservedTiles.has(tileKey(t[0], t[1])) && !waterTiles.has(tileKey(t[0], t[1]));
+
+  const civicBlock = blocks.find(b => b.role === 'civic');
+  if (civicBlock) {
+    const sorted = civicBlock.tiles
+      .filter(isFree)
+      .sort((a, b) => {
+        const da = Math.hypot(a[0] + 0.5 - cx, a[1] + 0.5 - cy);
+        const db = Math.hypot(b[0] + 0.5 - cx, b[1] + 0.5 - cy);
+        return da - db;
+      });
+    const pickCount = env.size === 'small' ? 1 : 2;
+    const picks = sorted.slice(0, Math.min(pickCount, sorted.length));
+    if (picks.length > 0) {
+      spaces.push({ kind: 'square', tiles: picks });
+      for (const t of picks) reservedTiles.add(tileKey(t[0], t[1]));
+    }
+  }
+
+  for (const b of blocks) {
+    if (b.role !== 'market') continue;
+    const free = b.tiles.filter(isFree);
+    if (free.length === 0) continue;
+    const t = free[Math.floor(rng() * free.length)];
+    spaces.push({ kind: 'market', tiles: [t] });
+    reservedTiles.add(tileKey(t[0], t[1]));
+  }
+
+  const parkCount =
+    env.size === 'small' ? 1 :
+    env.size === 'medium' ? 1 :
+    env.size === 'large' ? 2 :
+    env.size === 'metropolis' ? 3 : 3;
+  const resBlocks = blocks.filter(b => b.role === 'residential');
+  for (let i = 0; i < parkCount; i++) {
+    if (resBlocks.length === 0) break;
+    const b = resBlocks[Math.floor(rng() * resBlocks.length)];
+    const free = b.tiles.filter(isFree);
+    if (free.length === 0) continue;
+    const t = free[Math.floor(rng() * free.length)];
+    spaces.push({ kind: 'park', tiles: [t] });
+    reservedTiles.add(tileKey(t[0], t[1]));
+  }
+
+  return spaces;
+}
+
+// ── Landmarks ──
+
+function generateLandmarks(
+  blocks: CityBlock[],
+  openSpaces: { kind: 'square' | 'market' | 'park'; tiles: [number, number][] }[],
+  reservedTiles: Set<string>,
+  env: CityEnvironment,
+  gridW: number,
+  rng: () => number,
+): CityLandmark[] {
+  const landmarks: CityLandmark[] = [];
+  const cx = (gridW - 1) / 2 + 0.5;
+  const cy = (gridW - 1) / 2 + 0.5;
+  const placed = new Set<string>();
+  const markPlaced = (t: [number, number]) => {
+    placed.add(tileKey(t[0], t[1]));
+    reservedTiles.add(tileKey(t[0], t[1]));
+  };
+
+  const byDistanceToCenter = (tiles: [number, number][]): [number, number][] =>
+    [...tiles].sort((a, b) => {
+      const da = Math.hypot(a[0] + 0.5 - cx, a[1] + 0.5 - cy);
+      const db = Math.hypot(b[0] + 0.5 - cx, b[1] + 0.5 - cy);
+      return da - db;
+    });
+
+  const civicBlocks = blocks.filter(b => b.role === 'civic');
+  const marketBlocks = blocks.filter(b => b.role === 'market');
+
+  if (env.isCapital && civicBlocks.length > 0) {
+    const bigEnough =
+      env.size === 'large' || env.size === 'metropolis' || env.size === 'megalopolis';
+    const capitalTypes: ('castle' | 'palace')[] = bigEnough
+      ? ['castle', 'palace']
+      : [rng() < 0.5 ? 'castle' : 'palace'];
+
+    const civicTiles = byDistanceToCenter(
+      civicBlocks.flatMap(b => b.tiles).filter(t => !placed.has(tileKey(t[0], t[1]))),
+    );
+    for (const type of capitalTypes) {
+      const t = civicTiles.shift();
+      if (!t) break;
+      landmarks.push({ tile: t, type });
+      markPlaced(t);
+    }
+  }
+
+  const civicAndMarket = [
+    ...civicBlocks.flatMap(b => b.tiles),
+    ...marketBlocks.flatMap(b => b.tiles),
+  ];
+
+  for (let i = 0; i < env.religionCount; i++) {
+    const candidates = civicAndMarket.filter(t => !placed.has(tileKey(t[0], t[1])));
+    if (candidates.length === 0) break;
+    const t = candidates[Math.floor(rng() * candidates.length)];
+    landmarks.push({ tile: t, type: 'temple' });
+    markPlaced(t);
+  }
+
+  const squareTiles = openSpaces
+    .filter(s => s.kind === 'square' || s.kind === 'market')
+    .flatMap(s => s.tiles);
+  for (let i = 0; i < env.wonderCount; i++) {
+    const pool = [
+      ...squareTiles,
+      ...civicAndMarket,
+    ].filter(t => !placed.has(tileKey(t[0], t[1])));
+    if (pool.length === 0) break;
+    const t = pool[Math.floor(rng() * pool.length)];
+    landmarks.push({ tile: t, type: 'monument' });
+    // Monuments may share an open-space tile with the square itself but not with another landmark.
+    placed.add(tileKey(t[0], t[1]));
+  }
+
+  return landmarks;
+}
+
 // ── Main generator ──
 
 export function generateCityMap(seed: string, cityName: string, env: CityEnvironment): CityMapData {
@@ -821,6 +1198,14 @@ export function generateCityMap(seed: string, cityName: string, env: CityEnviron
   const streets = generateStreets(interior, roads, riverEdgeSet, gridW, rng);
   const bridges = findBridges(roads, riverEdgeSet);
 
+  const waterTiles = computeWaterTiles(river);
+  const barriers = buildBarrierSet(wallPath, roads, streets, river);
+  const blocks = generateBlocks(interior, waterTiles, barriers, gridW, env, rng);
+
+  const reservedTiles = new Set<string>();
+  const openSpaces = generateOpenSpaces(blocks, waterTiles, reservedTiles, env, gridW, rng);
+  const landmarks = generateLandmarks(blocks, openSpaces, reservedTiles, env, gridW, rng);
+
   return {
     grid: { w: gridW, h: gridW, tileSize },
     wallPath,
@@ -829,10 +1214,10 @@ export function generateCityMap(seed: string, cityName: string, env: CityEnviron
     bridges,
     roads,
     streets,
-    blocks: [],
-    openSpaces: [],
+    blocks,
+    openSpaces,
     buildings: [],
-    landmarks: [],
+    landmarks,
     districtLabels: [],
     canvasSize: CANVAS_SIZE,
   };
