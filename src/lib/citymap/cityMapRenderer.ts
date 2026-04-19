@@ -1,4 +1,4 @@
-import type { CityMapData, CityEnvironment } from './cityMapGenerator';
+import type { CityMapData, CityEnvironment, CityLandmark } from './cityMapGenerator';
 import { seededPRNG } from '../terrain/noise';
 
 // ── Palette tokens ──
@@ -9,6 +9,9 @@ const PARCHMENT = '#ebdfba'; // ruin overlay + label halo
 const RIVER_FILL = '#6d665a';
 const STREET_COLOR = '#b8ad92';
 const ROAD_COLOR = '#2a241c';
+const OPEN_SPACE_FILL = '#e4dbc4';
+const PARK_GREEN = '#6b7f4a';
+const LANDMARK_FILL = '#f5f0e8';
 
 // ── Main render function ──
 
@@ -43,8 +46,14 @@ export function renderCityMap(
   // Layer 8: bridges
   drawBridges(ctx, data);
 
+  // Layer 9: open spaces (squares, markets, parks)
+  drawOpenSpaces(ctx, data, rng);
+
   // Layer 11: walls + towers + gates
   drawWalls(ctx, data);
+
+  // Layer 12: landmarks (castle, palace, temple, monument)
+  drawLandmarks(ctx, data);
 
   // Ruin overlay
   if (env.isRuin) drawRuinOverlay(ctx, S, rng);
@@ -319,6 +328,229 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapData): void {
 
     ctx.restore();
   }
+}
+
+function drawOpenSpaces(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapData,
+  rng: () => number,
+): void {
+  if (data.openSpaces.length === 0) return;
+  const { tileSize } = data.grid;
+
+  for (const os of data.openSpaces) {
+    for (const [tx, ty] of os.tiles) {
+      const px = tx * tileSize;
+      const py = ty * tileSize;
+      const inset = Math.max(1, tileSize * 0.06);
+      const w = tileSize - inset * 2;
+      const h = tileSize - inset * 2;
+
+      ctx.fillStyle = OPEN_SPACE_FILL;
+      ctx.fillRect(px + inset, py + inset, w, h);
+
+      if (os.kind === 'park') {
+        // Cluster of small trees as green circles.
+        const trees = 3 + Math.floor(rng() * 3);
+        for (let i = 0; i < trees; i++) {
+          const cx = px + inset + rng() * w;
+          const cy = py + inset + rng() * h;
+          const r = Math.max(1.5, tileSize * 0.08);
+          ctx.fillStyle = PARK_GREEN;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = INK;
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
+        }
+      } else if (os.kind === 'market') {
+        // Scatter tiny stall rectangles.
+        const stalls = 4 + Math.floor(rng() * 4);
+        ctx.fillStyle = INK;
+        for (let i = 0; i < stalls; i++) {
+          const sw = Math.max(2, tileSize * 0.12);
+          const sh = Math.max(2, tileSize * 0.09);
+          const sx = px + inset + rng() * (w - sw);
+          const sy = py + inset + rng() * (h - sh);
+          ctx.fillRect(sx, sy, sw, sh);
+        }
+      }
+    }
+  }
+}
+
+function drawLandmarks(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (data.landmarks.length === 0) return;
+  const { tileSize } = data.grid;
+
+  for (const lm of data.landmarks) {
+    const px = lm.tile[0] * tileSize;
+    const py = lm.tile[1] * tileSize;
+    switch (lm.type) {
+      case 'castle': drawCastleGlyph(ctx, px, py, tileSize); break;
+      case 'palace': drawPalaceGlyph(ctx, px, py, tileSize); break;
+      case 'temple': drawTempleGlyph(ctx, px, py, tileSize); break;
+      case 'monument': drawMonumentGlyph(ctx, px, py, tileSize); break;
+    }
+  }
+
+  // Small labels below major capital landmarks so they read at a glance.
+  const labeledTypes = new Set<CityLandmark['type']>(['castle', 'palace']);
+  ctx.fillStyle = INK;
+  ctx.font = `bold ${Math.max(8, Math.round(tileSize * 0.35))}px Georgia, 'Times New Roman', serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const lm of data.landmarks) {
+    if (!labeledTypes.has(lm.type)) continue;
+    const cx = lm.tile[0] * tileSize + tileSize / 2;
+    const cy = lm.tile[1] * tileSize + tileSize + 1;
+    ctx.fillText(lm.type.toUpperCase(), cx, cy);
+  }
+}
+
+function drawCastleGlyph(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  tileSize: number,
+): void {
+  const inset = tileSize * 0.12;
+  const x = px + inset;
+  const y = py + inset;
+  const w = tileSize - inset * 2;
+  const h = tileSize - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1, tileSize * 0.06);
+  ctx.strokeRect(x, y, w, h);
+
+  // Crenellated top — alternating notches.
+  const notches = 5;
+  const notchW = w / (notches * 2 - 1);
+  ctx.fillStyle = INK;
+  for (let i = 0; i < notches; i++) {
+    const nx = x + i * 2 * notchW;
+    ctx.fillRect(nx, y - notchW * 0.6, notchW, notchW * 0.6);
+  }
+
+  // Tower circles at the 4 corners.
+  const r = Math.max(2, tileSize * 0.1);
+  ctx.fillStyle = LANDMARK_FILL;
+  for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Central door.
+  const doorW = w * 0.2;
+  const doorH = h * 0.4;
+  ctx.fillStyle = INK;
+  ctx.fillRect(x + w / 2 - doorW / 2, y + h - doorH, doorW, doorH);
+}
+
+function drawPalaceGlyph(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  tileSize: number,
+): void {
+  const inset = tileSize * 0.08;
+  const x = px + inset;
+  const y = py + inset;
+  const w = tileSize - inset * 2;
+  const h = tileSize - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1, tileSize * 0.05);
+  ctx.strokeRect(x, y, w, h);
+
+  // Inner courtyard.
+  const cInset = Math.max(2, tileSize * 0.22);
+  ctx.strokeRect(x + cInset, y + cInset, w - cInset * 2, h - cInset * 2);
+
+  // Corner wings (solid squares).
+  const sq = Math.max(2, tileSize * 0.14);
+  ctx.fillStyle = INK;
+  for (const [cx, cy] of [[x, y], [x + w - sq, y], [x, y + h - sq], [x + w - sq, y + h - sq]]) {
+    ctx.fillRect(cx, cy, sq, sq);
+  }
+}
+
+function drawTempleGlyph(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  tileSize: number,
+): void {
+  const inset = tileSize * 0.15;
+  const x = px + inset;
+  const y = py + inset;
+  const w = tileSize - inset * 2;
+  const h = tileSize - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = Math.max(1, tileSize * 0.05);
+  ctx.strokeRect(x, y, w, h);
+
+  // Dome (half circle at top) + cross.
+  const cx = x + w / 2;
+  const domeR = Math.min(w, h) * 0.22;
+  ctx.fillStyle = INK;
+  ctx.beginPath();
+  ctx.arc(cx, y + h * 0.45, domeR, Math.PI, 0, false);
+  ctx.fill();
+
+  // Cross centered in the lower half.
+  const crossY = y + h * 0.55;
+  const crossH = h * 0.3;
+  const crossW = w * 0.18;
+  const armW = crossH * 0.3;
+  ctx.fillRect(cx - crossW / 2, crossY + armW, crossW, armW);
+  ctx.fillRect(cx - armW / 2, crossY, armW, crossH);
+}
+
+function drawMonumentGlyph(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  tileSize: number,
+): void {
+  const cx = px + tileSize / 2;
+  const baseY = py + tileSize * 0.85;
+  const topY = py + tileSize * 0.18;
+  const halfW = tileSize * 0.12;
+
+  // Obelisk: tapered rectangle with a pointed cap.
+  ctx.fillStyle = INK;
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW * 0.55, topY);
+  ctx.lineTo(cx + halfW * 0.55, topY);
+  ctx.lineTo(cx + halfW, baseY);
+  ctx.lineTo(cx - halfW, baseY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cap triangle.
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW * 0.55, topY);
+  ctx.lineTo(cx, topY - tileSize * 0.08);
+  ctx.lineTo(cx + halfW * 0.55, topY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Base step.
+  const stepW = tileSize * 0.42;
+  const stepH = tileSize * 0.07;
+  ctx.fillRect(cx - stepW / 2, baseY, stepW, stepH);
 }
 
 function drawRuinOverlay(
