@@ -6,6 +6,9 @@ import { seededPRNG } from '../terrain/noise';
 const FLAT_PAPER = '#ece5d3';
 const INK = '#2a241c';
 const PARCHMENT = '#ebdfba'; // ruin overlay + label halo
+const RIVER_FILL = '#6d665a';
+const STREET_COLOR = '#b8ad92';
+const ROAD_COLOR = '#2a241c';
 
 // ── Main render function ──
 
@@ -27,6 +30,18 @@ export function renderCityMap(
 
   // Layer 2: faint cadastral grid (4-tile groupings ≈ 180 px for 720 px canvas)
   drawCadastralGrid(ctx, S, data.grid);
+
+  // Layer 5: river channel
+  if (data.river) drawRiver(ctx, data);
+
+  // Layer 6: streets
+  drawStreets(ctx, data);
+
+  // Layer 7: roads
+  drawRoads(ctx, data);
+
+  // Layer 8: bridges
+  drawBridges(ctx, data);
 
   // Layer 11: walls + towers + gates
   drawWalls(ctx, data);
@@ -167,6 +182,142 @@ function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapData): void {
     ctx.moveTo(bx, by);
     ctx.lineTo(bx + nx * dashLen, by + ny * dashLen);
     ctx.stroke();
+  }
+}
+
+function drawRiver(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (!data.river) return;
+  const { tileSize } = data.grid;
+  const px = (c: [number, number]): [number, number] => [c[0] * tileSize, c[1] * tileSize];
+
+  // Fill each tile that has at least one river edge as a river-colored square.
+  // Build set of tiles touching river edges.
+  const riverTileKeys = new Set<string>();
+  for (const [a, b] of data.river.edges) {
+    // Determine which tile(s) share this edge
+    const ax = a[0], ay = a[1], bx = b[0], by = b[1];
+    if (ay === by) {
+      // horizontal edge — shared by tile (min(ax,bx), ay-1) and (min(ax,bx), ay)
+      const tx = Math.min(ax, bx);
+      riverTileKeys.add(`${tx},${ay - 1}`);
+      riverTileKeys.add(`${tx},${ay}`);
+    } else {
+      // vertical edge — shared by tile (ax-1, min(ay,by)) and (ax, min(ay,by))
+      const ty = Math.min(ay, by);
+      riverTileKeys.add(`${ax - 1},${ty}`);
+      riverTileKeys.add(`${ax},${ty}`);
+    }
+  }
+
+  ctx.fillStyle = RIVER_FILL;
+  for (const key of riverTileKeys) {
+    const [xs, ys] = key.split(',');
+    const tx = Number(xs), ty = Number(ys);
+    if (tx < 0 || ty < 0 || tx >= data.grid.w || ty >= data.grid.h) continue;
+    // Skip island tiles — restore ground color
+    if (data.river.islands.has(key)) continue;
+    const [px1, py1] = px([tx, ty]);
+    ctx.fillRect(px1, py1, tileSize, tileSize);
+  }
+
+  // Restore island tiles to paper color
+  ctx.fillStyle = FLAT_PAPER;
+  for (const key of data.river.islands) {
+    const [xs, ys] = key.split(',');
+    const tx = Number(xs), ty = Number(ys);
+    const [px1, py1] = px([tx, ty]);
+    ctx.fillRect(px1, py1, tileSize, tileSize);
+  }
+
+  // Outline river edges
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const [a, b] of data.river.edges) {
+    const [ax, ay] = px(a);
+    const [bx, by] = px(b);
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+  }
+  ctx.stroke();
+}
+
+function drawStreets(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (data.streets.length === 0) return;
+  const { tileSize } = data.grid;
+  const px = (c: [number, number]): [number, number] => [c[0] * tileSize, c[1] * tileSize];
+
+  ctx.strokeStyle = STREET_COLOR;
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const path of data.streets) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    const [sx, sy] = px(path[0]);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < path.length; i++) {
+      const [x, y] = px(path[i]);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawRoads(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (data.roads.length === 0) return;
+  const { tileSize } = data.grid;
+  const px = (c: [number, number]): [number, number] => [c[0] * tileSize, c[1] * tileSize];
+
+  ctx.strokeStyle = ROAD_COLOR;
+  ctx.lineWidth = 4;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const path of data.roads) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    const [sx, sy] = px(path[0]);
+    ctx.moveTo(sx, sy);
+    for (let i = 1; i < path.length; i++) {
+      const [x, y] = px(path[i]);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapData): void {
+  if (data.bridges.length === 0) return;
+  const { tileSize } = data.grid;
+  const px = (c: [number, number]): [number, number] => [c[0] * tileSize, c[1] * tileSize];
+
+  for (const [a, b] of data.bridges) {
+    const [ax, ay] = px(a);
+    const [bx, by] = px(b);
+    const mx = (ax + bx) / 2;
+    const my = (ay + by) / 2;
+    const len = Math.hypot(bx - ax, by - ay);
+    const angle = Math.atan2(by - ay, bx - ax);
+
+    ctx.save();
+    ctx.translate(mx, my);
+    ctx.rotate(angle);
+
+    // White bridge deck
+    ctx.fillStyle = '#f5f0e8';
+    ctx.fillRect(-len / 2, -tileSize * 0.3, len, tileSize * 0.6);
+
+    // Ink rails on each side
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-len / 2, -tileSize * 0.3);
+    ctx.lineTo(len / 2, -tileSize * 0.3);
+    ctx.moveTo(-len / 2, tileSize * 0.3);
+    ctx.lineTo(len / 2, tileSize * 0.3);
+    ctx.stroke();
+
+    ctx.restore();
   }
 }
 
