@@ -1,11 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // City Map V2 renderer — Voronoi foundation (PR 1) + walls (PR 2) + river /
-// streets / roads / bridges (PR 3)
+// streets / roads / bridges (PR 3) + open spaces (PR 4 slice)
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles. Every geometric
 // primitive this renderer consumes comes from the polygon graph emitted by
 // `cityMapGeneratorV2.ts` and the polygon-edge traversals done by
-// `cityMapWalls.ts` (PR 2) / `cityMapRiver.ts` + `cityMapNetwork.ts` (PR 3).
+// `cityMapWalls.ts` (PR 2) / `cityMapRiver.ts` + `cityMapNetwork.ts` (PR 3) /
+// `cityMapOpenSpaces.ts` (PR 4 — open spaces slice).
 //
 //   Layer 1  — flat cream base #ece5d3
 //   Layer 2  — faint Voronoi polygon edges (the "organic cadastral grid")
@@ -15,10 +16,20 @@
 //   Layer 7  — roads 4 px #2a241c (PR 3)   [polygon-edge road paths]
 //   Layer 8  — bridges (PR 3): white rect + two dark rail dashes per
 //              road∩river edge
+//   Layer 9  — open spaces (PR 4 slice): pale fills over polygon RINGS for
+//              squares + markets, greenish fills for parks, plus market
+//              stall dots and park trees scattered inside each polygon
 //   Layer 11 — walls + towers + gate doors (PR 2)  [polygon-edge wall path]
-//   …gap…    — Layers 3, 4, 9, 10, 12, 13 reserved for PR 4–5
-//              (docks, sprawl, open spaces, buildings, landmarks, labels)
+//   …gap…    — Layers 3, 4, 10, 12, 13 reserved for PR 4 (remainder) + PR 5
+//              (docks, sprawl, blocks, buildings, landmarks, labels)
 //   Layer 14 — top-centered city name + "V2" QA tag
+//
+// LAYER ORDER NOTE — open spaces are drawn BEFORE roads / streets / walls so
+// the road and wall ink sit visually on top of the pale plaza fills. The
+// polygon ring is filled directly: every market / square / park entry from
+// `data.openSpaces` carries `polygonIds` indexing into `data.polygons`, so
+// the renderer just walks each polygon's `vertices` ring (UNCLOSED, per the
+// `CityPolygon` contract).
 //
 // NOTE ON LAYER 2: the spec calls for a rigid 4×4 cadastral grid. We
 // deliberately substitute a faint stroke of every Voronoi polygon's vertex
@@ -30,7 +41,8 @@
 //      data model. The polygons ARE the cadastral grid in V2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { CityEnvironment, CityMapDataV2 } from './cityMapTypesV2';
+import type { CityEnvironment, CityMapDataV2, CityPolygon } from './cityMapTypesV2';
+import { seededPRNG } from '../terrain/noise';
 
 const BASE_FILL = '#ece5d3';
 const POLYGON_EDGE_STROKE = 'rgba(0, 0, 0, 0.12)';
@@ -75,6 +87,26 @@ const BRIDGE_HALF_WIDTH = 6;      // half-width of the rect perpendicular to the
 const BRIDGE_RAIL_OFFSET = 3;     // perpendicular offset of each rail from the edge centerline
 const BRIDGE_RAIL_WIDTH = 1.5;
 
+// Layer 9 — open-space styling (PR 4 slice). All geometry comes from the
+// polygon graph: each entry in `data.openSpaces` references one or more
+// polygons by id, and the renderer fills those polygons' vertex rings.
+// Colors land a shade above the cream base for plazas (paved feel) and a
+// muted sage for parks (planted feel), so the wall ink (Layer 11) and road
+// ink (Layer 7) drawn on top stay clearly readable.
+const OPEN_SPACE_PLAZA_FILL = '#efe7cb';   // squares + markets — paved / pale
+const OPEN_SPACE_PLAZA_STROKE = 'rgba(138, 128, 112, 0.55)'; // thin outline
+const OPEN_SPACE_PARK_FILL = '#d8dcbf';    // parks — muted greenish
+const OPEN_SPACE_PARK_STROKE = 'rgba(106, 122, 74, 0.55)';
+const MARKET_STALL_INK = '#2a241c';
+const MARKET_STALL_RADIUS = 1.5;
+const MARKET_STALLS_PER_POLYGON_MIN = 6;
+const MARKET_STALLS_PER_POLYGON_MAX = 12;
+const PARK_TREE_FILL = '#6a7a4a';
+const PARK_TREE_STROKE = 'rgba(40, 50, 30, 0.7)';
+const PARK_TREE_RADIUS = 3;
+const PARK_TREES_PER_POLYGON_MIN = 4;
+const PARK_TREES_PER_POLYGON_MAX = 10;
+
 export function renderCityMapV2(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
@@ -83,7 +115,6 @@ export function renderCityMapV2(
   cityName: string,
 ): void {
   void env;
-  void seed;
 
   const size = data.canvasSize;
 
@@ -107,13 +138,19 @@ export function renderCityMapV2(
     ctx.stroke();
   }
 
-  // ── Layers 3, 4, 9, 10, 12, 13 reserved for PR 4–5 ─────────────────────
+  // ── Layers 3, 4, 10, 12, 13 reserved for PR 4 (remainder) + PR 5 ───────
   //   Layer 3  — docks (PR 5, env.waterSide hatching)
   //   Layer 4  — outside-walls sprawl (PR 5)
-  //   Layer 9  — open spaces / park trees / market stalls (PR 4)
   //   Layer 10 — buildings (PR 5)
-  //   Layer 12 — landmarks: castle / palace / temple / monument (PR 4)
+  //   Layer 12 — landmarks: castle / palace / temple / monument (PR 4 next)
   //   Layer 13 — district labels (PR 5)
+
+  // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
+  // [Voronoi-polygon] Each entry references polygons by id; the renderer
+  // fills the union of those polygons' vertex rings (UNCLOSED, per the
+  // CityPolygon contract). Drawn BEFORE river / streets / roads / walls so
+  // those infrastructure layers visibly overlap the pale plaza fills.
+  drawOpenSpaces(ctx, data, seed, cityName);
 
   // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
   // [Voronoi-polygon] Every river edge is a polygon edge. Two stacked
@@ -399,4 +436,150 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
       ctx.stroke();
     }
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 4 (slice) — open spaces (squares + markets + parks) on Layer 9
+// ─────────────────────────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Render every entry in `data.openSpaces`. Each entry's
+// `polygonIds` indexes into `data.polygons`; we fill the union of those
+// polygons' vertex rings (UNCLOSED — `CityPolygon.vertices` is unclosed by
+// the contract documented in `cityMapTypesV2.ts`). On top of the fill we
+// scatter market stalls (small dark dots) or park trees (filled green
+// circles) using a seeded RNG keyed off the city, so re-rendering the same
+// city produces identical scatter positions.
+//
+// Sub-streams: `_openspaces_render_markets` and `_openspaces_render_parks`,
+// matching the generator's `_openspaces_markets` / `_openspaces_parks`
+// sub-stream pattern. Render-side streams are kept distinct from generation
+// streams so re-rendering without re-generating doesn't perturb generation
+// output (and vice versa).
+function drawOpenSpaces(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  seed: string,
+  cityName: string,
+): void {
+  if (data.openSpaces.length === 0) return;
+
+  // Pass 1 — fill polygon rings (squares + markets share plaza colors;
+  // parks use sage). Drawn in a single pass per kind so style switches
+  // are minimised.
+  fillOpenSpaceKind(ctx, data, ['square', 'market'], OPEN_SPACE_PLAZA_FILL, OPEN_SPACE_PLAZA_STROKE);
+  fillOpenSpaceKind(ctx, data, ['park'], OPEN_SPACE_PARK_FILL, OPEN_SPACE_PARK_STROKE);
+
+  // Pass 2 — market stall dots scattered inside each market polygon.
+  const stallRng = seededPRNG(`${seed}_city_${cityName}_openspaces_render_markets`);
+  ctx.fillStyle = MARKET_STALL_INK;
+  for (const entry of data.openSpaces) {
+    if (entry.kind !== 'market') continue;
+    for (const pid of entry.polygonIds) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      const stallCount = randIntInclusive(
+        stallRng,
+        MARKET_STALLS_PER_POLYGON_MIN,
+        MARKET_STALLS_PER_POLYGON_MAX,
+      );
+      // [Voronoi-polygon] Bias scatter around `polygon.site` with a
+      // bounded radius so dots stay inside the polygon ring even on
+      // elongated cells. The polygon's shoelace area informs how wide
+      // we let the scatter spread.
+      const spread = Math.sqrt(polygon.area) * 0.32;
+      for (let i = 0; i < stallCount; i++) {
+        const [px, py] = scatterInsidePolygon(polygon, stallRng, spread);
+        ctx.beginPath();
+        ctx.arc(px, py, MARKET_STALL_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Pass 3 — park trees. Same scatter pattern as stalls but greener and
+  // bigger; outlined so dense clusters still read as individual trees.
+  const treeRng = seededPRNG(`${seed}_city_${cityName}_openspaces_render_parks`);
+  ctx.fillStyle = PARK_TREE_FILL;
+  ctx.strokeStyle = PARK_TREE_STROKE;
+  ctx.lineWidth = 0.75;
+  for (const entry of data.openSpaces) {
+    if (entry.kind !== 'park') continue;
+    for (const pid of entry.polygonIds) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      const treeCount = randIntInclusive(
+        treeRng,
+        PARK_TREES_PER_POLYGON_MIN,
+        PARK_TREES_PER_POLYGON_MAX,
+      );
+      const spread = Math.sqrt(polygon.area) * 0.36;
+      for (let i = 0; i < treeCount; i++) {
+        const [px, py] = scatterInsidePolygon(polygon, treeRng, spread);
+        ctx.beginPath();
+        ctx.arc(px, py, PARK_TREE_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// [Voronoi-polygon] Stroke + fill every polygon listed under any of the
+// requested `kinds`. Keeps the canvas style switches batched per kind.
+function fillOpenSpaceKind(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  kinds: ('square' | 'market' | 'park')[],
+  fillStyle: string,
+  strokeStyle: string,
+): void {
+  ctx.fillStyle = fillStyle;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = 1;
+  ctx.lineJoin = 'round';
+  for (const entry of data.openSpaces) {
+    if (!kinds.includes(entry.kind)) continue;
+    for (const pid of entry.polygonIds) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      tracePolygonRing(ctx, polygon);
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+}
+
+// [Voronoi-polygon] Trace `polygon.vertices` as a closed ring on the
+// current canvas path. The ring is UNCLOSED in the data (per the
+// CityPolygon contract); `closePath` does the wrap.
+function tracePolygonRing(ctx: CanvasRenderingContext2D, polygon: CityPolygon): void {
+  const verts = polygon.vertices;
+  ctx.beginPath();
+  ctx.moveTo(verts[0][0], verts[0][1]);
+  for (let i = 1; i < verts.length; i++) {
+    ctx.lineTo(verts[i][0], verts[i][1]);
+  }
+  ctx.closePath();
+}
+
+// [Voronoi-polygon] Returns a point inside (or near the centre of) a
+// polygon by jittering its `site`. We don't insist on strict point-in-
+// polygon containment — a small jitter bounded by `Math.sqrt(area)` keeps
+// stalls / trees visually inside the polygon even for elongated Voronoi
+// cells, and the wall / road / river layers drawn on top hide any rare
+// outliers. Keeping the helper geometry-only means determinism is governed
+// solely by the caller's RNG.
+function scatterInsidePolygon(
+  polygon: CityPolygon,
+  rng: () => number,
+  spread: number,
+): [number, number] {
+  const [sx, sy] = polygon.site;
+  const dx = (rng() - 0.5) * 2 * spread;
+  const dy = (rng() - 0.5) * 2 * spread;
+  return [sx + dx, sy + dy];
+}
+
+function randIntInclusive(rng: () => number, lo: number, hi: number): number {
+  return lo + Math.floor(rng() * (hi - lo + 1));
 }

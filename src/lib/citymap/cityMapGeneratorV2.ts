@@ -27,6 +27,7 @@ import { generateWallsAndGates } from './cityMapWalls';
 import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
+import { generateOpenSpaces } from './cityMapOpenSpaces';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -214,6 +215,24 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
+  // PR 4 (open-spaces slice) — civic square + markets + parks. Polygon-based
+  // throughout: civic = polygon nearest canvas center; markets = polygons
+  // nearest each gate midpoint (with Lloyd-style spread for the rest);
+  // parks = BFS clusters over polygon.neighbors. Eligibility filters out
+  // polygons whose ring touches a wall / river / road edge so plazas never
+  // overlap infrastructure. Blocks + landmarks (the rest of spec PR 4)
+  // remain deferred — `blocks: []` and `landmarks: []` below stay empty.
+  const openSpaces = generateOpenSpaces(
+    seed,
+    cityName,
+    env,
+    polygons,
+    wall,
+    river,
+    roads,
+    CANVAS_SIZE,
+  );
+
   return {
     canvasSize: CANVAS_SIZE,
     polygonCount,
@@ -224,9 +243,12 @@ export function generateCityMapV2(
     bridges,
     roads,
     streets,
+    // TODO PR 4 (remainder): district clusters with roles + medieval names.
+    // Open spaces landed first; blocks come next.
     blocks: [],
-    openSpaces: [],
+    openSpaces,
     buildings: [],
+    // TODO PR 4 (remainder): castle / palace / temple / monument placements.
     landmarks: [],
     districtLabels: [],
   };
