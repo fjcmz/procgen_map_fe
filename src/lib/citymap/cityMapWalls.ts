@@ -25,11 +25,23 @@
 // connect-prune → hole-fill → deterministic edge chain → cardinal-aligned
 // gate pick) but run them on the polygon graph. Do NOT copy V1's tile
 // data structures.
+//
+// PR 3 note: the polygon-edge helpers (`roundV`, `vertexKey`,
+// `canonicalEdgeKey`, `EdgeRecord`, `buildEdgeOwnership`) used to live
+// here. They were lifted into `cityMapEdgeGraph.ts` when rivers / roads /
+// streets appeared as additional callers. This file now imports them
+// and keeps only the wall-specific stages.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
 import type { CitySize } from './cityMapTypes';
 import { createNoiseSamplers, fbm } from '../terrain/noise';
+import {
+  buildEdgeOwnership,
+  canonicalEdgeKey,
+  vertexKey,
+  type EdgeRecord,
+} from './cityMapEdgeGraph';
 
 // Mirrors V1's file-local SIZE_TIER (cityMapGenerator.ts:37). Duplicated
 // rather than imported so V1 can be retired in PR 5 without a reverse dep.
@@ -46,11 +58,6 @@ const SIZE_TIER: Record<CitySize, number> = {
 // polygon candidate set instead of a tile grid.
 const COVERAGE_MIN = 0.5;
 const COVERAGE_MAX = 0.85;
-
-// Round(v * VERTEX_PRECISION) / VERTEX_PRECISION before stringifying so
-// shared edges between adjacent polygons collapse to the same canonical
-// key. D3-Delaunay's clip step can introduce sub-ULP float differences.
-const VERTEX_PRECISION = 1000;
 
 // FBM perturbation applied to each polygon's radial-distance score. The
 // input scale produces ~5-8 noise cycles across the 720 px canvas (matches
@@ -217,54 +224,10 @@ function selectInteriorPolygons(
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 2 — polygon-edge ownership map
 // ─────────────────────────────────────────────────────────────────────────────
-
-interface EdgeRecord {
-  polyIds: number[];
-  /** Raw (un-rounded) endpoints — preserve sub-pixel precision in wallPath. */
-  a: Point;
-  b: Point;
-}
-
-function roundV(v: number): number {
-  return Math.round(v * VERTEX_PRECISION) / VERTEX_PRECISION;
-}
-
-function vertexKey(p: Point): string {
-  return `${roundV(p[0])},${roundV(p[1])}`;
-}
-
-function canonicalEdgeKey(a: Point, b: Point): string {
-  const ka = vertexKey(a);
-  const kb = vertexKey(b);
-  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
-}
-
-// [Voronoi-polygon] Build a lookup from every polygon edge to the 1 or 2
-// polygons that share it. Voronoi cells share exact edges with each of
-// their Delaunay neighbors; canonicalizing endpoints via `roundV` collapses
-// any float drift from d3's clip step so the same shared edge always maps
-// to the same key. An edge owned by exactly two polygons is internal; an
-// edge owned by exactly one is on the polygon-graph boundary.
-function buildEdgeOwnership(polygons: CityPolygon[]): Map<string, EdgeRecord> {
-  const map = new Map<string, EdgeRecord>();
-  for (const p of polygons) {
-    const verts = p.vertices;
-    const n = verts.length;
-    if (n < 3) continue;
-    for (let i = 0; i < n; i++) {
-      const a = verts[i];
-      const b = verts[(i + 1) % n];
-      const key = canonicalEdgeKey(a, b);
-      const existing = map.get(key);
-      if (existing) {
-        existing.polyIds.push(p.id);
-      } else {
-        map.set(key, { polyIds: [p.id], a: [a[0], a[1]], b: [b[0], b[1]] });
-      }
-    }
-  }
-  return map;
-}
+// `buildEdgeOwnership`, `roundV`, `vertexKey`, `canonicalEdgeKey`, and the
+// `EdgeRecord` shape live in `cityMapEdgeGraph.ts` — lifted out of this file
+// in PR 3 when rivers/roads/streets became additional callers. The pre-lift
+// helpers were here in PR 2. Do NOT duplicate them again.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Step 3 — collect wall boundary edges
