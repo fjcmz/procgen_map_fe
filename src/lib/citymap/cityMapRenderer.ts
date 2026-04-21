@@ -1,4 +1,4 @@
-import type { CityMapData, CityEnvironment, CityLandmark } from './cityMapGenerator';
+import type { CityMapData, CityEnvironment, CityLandmark } from './cityMapTypes';
 import { seededPRNG } from '../terrain/noise';
 
 // ── Palette tokens ──
