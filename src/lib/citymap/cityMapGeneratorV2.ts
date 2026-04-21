@@ -28,6 +28,7 @@ import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
+import { generateBlocks } from './cityMapBlocks';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -220,8 +221,9 @@ export function generateCityMapV2(
   // nearest each gate midpoint (with Lloyd-style spread for the rest);
   // parks = BFS clusters over polygon.neighbors. Eligibility filters out
   // polygons whose ring touches a wall / river / road edge so plazas never
-  // overlap infrastructure. Blocks + landmarks (the rest of spec PR 4)
-  // remain deferred — `blocks: []` and `landmarks: []` below stay empty.
+  // overlap infrastructure. The blocks slice below consumes the civic /
+  // market polygons from this result to stamp block roles; landmarks (the
+  // remaining piece of spec PR 4) still stay deferred.
   const openSpaces = generateOpenSpaces(
     seed,
     cityName,
@@ -230,6 +232,28 @@ export function generateCityMapV2(
     wall,
     river,
     roads,
+    CANVAS_SIZE,
+  );
+
+  // PR 4 (blocks slice) — polygon-graph flood bounded by wall / river / road /
+  // street edges. Every polygon lands in exactly one block. Role is assigned
+  // from the already-computed open-space anchors (civic square → civic block,
+  // market polygon → market block), `env.waterSide` proximity (harbor),
+  // `polygon.isEdge` membership (slum / agricultural for the outside-walls
+  // clusters PR 5 will render as sprawl), otherwise `residential`. Medieval
+  // names via the V1 prefix+suffix combiner on a dedicated RNG sub-stream.
+  // See `cityMapBlocks.ts` for the full algorithm + semantic-inversion note
+  // (streets ARE block barriers, unlike open-space eligibility).
+  const blocks = generateBlocks(
+    seed,
+    cityName,
+    env,
+    polygons,
+    wall,
+    river,
+    roads,
+    streets,
+    openSpaces,
     CANVAS_SIZE,
   );
 
@@ -243,9 +267,7 @@ export function generateCityMapV2(
     bridges,
     roads,
     streets,
-    // TODO PR 4 (remainder): district clusters with roles + medieval names.
-    // Open spaces landed first; blocks come next.
-    blocks: [],
+    blocks,
     openSpaces,
     buildings: [],
     // TODO PR 4 (remainder): castle / palace / temple / monument placements.
