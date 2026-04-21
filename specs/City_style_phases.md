@@ -1,15 +1,43 @@
-# City map style improvements
+# City map generator redux
 This document contains a series of sequential changes to implement a new style for the city maps. 
 Each change is described as a pull request (PR) that builds on the previous ones.
 Each PR in this document is independently buildable, visually verifiable in npm run dev, and keeps the generateCityMap / renderCityMap signatures stable.
 
+## City map components
+A city wil have these components with this detailed geometry:
+* A city map will be 720x720 px, with an adaptative display for mobile devices.
+* A city map will be composed of Voronoi polygons.
+* The number of polygons will be based on the city size tier (150/250/350/500/1000)
+* A capital city will have a castle or a palace or both
+* A city will have a temple per religion
+* A city will have a monument per wonder; higher tier wonders appear bigger
+* Medium+ cities will have a wall; megalopolis will have 2 walls, one around a core area and another around the whole city
+* Cities with coast and some trade will have a dock
+* Cities on or next to a river cell will show the river in the map; the river will follow polygon edges and will cross the city from opposing side walls; if the city is on the coast the river must finish on the coast; a river might bifurcate and join again forming islands
+* Walls will have at least on gate per main side
+* Cities will have streets and roads represented along the edges between polygons; roads will always go from wall gates to the palace or castle
+* Roads can cross a river and if they do they will have a bridge
+* Districts will be densely packed with buildings
+* Cities will have ~10% of their area covered by open spaces like squares, parks, and markets
+* All buildings will be rendered from a top view
+* Cities will show some sparse buildings in cells out of their area; the bigger the city the more such sparse buildings
+* Cities will show roads going from the gates to the outer limits of the map, as roads connecting to other non visible cities 
+
+## PR 0 - New Generator based on Voronoi Polygons
+PR 0 - New Generator based on Voronoi Polygons
+* Scope: create a new city map generator implementation that lives along the existing one but that is not used yet.
+* This new city map generation appears as a new button called "MapV2" in the details tab, next to the existing "Map" button
+* Goal: the new implementation will start as a dummy skeleton that will be improved in subsequent pull requests and will replace the existing generator once all the features are complete.
+* Reuse as much as possible of the exist data structures.
+* Ditch all the existing city map generator and renderer logic that is based on tiles.
+* Extract the data structures for a city map into its own file to split the data structures from the generator and rendering logic.
+
 ## PR 1 - Foundations
 PR 1 — Foundation: env counts, new data shape, flat-paper base
-* Scope: data contract + minimal renderer swap, no geometry yet.
-* cityMapGenerator.ts: swap hasWonder/hasReligion booleans → wonderCount/religionCount in deriveCityEnvironment (count occurrences in the already-passed cell-index arrays).
+* Scope: data contract + minimal renderer, no geometry yet.
 * Define new CityMapData / CityBlock / CityBuilding / CityLandmark types (fields present but mostly empty arrays this PR).
-Grid sizing by size tier (28/36/44/54/64) + tileSize = CANVAS_SIZE / gridW.
-* cityMapRenderer.ts: strip drawBackground parchment/grain/biome tint, drawTerrainFringe, drawCoastalWater, agricultural hatching. Draw layer 1 (solid #ece5d3) + layer 2 (faint 4×4 cadastral grid) + layer 14 (city name).
+* Grid sizing by size tier as described.
+* Renderer with draw layer 1 (solid #ece5d3) + layer 2 (faint 4×4 cadastral grid) + layer 14 (city name).
 * Barrel index.ts re-exports new types.
 * Verify: flat neutral canvas with city title; no regressions in CityMapPopup; sweep unaffected.
 
