@@ -1,8 +1,8 @@
 import type { CityEnvironment, CityMapData } from './cityMapTypes';
 
-// PR 0 skeleton: flat cream canvas + centered city name + a small "V2" tag
-// so QA can distinguish V2 from V1 at a glance. PR 1 replaces this with the
-// real flat-paper base + cadastral grid.
+// PR 1 foundation: flat-paper base + faint cadastral grid + top-center city
+// title. Matches the final 14-layer stack's layers 1, 2, and 14; all other
+// layers (walls, river, roads, buildings...) land in PRs 2-5.
 export function renderCityMapV2(
   ctx: CanvasRenderingContext2D,
   data: CityMapData,
@@ -10,24 +10,33 @@ export function renderCityMapV2(
   seed: string,
   cityName: string,
 ): void {
-  void data;
   void env;
   void seed;
 
-  const size = 720;
+  const size = data.canvasSize;
+  const { w, tileSize } = data.grid;
 
+  // Layer 1: flat paper background.
   ctx.fillStyle = '#ece5d3';
   ctx.fillRect(0, 0, size, size);
 
+  // Layer 2: faint cadastral grid every 4 tiles.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let k = 0; k <= w; k += 4) {
+    const p = Math.round(k * tileSize) + 0.5;
+    ctx.moveTo(p, 0);
+    ctx.lineTo(p, size);
+    ctx.moveTo(0, p);
+    ctx.lineTo(size, p);
+  }
+  ctx.stroke();
+
+  // Layer 14: city name at top-center.
   ctx.fillStyle = '#2a241c';
   ctx.font = 'bold 22px Georgia, serif';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(cityName, size / 2, size / 2);
-
-  ctx.fillStyle = '#8a8070';
-  ctx.font = '10px Georgia, serif';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('V2', size - 8, size - 8);
+  ctx.textBaseline = 'top';
+  ctx.fillText(cityName, size / 2, 16);
 }
