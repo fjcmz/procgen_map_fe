@@ -1,30 +1,19 @@
-import type { CityEnvironment, CityMapData, CitySize } from './cityMapTypes';
+import type { CityEnvironment, CityMapData } from './cityMapTypes';
 import { seededPRNG } from '../terrain/noise';
 
-const CANVAS_SIZE = 720;
-
-const GRID_SIZES: Record<CitySize, number> = {
-  small: 28,
-  medium: 36,
-  large: 44,
-  metropolis: 54,
-  megalopolis: 64,
-};
-
-// PR 1 foundation: flat-paper data shape. Populates grid sizing by size tier;
-// every geometry field stays empty until PR 2-5 fills them in.
+// PR 0 skeleton: returns an empty-valid CityMapData. PR 1 will define the
+// real Voronoi data contract and replace the placeholder grid field.
 export function generateCityMapV2(
   seed: string,
   cityName: string,
   env: CityEnvironment,
 ): CityMapData {
-  // Lock the seeded-PRNG invariant now so PR 2-5 can't drift to Math.random.
+  // Lock the seeded-PRNG invariant now so PR 1-5 can't drift to Math.random.
   seededPRNG(`${seed}_city_${cityName}`);
-
-  const n = GRID_SIZES[env.size];
+  void env;
 
   return {
-    grid: { w: n, h: n, tileSize: CANVAS_SIZE / n },
+    grid: { w: 0, h: 0, tileSize: 0 },
     wallPath: [],
     gates: [],
     river: null,
@@ -36,6 +25,6 @@ export function generateCityMapV2(
     buildings: [],
     landmarks: [],
     districtLabels: [],
-    canvasSize: CANVAS_SIZE,
+    canvasSize: 720,
   };
 }
