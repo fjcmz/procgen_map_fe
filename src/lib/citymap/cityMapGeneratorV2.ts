@@ -23,6 +23,7 @@ import type {
   CityPolygon,
 } from './cityMapTypesV2';
 import type { CitySize } from './cityMapTypes';
+import { generateWallsAndGates } from './cityMapWalls';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -39,10 +40,12 @@ const LLOYD_ROUNDS = 2;
 
 // [Voronoi foundation] — builds the city's polygon graph from N seeded points.
 //
-// TODO PR 2: once wall/edge-walk primitives crystallize, consider lifting this
-// helper (plus any shared polygon-graph utilities) into a dedicated
-// `cityMapVoronoi.ts` module alongside `terrain/voronoi.ts`. Keeping it inline
-// for PR 1 avoids speculative API design.
+// TODO PR 3+: once a second feature needs the polygon-edge graph (rivers
+// and roads will both want edge-weighted A*), lift this helper plus the
+// edge-ownership utility from `cityMapWalls.ts` into a shared
+// `cityMapVoronoi.ts` module alongside `terrain/voronoi.ts`. PR 2 kept
+// the edge helper scoped to walls only — one caller doesn't justify a
+// shared module yet.
 function buildCityPolygonGraph(
   voronoiSeed: string,
   numPolygons: number,
@@ -172,12 +175,24 @@ export function generateCityMapV2(
     );
   }
 
+  // PR 2 — walls + gates. Polygon-based wall footprint + cardinal gates.
+  // See cityMapWalls.ts for the Voronoi-polygon algorithm (score non-edge
+  // polygons, BFS-prune, hole-fill, walk boundary polygon edges, pick
+  // cardinal gates skipping env.waterSide).
+  const { wallPath, gates } = generateWallsAndGates(
+    seed,
+    cityName,
+    env,
+    polygons,
+    CANVAS_SIZE,
+  );
+
   return {
     canvasSize: CANVAS_SIZE,
     polygonCount,
     polygons,
-    wallPath: [],
-    gates: [],
+    wallPath,
+    gates,
     river: null,
     bridges: [],
     roads: [],
