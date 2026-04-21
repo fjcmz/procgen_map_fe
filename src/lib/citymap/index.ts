@@ -1,3 +1,4 @@
+// V1 (tile-based) — frozen during the PR 1-5 migration.
 export type {
   CityEnvironment,
   CityMapData,
@@ -9,5 +10,19 @@ export type {
 } from './cityMapTypes';
 export { deriveCityEnvironment, generateCityMap } from './cityMapGenerator';
 export { renderCityMap } from './cityMapRenderer';
-export { generateCityMapV2 } from './cityMapGeneratorV2';
+
+// V2 (Voronoi-polygon-based) — see specs/City_style_phases.md.
+//   PR 1 introduces: CityMapDataV2, CityPolygon, CityBlockV2, CityBuildingV2,
+//                    CityLandmarkV2, POLYGON_COUNTS, generateCityMapV2,
+//                    renderCityMapV2.
+//   PR 2-5 extend CityMapDataV2 with walls, river, roads, blocks, buildings,
+//   landmarks, and labels — all operating on the same polygon graph.
+export type {
+  CityMapDataV2,
+  CityPolygon,
+  CityBlockV2,
+  CityBuildingV2,
+  CityLandmarkV2,
+} from './cityMapTypesV2';
+export { generateCityMapV2, POLYGON_COUNTS } from './cityMapGeneratorV2';
 export { renderCityMapV2 } from './cityMapRendererV2';

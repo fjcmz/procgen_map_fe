@@ -1,19 +1,181 @@
-import type { CityEnvironment, CityMapData } from './cityMapTypes';
-import { seededPRNG } from '../terrain/noise';
+// ─────────────────────────────────────────────────────────────────────────────
+// City Map V2 generator — Voronoi-polygon foundation
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 1 (specs/City_style_phases.md) — returns a CityMapDataV2 populated with a
+// full Voronoi polygon graph sized by city tier (150/250/350/500/1000) and
+// placeholder arrays for every geometric feature PR 2-5 will add.
+//
+// The polygon graph is this generator's PRIMARY OUTPUT. Walls (PR 2), rivers
+// and roads (PR 3), blocks and landmarks (PR 4), buildings and labels (PR 5)
+// all read `polygons[].vertices` / `polygons[].neighbors` / `polygons[].isEdge`
+// / `polygons[].area`. Do NOT reintroduce a tile grid.
+//
+// Reference pattern: src/lib/terrain/voronoi.ts::buildCellGraph — copy the D3
+// + Lloyd-relaxation recipe but strip the ghost-point / east-west wrapping
+// logic (cities are bounded, not toroidal).
+// ─────────────────────────────────────────────────────────────────────────────
 
-// PR 0 skeleton: returns an empty-valid CityMapData. PR 1 will define the
-// real Voronoi data contract and replace the placeholder grid field.
+import { Delaunay } from 'd3-delaunay';
+import { seededPRNG } from '../terrain/noise';
+import type {
+  CityEnvironment,
+  CityMapDataV2,
+  CityPolygon,
+} from './cityMapTypesV2';
+import type { CitySize } from './cityMapTypes';
+
+// Single source of truth for V2 polygon counts per city-size tier. Exported so
+// PR 2-5 tests and helpers reference the same table rather than redefining it.
+export const POLYGON_COUNTS: Record<CitySize, number> = {
+  small: 150,
+  medium: 250,
+  large: 350,
+  metropolis: 500,
+  megalopolis: 1000,
+};
+
+const CANVAS_SIZE = 720;
+const LLOYD_ROUNDS = 2;
+
+// [Voronoi foundation] — builds the city's polygon graph from N seeded points.
+//
+// TODO PR 2: once wall/edge-walk primitives crystallize, consider lifting this
+// helper (plus any shared polygon-graph utilities) into a dedicated
+// `cityMapVoronoi.ts` module alongside `terrain/voronoi.ts`. Keeping it inline
+// for PR 1 avoids speculative API design.
+function buildCityPolygonGraph(
+  voronoiSeed: string,
+  numPolygons: number,
+  canvasSize: number,
+): CityPolygon[] {
+  const rng = seededPRNG(voronoiSeed);
+
+  // 1. Seed-random point cloud in [0, canvasSize]².
+  let points: [number, number][] = [];
+  for (let i = 0; i < numPolygons; i++) {
+    points.push([rng() * canvasSize, rng() * canvasSize]);
+  }
+
+  // 2. Two rounds of Lloyd relaxation — matches terrain/voronoi.ts default.
+  //    Three rounds over-regularizes and starts to look grid-like; 1 is too
+  //    clumpy. No ghost points: cities don't wrap.
+  for (let round = 0; round < LLOYD_ROUNDS; round++) {
+    const d = Delaunay.from(points);
+    const v = d.voronoi([0, 0, canvasSize, canvasSize]);
+    const relaxed: [number, number][] = [];
+    for (let i = 0; i < numPolygons; i++) {
+      const poly = v.cellPolygon(i);
+      if (!poly || poly.length < 4) {
+        relaxed.push(points[i]);
+        continue;
+      }
+      let cx = 0;
+      let cy = 0;
+      const n = poly.length - 1; // poly is closed (first == last)
+      for (let j = 0; j < n; j++) {
+        cx += poly[j][0];
+        cy += poly[j][1];
+      }
+      relaxed.push([cx / n, cy / n]);
+    }
+    points = relaxed;
+  }
+
+  // 3. Final Delaunay + Voronoi, clipped to the canvas bbox.
+  const delaunay = Delaunay.from(points);
+  const voronoi = delaunay.voronoi([0, 0, canvasSize, canvasSize]);
+
+  const polygons: CityPolygon[] = [];
+  for (let i = 0; i < numPolygons; i++) {
+    const ring = voronoi.cellPolygon(i);
+    const vertices: [number, number][] = [];
+    if (ring) {
+      // Strip the closing vertex (D3 returns last === first).
+      const n = ring.length - 1;
+      for (let j = 0; j < n; j++) {
+        vertices.push([ring[j][0], ring[j][1]]);
+      }
+    }
+
+    // Adjacency — spread the generator once; repeat calls are not free.
+    const neighbors: number[] = [];
+    for (const nb of delaunay.neighbors(i)) {
+      if (nb !== i) neighbors.push(nb);
+    }
+
+    // Edge test: any vertex lying on the canvas bounding box.
+    let isEdge = false;
+    for (const [vx, vy] of vertices) {
+      if (vx <= 0 || vx >= canvasSize || vy <= 0 || vy >= canvasSize) {
+        isEdge = true;
+        break;
+      }
+    }
+
+    // Shoelace area (signed → abs). Cheap to compute once at gen time so PR 4
+    // doesn't re-walk every polygon for label sizing.
+    let area = 0;
+    const vn = vertices.length;
+    for (let j = 0; j < vn; j++) {
+      const [ax, ay] = vertices[j];
+      const [bx, by] = vertices[(j + 1) % vn];
+      area += ax * by - bx * ay;
+    }
+    area = Math.abs(area) * 0.5;
+
+    polygons.push({
+      id: i,
+      site: [points[i][0], points[i][1]],
+      vertices,
+      neighbors,
+      isEdge,
+      area,
+    });
+  }
+
+  return polygons;
+}
+
+/**
+ * Generate the V2 city-map payload for a given city.
+ *
+ * PR 1 populates only the Voronoi polygon graph. PR 2-5 will layer walls,
+ * rivers, roads, blocks, buildings, and landmarks on top of the same
+ * polygons — see `CityMapDataV2`'s `// TODO PR N:` markers for the plan.
+ *
+ * Seeding: every RNG call routes through `seededPRNG` (never `Math.random`).
+ * The polygon graph uses a dedicated `_voronoi` suffix so it stays decoupled
+ * from PR 2-5 random streams (walls, rivers, etc.) and avoids cross-PR drift.
+ */
 export function generateCityMapV2(
   seed: string,
   cityName: string,
   env: CityEnvironment,
-): CityMapData {
-  // Lock the seeded-PRNG invariant now so PR 1-5 can't drift to Math.random.
+): CityMapDataV2 {
+  // Lock the top-level seeded-PRNG invariant: every V2 consumer downstream
+  // must derive its RNG from this base stream. PR 2-5 will add per-feature
+  // suffixes (e.g. `_walls`, `_river`).
   seededPRNG(`${seed}_city_${cityName}`);
-  void env;
+
+  const polygonCount = POLYGON_COUNTS[env.size];
+  const polygons = buildCityPolygonGraph(
+    `${seed}_city_${cityName}_voronoi`,
+    polygonCount,
+    CANVAS_SIZE,
+  );
+
+  // Contract guard — cheap, catches d3 / clipping surprises before PR 2-5
+  // downstream assumes `polygons.length === POLYGON_COUNTS[env.size]`.
+  if (polygons.length !== polygonCount) {
+    throw new Error(
+      `City V2 polygon count mismatch: expected ${polygonCount}, got ${polygons.length}`,
+    );
+  }
 
   return {
-    grid: { w: 0, h: 0, tileSize: 0 },
+    canvasSize: CANVAS_SIZE,
+    polygonCount,
+    polygons,
     wallPath: [],
     gates: [],
     river: null,
@@ -25,6 +187,5 @@ export function generateCityMapV2(
     buildings: [],
     landmarks: [],
     districtLabels: [],
-    canvasSize: 720,
   };
 }
