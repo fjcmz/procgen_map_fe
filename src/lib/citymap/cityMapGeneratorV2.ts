@@ -1,6 +1,5 @@
 import type { CityEnvironment, CityMapData, CitySize } from './cityMapTypes';
 import { seededPRNG } from '../terrain/noise';
-import { computeWallsAndGates } from './walls';
 
 const CANVAS_SIZE = 720;
 
@@ -12,26 +11,22 @@ const GRID_SIZES: Record<CitySize, number> = {
   megalopolis: 64,
 };
 
-// PR 2: grid + radial/FBM wall footprint + cardinal gates. Every other
-// geometry field stays empty until PR 3-5 fills it in.
+// PR 1 foundation: flat-paper data shape. Populates grid sizing by size tier;
+// every geometry field stays empty until PR 2-5 fills them in.
 export function generateCityMapV2(
   seed: string,
   cityName: string,
   env: CityEnvironment,
 ): CityMapData {
-  const innerSeed = `${seed}_city_${cityName}`;
-  // Lock the seeded-PRNG invariant now so PR 3-5 can't drift to Math.random.
-  seededPRNG(innerSeed);
+  // Lock the seeded-PRNG invariant now so PR 2-5 can't drift to Math.random.
+  seededPRNG(`${seed}_city_${cityName}`);
 
   const n = GRID_SIZES[env.size];
-  const grid = { w: n, h: n, tileSize: CANVAS_SIZE / n };
-
-  const { wallPath, gates } = computeWallsAndGates(grid, env, innerSeed);
 
   return {
-    grid,
-    wallPath,
-    gates,
+    grid: { w: n, h: n, tileSize: CANVAS_SIZE / n },
+    wallPath: [],
+    gates: [],
     river: null,
     bridges: [],
     roads: [],
