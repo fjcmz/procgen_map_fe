@@ -24,6 +24,9 @@ import type {
 } from './cityMapTypesV2';
 import type { CitySize } from './cityMapTypes';
 import { generateWallsAndGates } from './cityMapWalls';
+import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
+import { generateRiver } from './cityMapRiver';
+import { generateNetwork } from './cityMapNetwork';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -40,12 +43,12 @@ const LLOYD_ROUNDS = 2;
 
 // [Voronoi foundation] — builds the city's polygon graph from N seeded points.
 //
-// TODO PR 3+: once a second feature needs the polygon-edge graph (rivers
-// and roads will both want edge-weighted A*), lift this helper plus the
-// edge-ownership utility from `cityMapWalls.ts` into a shared
-// `cityMapVoronoi.ts` module alongside `terrain/voronoi.ts`. PR 2 kept
-// the edge helper scoped to walls only — one caller doesn't justify a
-// shared module yet.
+// PR 3 lifted the shared polygon-edge helpers (`buildEdgeOwnership`,
+// `buildPolygonEdgeGraph`, A*, edge-key canonicalization) out of
+// `cityMapWalls.ts` into `cityMapEdgeGraph.ts` so walls / river / roads /
+// streets all consume the same graph. Future PRs (4+) should keep that
+// file as the single home for polygon-edge graph machinery rather than
+// re-scoping helpers per feature file.
 function buildCityPolygonGraph(
   voronoiSeed: string,
   numPolygons: number,
@@ -179,11 +182,35 @@ export function generateCityMapV2(
   // See cityMapWalls.ts for the Voronoi-polygon algorithm (score non-edge
   // polygons, BFS-prune, hole-fill, walk boundary polygon edges, pick
   // cardinal gates skipping env.waterSide).
-  const { wallPath, gates } = generateWallsAndGates(
+  const wall = generateWallsAndGates(
     seed,
     cityName,
     env,
     polygons,
+    CANVAS_SIZE,
+  );
+  const { wallPath, gates } = wall;
+
+  // PR 3 — shared polygon-edge graph consumed by river + network A*.
+  // Built once per city so rivers, roads, and streets share precomputed
+  // edge lengths, vertex points, and adjacency.
+  const edgeGraph = buildPolygonEdgeGraph(polygons);
+
+  // PR 3 — river along polygon edges. Returns null when !env.hasRiver or
+  // when the boundary vertex search fails; the renderer no-ops on null.
+  const river = generateRiver(seed, cityName, env, polygons, edgeGraph, CANVAS_SIZE);
+
+  // PR 3 — roads (gate→center A*), space-filling streets, and bridges
+  // (road∩river by canonical edge key). Receives the river result so
+  // road cost can nudge around crossings and bridge detection is trivial.
+  const { roads, streets, bridges } = generateNetwork(
+    seed,
+    cityName,
+    env,
+    polygons,
+    edgeGraph,
+    wall,
+    river,
     CANVAS_SIZE,
   );
 
@@ -193,10 +220,10 @@ export function generateCityMapV2(
     polygons,
     wallPath,
     gates,
-    river: null,
-    bridges: [],
-    roads: [],
-    streets: [],
+    river,
+    bridges,
+    roads,
+    streets,
     blocks: [],
     openSpaces: [],
     buildings: [],
