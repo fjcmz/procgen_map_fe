@@ -19,12 +19,7 @@
 //              in fringe tiles"). Drawn BEFORE roads / river / streets so
 //              infrastructure ink visibly sits on top if a road ever exits
 //              the wall into the fringe.
-//   Layer 5  — river channel stroke #6d665a with darker outline (PR 3)
-//              [polygon-edge river path]
 //   Layer 6  — streets 2 px #b8ad92 (PR 3) [polygon-edge street paths]
-//   Layer 7  — roads 4 px #2a241c (PR 3)   [polygon-edge road paths]
-//   Layer 8  — bridges (PR 3): white rect + two dark rail dashes per
-//              road∩river edge
 //   Layer 9  — open spaces (PR 4 slice): pale fills over polygon RINGS for
 //              squares + markets, greenish fills for parks, plus market
 //              stall dots and park trees scattered inside each polygon
@@ -33,20 +28,31 @@
 //              fills and hollow #2a241c strokes. Packed per polygon inside
 //              the polygon.vertices ring with a 2 px inset from edges so
 //              streets / roads / walls stay visible on polygon boundaries.
-//   Layer 11 — walls + towers + gate doors (PR 2)  [polygon-edge wall path]
 //   Layer 12 — landmarks (PR 4 slice): castle / palace / temple / monument
 //              glyphs centered on `polygon.site`, sized from √polygon.area,
 //              "all ink on white" per spec. CASTLE / PALACE labels below
 //              capital glyphs.
+//   Layer 11 — walls (PR 2): continuous thick black polyline along the
+//              polygon-edge wall path. No gate gaps, no decorations.
+//   Layer 7  — roads 4 px (PR 3) [polygon-edge road paths] — continuous
+//              thick lines drawn on top of walls for ingress visibility.
+//   Layer 5  — river (PR 3): single continuous light-blue stroke along
+//              the polygon-edge river path.
+//   Layer 8  — bridges (PR 3): white rect + two dark rail dashes per
+//              road∩river edge, drawn ON TOP of the river so road
+//              crossings read above the water.
 //   …gap…    — Layers 3, 13 reserved for PR 5 (docks, district labels)
 //   Layer 14 — top-centered city name + "V2" QA tag
 //
-// LAYER ORDER NOTE — open spaces are drawn BEFORE roads / streets / walls so
-// the road and wall ink sit visually on top of the pale plaza fills. The
-// polygon ring is filled directly: every market / square / park entry from
-// `data.openSpaces` carries `polygonIds` indexing into `data.polygons`, so
-// the renderer just walks each polygon's `vertices` ring (UNCLOSED, per the
-// `CityPolygon` contract).
+// LAYER ORDER NOTE — walls, roads, and the river are drawn LAST (after
+// buildings and landmarks) so all three sit clearly on top of every other
+// feature. The river is the very last continuous fill; bridges are drawn
+// after the river so road crossings still mask the water at the bridge
+// span. Open spaces are still drawn early so the road / wall ink visibly
+// covers the pale plaza fills. The polygon ring is filled directly: every
+// market / square / park entry from `data.openSpaces` carries `polygonIds`
+// indexing into `data.polygons`, so the renderer just walks each polygon's
+// `vertices` ring (UNCLOSED, per the `CityPolygon` contract).
 //
 // NOTE ON LAYER 2: the spec calls for a rigid 4×4 cadastral grid. We
 // deliberately substitute a faint stroke of every Voronoi polygon's vertex
@@ -72,25 +78,17 @@ const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
 const CITY_NAME_INK = '#2a241c';
 const QA_TAG_INK = '#8a8070';
 
-// Layer 11 — wall + gate styling (PR 2). All wall geometry is polygon-edge
-// based; see cityMapWalls.ts for the generator.
+// Layer 11 — wall styling (PR 2). All wall geometry is polygon-edge based;
+// see cityMapWalls.ts for the generator. Walls render as a single continuous
+// thick black polyline — no gate gaps, no tower studs, no door dashes.
 const WALL_INK = '#000000';
-const WALL_WIDTH = 4;          // 3-5 px per spec; 4 is the mid-range default
-const TOWER_RADIUS = 3;        // studs at wall corners (polygon vertices)
-const TOWER_CORNER_COS_THRESHOLD = 0.7; // dot < this between adjacent edges ⇒ corner
-const GATE_GAP_PX = 18;        // visible door opening width
-const GATE_DOOR_DASH_LEN = 5;  // flanking door marker length
-const GATE_DOOR_OFFSET = 4;    // how far outside the wall each dash sits
-const GATE_MATCH_EPS = 1e-3;   // float compare tolerance when matching wall segments to gates
+const WALL_WIDTH = 4;
 
 // Layer 5 — river styling (PR 3). All river geometry is polygon-edge based;
-// see cityMapRiver.ts for the generator. Spec: "river channel fill #6d665a
-// with outline". We achieve the "channel fill + outline" reading with two
-// stacked strokes along the polygon edges.
+// see cityMapRiver.ts for the generator. Rendered as a single continuous
+// light-blue stroke (no outline pass).
 const RIVER_CHANNEL_INK = '#a8d4f0';
-const RIVER_OUTLINE_INK = 'rgba(50, 120, 200, 0.4)';
 const RIVER_CHANNEL_WIDTH = 8;
-const RIVER_OUTLINE_WIDTH = 10;
 
 // Layer 6 — street styling (PR 3). Thin paths along polygon edges.
 const STREET_INK = '#b0b0b0';
@@ -210,21 +208,48 @@ export function renderCityMapV2(
   // those infrastructure layers visibly overlap the pale plaza fills.
   drawOpenSpaces(ctx, data, seed, cityName);
 
-  // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
-  // [Voronoi-polygon] Every river edge is a polygon edge. Two stacked
-  // strokes give a visible channel + outline without polygon-fill, so
-  // island polygons stay cleanly un-tinted.
-  drawRiver(ctx, data);
-
   // ── Layer 6: streets (PR 3) ────────────────────────────────────────────
   // [Voronoi-polygon] Each street path is a sequence of polygon vertices
-  // threaded through adjacency by `cityMapNetwork.ts`.
+  // threaded through adjacency by `cityMapNetwork.ts`. Streets stay below
+  // the buildings / landmarks / wall-road-river stack so the dominant
+  // infrastructure ink reads on top.
   drawPathList(ctx, data.streets, STREET_INK, STREET_WIDTH);
+
+  // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
+  // [Voronoi-polygon] Every building carries a `polygonId` and sits inside
+  // the corresponding polygon's vertex ring (2 px inset from polygon edges
+  // at generation time — see cityMapBuildings.ts). Drawn AFTER streets so
+  // buildings cover the street ink that would otherwise bleed under their
+  // footprints, and BEFORE the wall / road / river stack so all three
+  // dominant features sit visibly on top of every building they cross.
+  drawBuildings(ctx, data);
+
+  // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
+  // [Voronoi-polygon] Each landmark references one `polygon.id`; we center
+  // the glyph on `polygon.site` and size it from `√polygon.area`. Drawn
+  // before walls / roads / river so those infrastructure layers cover any
+  // landmark glyph they cross. See cityMapLandmarks.ts for the polygon-
+  // graph placement.
+  drawLandmarks(ctx, data);
+
+  // ── Layer 11: walls (PR 2) ─────────────────────────────────────────────
+  // [Voronoi-polygon] Continuous thick black polyline along the polygon-
+  // edge wall path. Drawn after every other feature so the city's defensive
+  // perimeter remains the strongest read on the map.
+  drawWalls(ctx, data);
 
   // ── Layer 7: roads (PR 3) ──────────────────────────────────────────────
   // [Voronoi-polygon] Road paths come from gate→center A* over the polygon
-  // edge graph; see cityMapNetwork.ts.
+  // edge graph; see cityMapNetwork.ts. Drawn on top of the walls so road
+  // crossings (e.g. through gates) read as continuous thoroughfares.
   drawPathList(ctx, data.roads, ROAD_INK, ROAD_WIDTH);
+
+  // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
+  // [Voronoi-polygon] Single continuous light-blue stroke along the
+  // polygon-edge river path. Drawn AFTER walls and roads so the water
+  // surface reads on top of any dry feature it crosses; bridges (next
+  // layer) re-mask the river at road-river intersections.
+  drawRiver(ctx, data);
 
   // ── Layer 8: bridges (PR 3) ────────────────────────────────────────────
   // [Voronoi-polygon] Each bridge is a polygon edge that belongs to both
@@ -232,29 +257,6 @@ export function renderCityMapV2(
   // intersection as a `[a, b]` pair, the renderer turns it into a white
   // rect + rails so the crossing reads above the river stroke.
   drawBridges(ctx, data);
-
-  // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
-  // [Voronoi-polygon] Every building carries a `polygonId` and sits inside
-  // the corresponding polygon's vertex ring (2 px inset from polygon edges
-  // at generation time — see cityMapBuildings.ts). Drawn AFTER streets /
-  // roads / bridges so buildings cover the polygon interior cream base, and
-  // BEFORE walls so wall strokes sit visibly on top of any building that
-  // butts up against the wall boundary. Solid rects use #2a241c fill;
-  // hollow rects use a half-lineWidth-inset #2a241c stroke so the 1 px
-  // mortar gap between neighbours stays crisp.
-  drawBuildings(ctx, data);
-
-  // ── Layer 11: walls + towers + gate doors (PR 2) ────────────────────────
-  // [Voronoi-polygon] The wall path is a closed polyline of polygon-edge
-  // endpoints (pixel coords). See cityMapWalls.ts for the generator.
-  drawWallsAndGates(ctx, data);
-
-  // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
-  // [Voronoi-polygon] Each landmark references one `polygon.id`; we center
-  // the glyph on `polygon.site` and size it from `√polygon.area`. Drawn on
-  // top of walls so capital castle/palace silhouettes read cleanly over the
-  // wall stud ink. See cityMapLandmarks.ts for the polygon-graph placement.
-  drawLandmarks(ctx, data);
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
   ctx.fillStyle = CITY_NAME_INK;
@@ -292,161 +294,48 @@ function drawBlockBackgrounds(ctx: CanvasRenderingContext2D, data: CityMapDataV2
   }
 }
 
-// [Voronoi-polygon] Draw the wall + gate layer from the polygon-edge wall
-// path produced by `cityMapWalls.ts::generateWallsAndGates`. Every segment
-// in `data.wallPath` is a polygon edge; "corners" are polygon vertices.
-// No tiles involved — the stud/gate geometry derives entirely from the
-// polygon graph.
-function drawWallsAndGates(
+// [Voronoi-polygon] Draw the wall layer as a single continuous thick black
+// polyline along the polygon-edge wall path produced by
+// `cityMapWalls.ts::generateWallsAndGates`. Every segment in `data.wallPath`
+// is a polygon edge; the path is closed (first === last). Gate gaps, tower
+// studs, and door dashes were dropped intentionally so the wall reads as
+// one strong unbroken silhouette on top of every other feature.
+function drawWalls(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
 ): void {
   const path = data.wallPath;
   if (path.length < 2) return;
 
-  // Pre-index wall segments that overlap a gate edge so we can skip them
-  // during the main stroke and render them as two stubs flanking the gap.
-  const gateSegments = new Map<number, { a: [number, number]; b: [number, number] }>();
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i];
-    const b = path[i + 1];
-    for (const gate of data.gates) {
-      const [ga, gb] = gate.edge;
-      const matchForward =
-        Math.abs(a[0] - ga[0]) < GATE_MATCH_EPS && Math.abs(a[1] - ga[1]) < GATE_MATCH_EPS &&
-        Math.abs(b[0] - gb[0]) < GATE_MATCH_EPS && Math.abs(b[1] - gb[1]) < GATE_MATCH_EPS;
-      const matchReverse =
-        Math.abs(a[0] - gb[0]) < GATE_MATCH_EPS && Math.abs(a[1] - gb[1]) < GATE_MATCH_EPS &&
-        Math.abs(b[0] - ga[0]) < GATE_MATCH_EPS && Math.abs(b[1] - ga[1]) < GATE_MATCH_EPS;
-      if (matchForward || matchReverse) {
-        gateSegments.set(i, { a: [a[0], a[1]], b: [b[0], b[1]] });
-        break;
-      }
-    }
-  }
-
-  // Stroke the main wall. Each non-gate segment is traced straight; each
-  // gate segment is shrunk from both ends so a ~GATE_GAP_PX opening is
-  // centered on the segment.
   ctx.strokeStyle = WALL_INK;
   ctx.lineWidth = WALL_WIDTH;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.beginPath();
-  for (let i = 0; i < path.length - 1; i++) {
-    const a = path[i];
-    const b = path[i + 1];
-    const gate = gateSegments.get(i);
-    if (!gate) {
-      ctx.moveTo(a[0], a[1]);
-      ctx.lineTo(b[0], b[1]);
-      continue;
-    }
-    const dx = b[0] - a[0];
-    const dy = b[1] - a[1];
-    const len = Math.hypot(dx, dy);
-    if (len === 0) continue;
-    const gap = Math.min(GATE_GAP_PX, len * 0.9);
-    const stubLen = (len - gap) / 2;
-    if (stubLen <= 0) continue; // segment too short to host a visible stub
-    const ux = dx / len;
-    const uy = dy / len;
-    // Stub 1: from a toward midpoint, stopping stubLen short of mid-gap.
-    ctx.moveTo(a[0], a[1]);
-    ctx.lineTo(a[0] + ux * stubLen, a[1] + uy * stubLen);
-    // Stub 2: from gap-end toward b.
-    ctx.moveTo(b[0] - ux * stubLen, b[1] - uy * stubLen);
-    ctx.lineTo(b[0], b[1]);
+  ctx.moveTo(path[0][0], path[0][1]);
+  for (let i = 1; i < path.length; i++) {
+    ctx.lineTo(path[i][0], path[i][1]);
   }
   ctx.stroke();
-
-  // Tower studs at sharp polygon-corner turns. The wall path is closed
-  // (first === last), so index i wraps via (i-1+n) % n and (i+1) % n, but
-  // we iterate only unique vertices [0, n-1) to avoid double-plotting the
-  // closing repeat.
-  const n = path.length - 1;
-  ctx.fillStyle = WALL_INK;
-  for (let i = 0; i < n; i++) {
-    const prev = path[(i - 1 + n) % n];
-    const curr = path[i];
-    const next = path[(i + 1) % n];
-    const inDx = curr[0] - prev[0];
-    const inDy = curr[1] - prev[1];
-    const outDx = next[0] - curr[0];
-    const outDy = next[1] - curr[1];
-    const inLen = Math.hypot(inDx, inDy) || 1;
-    const outLen = Math.hypot(outDx, outDy) || 1;
-    const dot = (inDx * outDx + inDy * outDy) / (inLen * outLen);
-    if (dot < TOWER_CORNER_COS_THRESHOLD) {
-      ctx.beginPath();
-      ctx.arc(curr[0], curr[1], TOWER_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  // Flanking door dashes — two short perpendicular-offset tickmarks at each
-  // gate midpoint. They sit just outside the wall line to read as door jambs.
-  ctx.lineWidth = 2;
-  ctx.strokeStyle = WALL_INK;
-  for (const gate of data.gates) {
-    const [ga, gb] = gate.edge;
-    const dx = gb[0] - ga[0];
-    const dy = gb[1] - ga[1];
-    const len = Math.hypot(dx, dy);
-    if (len === 0) continue;
-    const ux = dx / len;
-    const uy = dy / len;
-    // Outward normal: (dy, -dx) normalized (CW polygon convention, y-down).
-    const nx = dy / len;
-    const ny = -dx / len;
-    const mx = (ga[0] + gb[0]) / 2;
-    const my = (ga[1] + gb[1]) / 2;
-    const halfGap = Math.min(GATE_GAP_PX, len * 0.9) / 2;
-    // Two dashes anchored at each jamb, projecting outward along the normal.
-    for (const sign of [-1, 1]) {
-      const jx = mx + ux * halfGap * sign;
-      const jy = my + uy * halfGap * sign;
-      const sxStart = jx + nx * GATE_DOOR_OFFSET;
-      const syStart = jy + ny * GATE_DOOR_OFFSET;
-      const sxEnd = sxStart + nx * GATE_DOOR_DASH_LEN;
-      const syEnd = syStart + ny * GATE_DOOR_DASH_LEN;
-      ctx.beginPath();
-      ctx.moveTo(sxStart, syStart);
-      ctx.lineTo(sxEnd, syEnd);
-      ctx.stroke();
-    }
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PR 3 — river + streets + roads + bridges (polygon-edge renderers)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Draw the river channel. Every edge in `data.river.edges`
-// is a polygon edge emitted by `cityMapRiver.ts`. Two stacked strokes: an
-// outline at `RIVER_OUTLINE_WIDTH` and a fill at `RIVER_CHANNEL_WIDTH`.
-// Island polygons don't need explicit handling here — they simply have no
-// river edges inside them, so the flood-and-channel pattern reads naturally.
+// [Voronoi-polygon] Draw the river channel as a single continuous light-blue
+// stroke. Every edge in `data.river.edges` is a polygon edge emitted by
+// `cityMapRiver.ts`. Round line caps + joins keep the per-edge segments
+// reading as one continuous line. Island polygons don't need explicit
+// handling — they simply have no river edges inside them.
 function drawRiver(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   const river = data.river;
   if (!river || river.edges.length === 0) return;
 
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-
-  // Outline pass (drawn underneath the channel fill).
-  ctx.strokeStyle = RIVER_OUTLINE_INK;
-  ctx.lineWidth = RIVER_OUTLINE_WIDTH;
-  ctx.beginPath();
-  for (const [a, b] of river.edges) {
-    ctx.moveTo(a[0], a[1]);
-    ctx.lineTo(b[0], b[1]);
-  }
-  ctx.stroke();
-
-  // Channel fill pass on top.
   ctx.strokeStyle = RIVER_CHANNEL_INK;
   ctx.lineWidth = RIVER_CHANNEL_WIDTH;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   ctx.beginPath();
   for (const [a, b] of river.edges) {
     ctx.moveTo(a[0], a[1]);
