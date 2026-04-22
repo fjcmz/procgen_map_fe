@@ -164,6 +164,13 @@ export interface CityMapDataV2 {
   innerWallPath: [number, number][];
   /** Inner wall gates (≥3 for metropolis+, empty for smaller cities). */
   innerGates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
+  /**
+   * Intermediate wall path (megalopolis only, 50% chance). Sits between the outer wall and the
+   * small inner core wall. Empty for all other city sizes.
+   */
+  middleWallPath: [number, number][];
+  /** Intermediate wall gates (megalopolis only, when middleWallPath is present). */
+  middleGates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
   /** Roads extending outward from each outer gate to the canvas boundary (one per gate). */
   exitRoads: [number, number][][];
 }

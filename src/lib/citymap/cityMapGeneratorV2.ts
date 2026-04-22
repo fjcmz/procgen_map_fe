@@ -25,7 +25,7 @@ import type {
   CityPolygon,
   CitySize,
 } from './cityMapTypesV2';
-import { generateWallsAndGates } from './cityMapWalls';
+import { generateWallsAndGates, type WallConfig } from './cityMapWalls';
 import { selectCityFootprint } from './cityMapShape';
 import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
@@ -285,10 +285,44 @@ export function generateCityMapV2(
     cityPolygonCount,
   );
 
-  // PR 2 — walls + gates. Polygon-based wall footprint + cardinal gates.
-  // The interior set is now PRE-COMPUTED by `selectCityFootprint`; walls
-  // just walk the boundary polygon edges and pick gates skipping
-  // `env.waterSide`.
+  // PR 2 — walls + gates.
+  // Wall configuration is decided here by size + probabilistic rolls so that
+  // `generateWallsAndGates` remains a pure geometry generator.
+  //
+  //   small      — no walls
+  //   medium     — 50% outer wall
+  //   large      — 80% outer wall OR 20% inner core wall only
+  //   metropolis — always outer + 50% inner core wall (fraction 0.42)
+  //   megalopolis — always outer + always small inner core (fraction 0.22)
+  //                 + 50% intermediate middle ring (fraction 0.52)
+  const wallRng = seededPRNG(`${seed}_city_${cityName}_wallconfig`);
+
+  let wallConfig: WallConfig;
+  switch (env.size) {
+    case 'small':
+      wallConfig = { hasOuterWall: false, hasInnerWall: false, innerFraction: 0, hasMiddleWall: false, middleFraction: 0 };
+      break;
+    case 'medium':
+      wallConfig = { hasOuterWall: wallRng() < 0.5, hasInnerWall: false, innerFraction: 0, hasMiddleWall: false, middleFraction: 0 };
+      break;
+    case 'large': {
+      const roll = wallRng();
+      if (roll < 0.80) {
+        wallConfig = { hasOuterWall: true, hasInnerWall: false, innerFraction: 0, hasMiddleWall: false, middleFraction: 0 };
+      } else {
+        // 20%: inner core wall only (no outer wall)
+        wallConfig = { hasOuterWall: false, hasInnerWall: true, innerFraction: 0.30, hasMiddleWall: false, middleFraction: 0 };
+      }
+      break;
+    }
+    case 'metropolis':
+      wallConfig = { hasOuterWall: true, hasInnerWall: wallRng() < 0.5, innerFraction: 0.42, hasMiddleWall: false, middleFraction: 0 };
+      break;
+    case 'megalopolis':
+      wallConfig = { hasOuterWall: true, hasInnerWall: true, innerFraction: 0.22, hasMiddleWall: wallRng() < 0.5, middleFraction: 0.52 };
+      break;
+  }
+
   const wall = generateWallsAndGates(
     seed,
     cityName,
@@ -296,8 +330,9 @@ export function generateCityMapV2(
     polygons,
     footprint.interior,
     CANVAS_SIZE,
+    wallConfig,
   );
-  const { wallPath, gates, wallTowers, innerWallPath, innerGates } = wall;
+  const { wallPath, gates, wallTowers, innerWallPath, innerGates, middleWallPath, middleGates } = wall;
 
   // PR 3 — shared polygon-edge graph consumed by river + network A*.
   // Built once per city so rivers, roads, and streets share precomputed
@@ -442,6 +477,8 @@ export function generateCityMapV2(
     wallTowers,
     innerWallPath,
     innerGates,
+    middleWallPath,
+    middleGates,
     exitRoads,
     // TODO PR 5 (remainder): dock hatching + rotated district labels
     // ("BLUEGATE", "GLASS DOCKS", …).

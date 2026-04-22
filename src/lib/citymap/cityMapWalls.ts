@@ -46,30 +46,50 @@ const GATE_COUNT_MAX: Record<CitySize, number> = {
   small: 4, medium: 4, large: 4, metropolis: 6, megalopolis: 8,
 };
 
-// Inner wall only for metropolis+.
-const INNER_WALL_SIZES: ReadonlySet<CitySize> = new Set<CitySize>(['metropolis', 'megalopolis']);
-// Fraction of interior polygon count used for inner wall (central core).
-const INNER_WALL_FRACTION = 0.42;
-// Minimum gates on the inner wall.
+// Minimum gates on any inner/middle wall ring.
 const INNER_WALL_MIN_GATES = 3;
 
+/**
+ * Controls which wall rings are generated and at what interior fraction.
+ * Determined by the caller (`generateCityMapV2`) based on city size + RNG rolls.
+ *
+ * hasOuterWall   — whether to generate the outer perimeter wall.
+ * hasInnerWall   — whether to generate an inner core wall (citadel-style).
+ * innerFraction  — fraction of interior polygons the inner core covers (0–1).
+ * hasMiddleWall  — whether to generate an intermediate ring (megalopolis only).
+ * middleFraction — fraction of interior polygons the middle ring covers (0–1).
+ */
+export interface WallConfig {
+  hasOuterWall: boolean;
+  hasInnerWall: boolean;
+  innerFraction: number;
+  hasMiddleWall: boolean;
+  middleFraction: number;
+}
+
 export interface WallGenerationResult {
-  /** Closed polyline along polygon edges (first === last). Empty on degenerate input. */
+  /** Closed polyline along polygon edges (first === last). Empty when hasOuterWall=false. */
   wallPath: Point[];
-  /** Gates distributed around the wall (up to 8 for metropolis+). */
+  /** Gates distributed around the outer wall. */
   gates: { edge: Edge; dir: GateDir }[];
   /** Set of polygon ids that lie inside the wall footprint. */
   interiorPolygonIds: Set<number>;
   /** Outer wall tower positions (thick dots on wall vertices). */
   wallTowers: Point[];
-  /** Inner wall path for metropolis+ (empty for smaller cities). */
+  /** Inner core wall path (empty when hasInnerWall=false). */
   innerWallPath: Point[];
-  /** Inner wall gates (≥3 for metropolis+, empty for smaller cities). */
+  /** Inner core wall gates (empty when hasInnerWall=false). */
   innerGates: { edge: Edge; dir: GateDir }[];
+  /** Intermediate wall path between outer and inner (empty when hasMiddleWall=false). */
+  middleWallPath: Point[];
+  /** Intermediate wall gates (empty when hasMiddleWall=false). */
+  middleGates: { edge: Edge; dir: GateDir }[];
 }
 
 /**
  * Generate the wall footprint + gate list for a V2 city.
+ * Which rings are generated is controlled by `wallConfig`, computed by
+ * `generateCityMapV2` from city size + probability rolls.
  */
 export function generateWallsAndGates(
   seed: string,
@@ -78,34 +98,63 @@ export function generateWallsAndGates(
   polygons: CityPolygon[],
   interior: Set<number>,
   canvasSize: number,
+  wallConfig: WallConfig,
 ): WallGenerationResult {
   const empty: WallGenerationResult = {
     wallPath: [], gates: [], interiorPolygonIds: new Set(),
     wallTowers: [], innerWallPath: [], innerGates: [],
+    middleWallPath: [], middleGates: [],
   };
   if (interior.size < 3) return empty;
+  if (!wallConfig.hasOuterWall && !wallConfig.hasInnerWall) return empty;
 
   const rng = seededPRNG(`${seed}_city_${cityName}_walls_gates`);
-
   const edgeOwnership = buildEdgeOwnership(polygons);
-  const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
-  const wallPath = chainWallPath(boundaryEdges);
-  if (wallPath.length < 4) return empty;
 
-  // Determine gate count for this city size.
-  const gateMin = GATE_COUNT_MIN[env.size];
-  const gateMax = GATE_COUNT_MAX[env.size];
-  const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
+  // ── Outer wall ──────────────────────────────────────────────────────────────
+  let wallPath: Point[] = [];
+  let gates: { edge: Edge; dir: GateDir }[] = [];
+  let wallTowers: Point[] = [];
 
-  const gates = pickGatesAngular(wallPath, env.waterSide, canvasSize, gateCount, rng);
-  const wallTowers = computeTowerPositions(wallPath);
+  if (wallConfig.hasOuterWall) {
+    const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
+    wallPath = chainWallPath(boundaryEdges);
+    if (wallPath.length >= 4) {
+      const gateMin = GATE_COUNT_MIN[env.size];
+      const gateMax = GATE_COUNT_MAX[env.size];
+      const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
+      gates = pickGatesAngular(wallPath, env.waterSide, canvasSize, gateCount, rng);
+      wallTowers = computeTowerPositions(wallPath);
+    }
+  }
 
-  // Inner wall for metropolis+.
+  // ── Middle wall (megalopolis intermediate ring) ──────────────────────────────
+  let middleWallPath: Point[] = [];
+  let middleGates: { edge: Edge; dir: GateDir }[] = [];
+
+  if (wallConfig.hasMiddleWall && wallConfig.middleFraction > 0) {
+    const middleInterior = selectWallRingInterior(
+      polygons, interior, canvasSize, wallConfig.middleFraction,
+    );
+    if (middleInterior.size >= 3) {
+      const midBoundaryEdges = collectWallBoundaryEdges(polygons, middleInterior, edgeOwnership);
+      const midPath = chainWallPath(midBoundaryEdges);
+      if (midPath.length >= 4) {
+        middleWallPath = midPath;
+        const midGateCount = Math.max(INNER_WALL_MIN_GATES, GATE_COUNT_MIN[env.size]);
+        middleGates = pickGatesAngular(midPath, env.waterSide, canvasSize, midGateCount, rng);
+      }
+    }
+  }
+
+  // ── Inner core wall ─────────────────────────────────────────────────────────
   let innerWallPath: Point[] = [];
   let innerGates: { edge: Edge; dir: GateDir }[] = [];
 
-  if (INNER_WALL_SIZES.has(env.size)) {
-    const innerInterior = selectInnerInterior(polygons, interior, canvasSize);
+  if (wallConfig.hasInnerWall && wallConfig.innerFraction > 0) {
+    const innerInterior = selectWallRingInterior(
+      polygons, interior, canvasSize, wallConfig.innerFraction,
+    );
     if (innerInterior.size >= 3) {
       const innerBoundaryEdges = collectWallBoundaryEdges(polygons, innerInterior, edgeOwnership);
       const innerPath = chainWallPath(innerBoundaryEdges);
@@ -117,25 +166,28 @@ export function generateWallsAndGates(
     }
   }
 
-  return { wallPath, gates, interiorPolygonIds: interior, wallTowers, innerWallPath, innerGates };
+  return {
+    wallPath, gates, interiorPolygonIds: interior, wallTowers,
+    innerWallPath, innerGates, middleWallPath, middleGates,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Inner wall interior selection
+// Inner / middle wall interior selection
 // ─────────────────────────────────────────────────────────────────────────────
 
 // [Voronoi-polygon] Score interior polygons by radial distance from canvas
-// center and keep the closest INNER_WALL_FRACTION of them. BFS-prune to
-// connected component containing the most-central polygon.
-function selectInnerInterior(
+// center, keep the closest `fraction` of them, then BFS-prune to the connected
+// component containing the most-central polygon.
+function selectWallRingInterior(
   polygons: CityPolygon[],
   outerInterior: Set<number>,
   canvasSize: number,
+  fraction: number,
 ): Set<number> {
   const cx = canvasSize / 2;
   const cy = canvasSize / 2;
 
-  // Score interior polygons by squared distance from canvas center.
   type Scored = { id: number; d2: number };
   const scored: Scored[] = [];
   for (const id of outerInterior) {
@@ -147,13 +199,12 @@ function selectInnerInterior(
   }
   scored.sort((a, b) => a.d2 - b.d2 || a.id - b.id);
 
-  const targetCount = Math.max(3, Math.round(scored.length * INNER_WALL_FRACTION));
+  const targetCount = Math.max(3, Math.round(scored.length * fraction));
   const initial = new Set<number>();
   for (let i = 0; i < Math.min(targetCount, scored.length); i++) {
     initial.add(scored[i].id);
   }
 
-  // BFS-prune to connected component from most-central polygon.
   const seedId = scored[0]?.id;
   if (seedId == null) return new Set();
   const inner = new Set<number>([seedId]);
