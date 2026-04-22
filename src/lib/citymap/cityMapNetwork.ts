@@ -93,7 +93,7 @@ export function generateNetwork(
 ): NetworkGenerationResult {
   void env; // Reserved — PR 4+ may want to branch on env.size / env.waterSide here.
 
-  if (wall.gates.length === 0 || polygons.length < 4) {
+  if (polygons.length < 4) {
     return { roads: [], streets: [], bridges: [], exitRoads: [] };
   }
 

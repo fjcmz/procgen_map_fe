@@ -106,25 +106,40 @@ export function generateWallsAndGates(
     middleWallPath: [], middleGates: [],
   };
   if (interior.size < 3) return empty;
-  if (!wallConfig.hasOuterWall && !wallConfig.hasInnerWall) return empty;
 
   const rng = seededPRNG(`${seed}_city_${cityName}_walls_gates`);
   const edgeOwnership = buildEdgeOwnership(polygons);
 
-  // ── Outer wall ──────────────────────────────────────────────────────────────
+  // ── Outer wall (or virtual entry points when unwalled) ──────────────────────
+  // Walled cities trace the footprint boundary as a masonry wall and pick
+  // gates along it. Unwalled cities skip the wall drawing but still pick the
+  // same number of entry points from the footprint boundary using the same
+  // angular-distribution logic — roads then connect those entry points to the
+  // city centre, giving unwalled settlements a street network and proper blocks.
   let wallPath: Point[] = [];
   let gates: { edge: Edge; dir: GateDir }[] = [];
   let wallTowers: Point[] = [];
 
+  const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
+  const footprintPath = chainWallPath(boundaryEdges);
+
   if (wallConfig.hasOuterWall) {
-    const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
-    wallPath = chainWallPath(boundaryEdges);
+    wallPath = footprintPath;
     if (wallPath.length >= 4) {
       const gateMin = GATE_COUNT_MIN[env.size];
       const gateMax = GATE_COUNT_MAX[env.size];
       const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
       gates = pickGatesAngular(wallPath, env.waterSide, canvasSize, gateCount, rng);
       wallTowers = computeTowerPositions(wallPath);
+    }
+  } else {
+    // No outer wall: derive virtual entry points from the footprint boundary so
+    // road generation has targets and block barriers are produced correctly.
+    if (footprintPath.length >= 4) {
+      const gateMin = GATE_COUNT_MIN[env.size];
+      const gateMax = GATE_COUNT_MAX[env.size];
+      const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
+      gates = pickGatesAngular(footprintPath, env.waterSide, canvasSize, gateCount, rng);
     }
   }
 
@@ -167,8 +182,8 @@ export function generateWallsAndGates(
   }
 
   return {
-    wallPath, gates, interiorPolygonIds: interior, wallTowers,
-    innerWallPath, innerGates, middleWallPath, middleGates,
+    wallPath, gates, interiorPolygonIds: interior,
+    wallTowers, innerWallPath, innerGates, middleWallPath, middleGates,
   };
 }
 
