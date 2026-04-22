@@ -430,7 +430,7 @@ export function generateCityMapV2(
     wallConfig,
     obstaclePolygonIds,
   );
-  const { wallPath, gates, wallTowers, innerWallPath, innerGates, middleWallPath, middleGates } = wall;
+  const { wallPath, wallSegments, gates, wallTowers, innerWallPath, innerGates, middleWallPath, middleGates } = wall;
 
   // PR 3 — shared polygon-edge graph consumed by river + network A*.
   // Built once per city so rivers, roads, and streets share precomputed
@@ -570,6 +570,7 @@ export function generateCityMapV2(
     waterPolygonIds: [...waterPolygonIds].sort((a, b) => a - b),
     mountainPolygonIds: [...mountainPolygonIds].sort((a, b) => a - b),
     wallPath,
+    wallSegments,
     gates,
     river,
     bridges,

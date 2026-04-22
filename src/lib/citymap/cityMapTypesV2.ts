@@ -154,6 +154,13 @@ export interface CityMapDataV2 {
 
   // TODO PR 2: closed polyline walking the wall boundary along polygon edges.
   wallPath: [number, number][];
+  /**
+   * ALL disconnected outer-wall segments (mountains / water gaps split the
+   * footprint boundary into multiple sections). Sorted longest-first.
+   * Empty for unwalled cities. The renderer draws every segment; barrier
+   * builders iterate all segments to cover every disconnected wall section.
+   */
+  wallSegments: [number, number][][];
   // TODO PR 2: gates placed on wall edges (4 for small/medium/large, 5–8 for metropolis+).
   gates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
   // TODO PR 3: river routed along polygon edges; `islandPolygonIds` lists
