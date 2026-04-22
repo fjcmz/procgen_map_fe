@@ -78,18 +78,21 @@ const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
 const CITY_NAME_INK = '#2a241c';
 const QA_TAG_INK = '#8a8070';
 
-// Layer 11 — wall styling (PR 2).
-const WALL_INK = '#2a241c';
-const WALL_WIDTH = 4;
-// Inner wall is thinner / slightly lighter so it reads as secondary.
-const INNER_WALL_INK = '#4a3c2c';
+// Layer 11 — wall styling (PR 2). All rings use the same near-black ink;
+// width decreases inward so outer reads as the primary fortification.
+const WALL_INK = '#111118';
+const WALL_WIDTH = 5;
+const MIDDLE_WALL_INK = '#111118';
+const MIDDLE_WALL_WIDTH = 3.5;
+const INNER_WALL_INK = '#111118';
 const INNER_WALL_WIDTH = 2.5;
 // Tower dots along walls (filled circles at vertex positions).
-const TOWER_RADIUS = 4;    // outer wall towers
-const INNER_TOWER_RADIUS = 3;  // inner wall towers
+const TOWER_RADIUS = 4.5;  // outer wall towers
+const MIDDLE_TOWER_RADIUS = 3.5;  // middle wall towers
+const INNER_TOWER_RADIUS = 3;     // inner wall towers
 
 // Exit roads — dashed lines from gates to canvas boundary.
-const EXIT_ROAD_INK = '#888070';
+const EXIT_ROAD_INK = '#c0b8a8';
 const EXIT_ROAD_WIDTH = 2;
 const EXIT_ROAD_DASH: number[] = [6, 5];
 
@@ -98,12 +101,12 @@ const RIVER_CHANNEL_INK = '#a8d4f0';
 const RIVER_CHANNEL_WIDTH = 8;
 
 // Layer 6 — street styling (PR 3).
-const STREET_INK = '#b0b0b0';
+const STREET_INK = '#b8b0a0';
 const STREET_WIDTH = 1.5;
 
-// Layer 7 — road styling (PR 3).
-const ROAD_INK = '#444444';
-const ROAD_WIDTH = 4;
+// Layer 7 — road styling (PR 3). Thick light grey per spec.
+const ROAD_INK = '#c0b8a8';
+const ROAD_WIDTH = 5;
 
 // Layer 8 — bridge styling (PR 3, redesigned).
 // Bridge is now drawn PERPENDICULAR to the river edge (crossing the channel),
@@ -114,33 +117,30 @@ const BRIDGE_CROSS_HALF = 6;      // half-length of bridge perpendicular to rive
 const BRIDGE_ROAD_HALF = 2;       // half-width of bridge along river direction (road footprint)
 const BRIDGE_RAIL_WIDTH = 1.2;
 
-// Layer 9 — open-space styling (PR 4 slice). Each open space kind has a
-// distinct palette: civic squares (purple-white), markets (yellow-orange),
-// parks (greens).
-const OPEN_SPACE_SQUARE_FILL = '#e8d5f5';   // civic squares — light lavender
-const OPEN_SPACE_SQUARE_STROKE = 'rgba(100, 50, 150, 0.55)';
-const OPEN_SPACE_MARKET_FILL = '#f0b840';   // markets — warm amber-yellow
-const OPEN_SPACE_MARKET_STROKE = 'rgba(160, 80, 10, 0.6)';
-const OPEN_SPACE_PARK_FILL = '#7ec44a';     // parks — bright grass green
-const OPEN_SPACE_PARK_STROKE = 'rgba(30, 90, 10, 0.65)';
-const MARKET_STALL_INK = '#7a3a00';
+// Layer 9 — open-space styling (PR 4 slice). Lighter palette per spec.
+const OPEN_SPACE_SQUARE_FILL = '#f0eadc';   // civic squares — warm parchment
+const OPEN_SPACE_SQUARE_STROKE = 'rgba(120, 100, 60, 0.4)';
+const OPEN_SPACE_MARKET_FILL = '#f5e8b0';   // markets — pale straw yellow
+const OPEN_SPACE_MARKET_STROKE = 'rgba(150, 100, 20, 0.4)';
+const OPEN_SPACE_PARK_FILL = '#c8e8a8';     // parks — light sage green
+const OPEN_SPACE_PARK_STROKE = 'rgba(60, 120, 30, 0.45)';
+const MARKET_STALL_INK = '#5a3000';
 const MARKET_STALL_RADIUS = 1.5;
 const MARKET_STALLS_PER_POLYGON_MIN = 6;
 const MARKET_STALLS_PER_POLYGON_MAX = 12;
-const PARK_TREE_FILL = '#2d6a0a';
-const PARK_TREE_STROKE = 'rgba(10, 40, 5, 0.85)';
+const PARK_TREE_FILL = '#4a8820';
+const PARK_TREE_STROKE = 'rgba(20, 60, 5, 0.7)';
 const PARK_TREE_RADIUS = 3;
 const PARK_TREES_PER_POLYGON_MIN = 4;
 const PARK_TREES_PER_POLYGON_MAX = 10;
 
-// Layer 12 — landmark styling (PR 4 slice). Each landmark type has its own
-// palette: castle/palace = navy blue, temple = purple, monument = golden.
-// Fill is the plaque/body color; ink is the detail/label color on top.
+// Layer 12 — landmark styling (PR 4 slice). Lighter palette per spec:
+// body fills are medium-light tones; detail ink is dark for contrast.
 const LANDMARK_COLORS: Record<CityLandmarkV2['type'], { fill: string; ink: string }> = {
-  castle:   { fill: '#1a3a6e', ink: '#c8d8ff' }, // navy blue
-  palace:   { fill: '#1a3a6e', ink: '#c8d8ff' }, // navy blue
-  temple:   { fill: '#6a2080', ink: '#f0d0ff' }, // purple
-  monument: { fill: '#c89010', ink: '#fff5cc' }, // golden
+  castle:   { fill: '#6e9cc8', ink: '#0e1e3c' }, // light steel blue, dark ink
+  palace:   { fill: '#6e9cc8', ink: '#0e1e3c' }, // light steel blue, dark ink
+  temple:   { fill: '#a870c8', ink: '#2c0844' }, // light purple, dark ink
+  monument: { fill: '#dca030', ink: '#3c2400' }, // light gold, dark ink
 };
 const LANDMARK_SIZE_MIN = 20;
 const LANDMARK_SIZE_MAX = 36;
@@ -216,8 +216,9 @@ export function renderCityMapV2(
   // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
   drawLandmarks(ctx, data);
 
-  // ── Inner wall (metropolis+) — drawn before outer wall so outer sits on top ──
+  // ── Wall rings — drawn innermost first so outer rings sit visually on top ──
   drawInnerWalls(ctx, data);
+  drawMiddleWalls(ctx, data);
 
   // ── Layer 11: outer walls (PR 2) ──────────────────────────────────────
   drawWalls(ctx, data);
@@ -279,15 +280,21 @@ function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   strokePolyline(ctx, data.wallPath, WALL_INK, WALL_WIDTH);
 }
 
-// [Voronoi-polygon] Draw the inner wall (metropolis+ only) thinner / lighter.
+// [Voronoi-polygon] Draw the intermediate wall ring (megalopolis only).
+function drawMiddleWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.middleWallPath || data.middleWallPath.length < 2) return;
+  strokePolyline(ctx, data.middleWallPath, MIDDLE_WALL_INK, MIDDLE_WALL_WIDTH);
+}
+
+// [Voronoi-polygon] Draw the inner wall (metropolis+ only) thinner.
 function drawInnerWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (!data.innerWallPath || data.innerWallPath.length < 2) return;
   strokePolyline(ctx, data.innerWallPath, INNER_WALL_INK, INNER_WALL_WIDTH);
 }
 
-// [Voronoi-polygon] Draw tower dots at every computed tower position on
-// the outer wall, then smaller dots on the inner wall towers (derived from
-// every 3rd vertex of the inner path at render time — no stored data needed).
+// [Voronoi-polygon] Draw tower dots on all active wall rings. Outer towers
+// come from stored `wallTowers`; middle and inner towers are derived from
+// every 3rd vertex of their path at render time (no extra stored arrays needed).
 function drawWallTowers(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   // Outer wall towers.
   if (data.wallTowers && data.wallTowers.length > 0) {
@@ -299,10 +306,22 @@ function drawWallTowers(ctx: CanvasRenderingContext2D, data: CityMapDataV2): voi
     }
   }
 
-  // Inner wall towers — derive from every 3rd vertex of innerWallPath.
+  // Middle wall towers — every 3rd vertex.
+  if (data.middleWallPath && data.middleWallPath.length > 2) {
+    ctx.fillStyle = MIDDLE_WALL_INK;
+    const n = data.middleWallPath.length - 1;
+    for (let i = 0; i < n; i += 3) {
+      const [tx, ty] = data.middleWallPath[i];
+      ctx.beginPath();
+      ctx.arc(tx, ty, MIDDLE_TOWER_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Inner wall towers — every 3rd vertex.
   if (data.innerWallPath && data.innerWallPath.length > 2) {
     ctx.fillStyle = INNER_WALL_INK;
-    const n = data.innerWallPath.length - 1; // skip closing dup
+    const n = data.innerWallPath.length - 1;
     for (let i = 0; i < n; i += 3) {
       const [tx, ty] = data.innerWallPath[i];
       ctx.beginPath();
@@ -536,11 +555,8 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
 // PR 5 (slice) — buildings on Layer 10
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Layer 10 — building ink. Solid footprints use fill; hollow footprints use
-// stroke. Buildings are now polygon paths (Voronoi lot insets) rather than
-// axis-aligned rects — each `CityBuildingV2.vertices` holds the inset polygon
-// ring produced by `cityMapBuildings.ts`.
-const BUILDING_FILL = '#b5ae9f';
+// Layer 10 — building ink. Lighter fill per spec; dark outline for legibility.
+const BUILDING_FILL = '#d0c8b8';
 const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
