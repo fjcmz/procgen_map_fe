@@ -69,6 +69,7 @@ const LOT_BASE: Record<DistrictRole, number> = {
   residential: 3,
   slum: 0,
   agricultural: 0,
+  dock: 0,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -77,6 +78,7 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   residential: 280,
   slum: 1,
   agricultural: 1,
+  dock: 1,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -85,6 +87,7 @@ const LOT_MIN: Record<DistrictRole, number> = {
   residential: 2,
   slum: 0,
   agricultural: 0,
+  dock: 0,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -93,6 +96,7 @@ const LOT_MAX: Record<DistrictRole, number> = {
   residential: 6,
   slum: 0,
   agricultural: 0,
+  dock: 0,
 };
 
 // Setback in pixels from polygon boundary edges.

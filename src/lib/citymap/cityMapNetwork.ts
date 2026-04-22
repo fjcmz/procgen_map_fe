@@ -90,6 +90,7 @@ export function generateNetwork(
   wall: WallGenerationResult,
   river: RiverGenerationResult | null,
   canvasSize: number,
+  waterPolygonIds?: Set<number>,
 ): NetworkGenerationResult {
   void env; // Reserved — PR 4+ may want to branch on env.size / env.waterSide here.
 
@@ -110,6 +111,20 @@ export function generateNetwork(
   const wallEdgeKeySet = new Set<string>();
   for (let i = 0; i < wall.wallPath.length - 1; i++) {
     wallEdgeKeySet.add(canonicalEdgeKey(wall.wallPath[i], wall.wallPath[i + 1]));
+  }
+
+  // [Voronoi-polygon] Precompute the water-edge key set — any polygon edge
+  // whose ownership touches a water polygon. Roads / streets / exit-roads
+  // must never cross water, so every cost function returns Infinity for
+  // such edges (A* silently drops them per the cost-fn contract).
+  const water = waterPolygonIds ?? new Set<number>();
+  const waterEdgeKeySet = new Set<string>();
+  if (water.size > 0) {
+    for (const [eKey, rec] of graph.edges) {
+      for (const pid of rec.polyIds) {
+        if (water.has(pid)) { waterEdgeKeySet.add(eKey); break; }
+      }
+    }
   }
 
   // Target for every road: polygon vertex closest to canvas center.
@@ -133,6 +148,7 @@ export function generateNetwork(
 
     // Road cost: edgeLen + turn penalty (if direction changes sharply) +
     // river-crossing nudge (allowed but mildly expensive) + small noise.
+    // Water-polygon-adjacent edges return Infinity — roads never cross water.
     // The turn penalty uses the normalized edge direction so polygon edges
     // of different lengths are compared fairly.
     const roadCost = (
@@ -141,6 +157,7 @@ export function generateNetwork(
       nb: EdgeNeighbor,
       prevKey: string | null,
     ): number => {
+      if (waterEdgeKeySet.has(nb.edgeKey)) return Infinity;
       let penalty = 0;
       if (prevKey !== null) {
         const prev = graph.vertexPoints.get(prevKey);
@@ -207,6 +224,7 @@ export function generateNetwork(
   const isEligibleFrontier = (id: number): boolean => {
     const poly = polygons[id];
     if (poly.isEdge) return false;
+    if (water.has(id)) return false; // streets never route onto water
     if (isPolygonServed(id)) return false;
     for (const nb of poly.neighbors) {
       if (isPolygonServed(nb)) return false;
@@ -225,11 +243,13 @@ export function generateNetwork(
   // Streets cost: distance-biased with tiny noise. No turn penalty (city
   // streets can be windy); river-crossing is moderately discouraged so
   // streets don't pile bridges the renderer can't afford to draw.
+  // Water-polygon-adjacent edges return Infinity — streets never cross water.
   const streetCost = (
     _currKey: string,
     _currPoint: Point,
     nb: EdgeNeighbor,
   ): number => {
+    if (waterEdgeKeySet.has(nb.edgeKey)) return Infinity;
     const riverPenalty = riverEdgeKeySet.has(nb.edgeKey) ? riverCost : 0;
     return nb.edgeLen + riverPenalty + streetRng() * roadNoiseWeight;
   };
@@ -387,9 +407,10 @@ export function generateNetwork(
 
     // Simple distance cost — A*'s outward heuristic naturally keeps the path
     // heading toward the canvas boundary without needing a turn penalty.
+    // Water edges are rejected so exit roads never sprint out into the sea.
     const pathKeys = aStarEdgeGraph(
       graph, startKey, exitTargetKey,
-      (_currKey, _currPoint, nb) => nb.edgeLen,
+      (_currKey, _currPoint, nb) => waterEdgeKeySet.has(nb.edgeKey) ? Infinity : nb.edgeLen,
     );
     if (!pathKeys || pathKeys.length < 2) continue;
     exitRoads.push(keyPathToPoints(graph, pathKeys));

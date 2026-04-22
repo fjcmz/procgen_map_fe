@@ -83,6 +83,17 @@ const SLUM_SIZE_THRESHOLD: Record<CitySize, number> = {
 // Mirrors V1's `gridW * 0.3` (cityMapGenerator.ts:913) in canvas-pixel space.
 const HARBOR_BAND_FRACTION = 0.30;
 
+// Cities of these tiers may sport `dock` blocks sitting on water polygons
+// adjacent to the city footprint (spec: "Cities that are large or larger
+// can have dock blocks covering up to 10% of their total city polygon
+// count"). Smaller coastal cities only get harbor blocks on the landward
+// side of the coast.
+const DOCK_ELIGIBLE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
+  'large', 'metropolis', 'megalopolis',
+]);
+// Cap on dock-block water-polygon coverage as a fraction of cityPolygonCount.
+const DOCK_MAX_FRACTION_OF_CITY = 0.10;
+
 // Name combiner: retry attempts before falling back to a numeric DISTRICT N.
 const NAME_MAX_ATTEMPTS = 12;
 // Probability of inserting a space between prefix + suffix (else concatenate).
@@ -120,8 +131,12 @@ export function generateBlocks(
   streets: Point[][],
   openSpaces: OpenSpaceEntry[],
   canvasSize: number,
+  waterPolygonIds?: Set<number>,
+  cityPolygonCount?: number,
 ): CityBlockV2[] {
   if (polygons.length < 4) return [];
+
+  const water = waterPolygonIds ?? new Set<number>();
 
   // ── Step 1: barrier edge keys ────────────────────────────────────────────
   // [Voronoi-polygon] Every wall / river / road / street segment is a
@@ -172,7 +187,11 @@ export function generateBlocks(
   // For walled cities the wall edges already block the same seam, so
   // this is a no-op on the flood result.
   const interior = wall.interiorPolygonIds;
+  // Water polygons are excluded from the standard flood — they cannot be
+  // part of civic / residential / harbor / slum / agricultural blocks.
+  // Dock blocks (large+ cities) are synthesized in a separate pass below.
   const visited = new Set<number>();
+  for (const p of polygons) if (water.has(p.id)) visited.add(p.id);
   const rawBlocks: number[][] = [];
   for (const seedPoly of polygons) {
     if (visited.has(seedPoly.id)) continue;
@@ -185,6 +204,7 @@ export function generateBlocks(
       const curr = polygons[currId];
       for (const nbId of curr.neighbors) {
         if (visited.has(nbId)) continue;
+        if (water.has(nbId)) continue; // water polygons are never part of land blocks
         if (interior.has(currId) !== interior.has(nbId)) continue; // footprint boundary
         const sharedKey = findSharedEdgeKey(curr, nbId, edgeOwnership);
         if (sharedKey === null) continue; // no shared Voronoi edge (very rare clip edge case)
@@ -236,7 +256,103 @@ export function generateBlocks(
     blocks.push({ polygonIds, role, name });
   }
 
+  // ── Dock block synthesis (large+ coastal cities only) ────────────────────
+  // [Voronoi-polygon] Select up to `DOCK_MAX_FRACTION_OF_CITY × cityPolygonCount`
+  // water polygons that sit Delaunay-adjacent to the city footprint. They
+  // become `dock` blocks — the only exception to the "no blocks on water"
+  // rule. Each cluster becomes its own block so the renderer can stamp a
+  // wood-plank pattern per dock. Small / medium cities don't emit docks
+  // (harbor land blocks already cover their waterfront).
+  if (
+    water.size > 0
+    && DOCK_ELIGIBLE_SIZES.has(env.size)
+    && cityPolygonCount && cityPolygonCount > 0
+  ) {
+    const dockBudget = Math.floor(cityPolygonCount * DOCK_MAX_FRACTION_OF_CITY);
+    if (dockBudget > 0) {
+      const dockPolygonIds = pickDockPolygons(polygons, water, interior, dockBudget);
+      if (dockPolygonIds.length > 0) {
+        const dockClusters = clusterAdjacentPolygons(polygons, dockPolygonIds);
+        for (const cluster of dockClusters) {
+          const name = generateBlockName(blocks.length, 'dock', nameRng, usedNames);
+          blocks.push({ polygonIds: cluster, role: 'dock', name });
+        }
+      }
+    }
+  }
+
   return blocks;
+}
+
+// ─── Dock block helpers ─────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Pick water polygons to become docks. Eligibility:
+//   - polygon must be in `water`
+//   - polygon must be Delaunay-adjacent to at least one `interior` polygon
+//     (city footprint) — docks touch the city, they don't float offshore
+// Picks the polygons closest to the interior first so dock blocks cluster
+// against the coastline (stable, deterministic — no RNG).
+function pickDockPolygons(
+  polygons: CityPolygon[],
+  water: Set<number>,
+  interior: Set<number>,
+  budget: number,
+): number[] {
+  type Candidate = { id: number; score: number };
+  const candidates: Candidate[] = [];
+  for (const pid of water) {
+    const poly = polygons[pid];
+    if (!poly) continue;
+    // Count interior neighbors — more interior neighbors = more prominent coast.
+    let interiorTouches = 0;
+    let landTouches = 0;
+    for (const nb of poly.neighbors) {
+      if (interior.has(nb)) interiorTouches++;
+      if (!water.has(nb)) landTouches++;
+    }
+    if (interiorTouches === 0) continue; // must actually touch the city
+    // Score: more interior contact ranks first; break ties by id for determinism.
+    candidates.push({ id: pid, score: -interiorTouches * 10 - landTouches });
+  }
+  candidates.sort((a, b) => (a.score - b.score) || (a.id - b.id));
+
+  const picked: number[] = [];
+  for (const c of candidates) {
+    if (picked.length >= budget) break;
+    picked.push(c.id);
+  }
+  return picked;
+}
+
+// [Voronoi-polygon] Group picked polygons into connected clusters over
+// `polygon.neighbors`. Two picked polygons end up in the same cluster iff
+// they're Delaunay-adjacent (direct or transitive). Deterministic — no RNG.
+function clusterAdjacentPolygons(
+  polygons: CityPolygon[],
+  picked: number[],
+): number[][] {
+  const pickedSet = new Set(picked);
+  const visited = new Set<number>();
+  const clusters: number[][] = [];
+  for (const pid of picked) {
+    if (visited.has(pid)) continue;
+    const cluster: number[] = [];
+    const queue: number[] = [pid];
+    visited.add(pid);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      cluster.push(id);
+      for (const nb of polygons[id].neighbors) {
+        if (pickedSet.has(nb) && !visited.has(nb)) {
+          visited.add(nb);
+          queue.push(nb);
+        }
+      }
+    }
+    cluster.sort((a, b) => a - b);
+    clusters.push(cluster);
+  }
+  return clusters;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -361,6 +477,7 @@ const NAME_PREFIXES = [
 const SUFFIXES_CIVIC = ['CROSS', 'COURT', 'SQUARE', 'GATE'];
 const SUFFIXES_MARKET = ['MARKET', 'CROSS', 'SQUARE', 'ROW'];
 const SUFFIXES_HARBOR = ['DOCKS', 'QUAY', 'WHARF', 'BANK'];
+const SUFFIXES_DOCK = ['DOCKS', 'PIER', 'WHARF', 'LANDING', 'JETTY'];
 const SUFFIXES_RESIDENTIAL = ['LANE', 'ROW', 'END', 'HOLM', 'SIDE', 'YARD', 'HILL', 'HEATH', 'GATE'];
 const SUFFIXES_SLUM = ['ROW', 'END', 'HEATH', 'LANE', 'SIDE'];
 const SUFFIXES_AGRI = ['FIELDS', 'CROFT', 'MEADOW', 'ACRES'];
@@ -370,6 +487,7 @@ function suffixesForRole(role: DistrictRole): string[] {
     case 'civic':        return SUFFIXES_CIVIC;
     case 'market':       return SUFFIXES_MARKET;
     case 'harbor':       return SUFFIXES_HARBOR;
+    case 'dock':         return SUFFIXES_DOCK;
     case 'slum':         return SUFFIXES_SLUM;
     case 'agricultural': return SUFFIXES_AGRI;
     default:             return SUFFIXES_RESIDENTIAL;

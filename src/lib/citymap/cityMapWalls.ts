@@ -90,6 +90,10 @@ export interface WallGenerationResult {
  * Generate the wall footprint + gate list for a V2 city.
  * Which rings are generated is controlled by `wallConfig`, computed by
  * `generateCityMapV2` from city size + probability rolls.
+ *
+ * `waterPolygonIds` (optional, coastal cities) suppresses wall segments
+ * that would run along a water-adjacent seam — the coast-facing side of
+ * a coastal city has no wall.
  */
 export function generateWallsAndGates(
   seed: string,
@@ -99,6 +103,7 @@ export function generateWallsAndGates(
   interior: Set<number>,
   canvasSize: number,
   wallConfig: WallConfig,
+  waterPolygonIds?: Set<number>,
 ): WallGenerationResult {
   const empty: WallGenerationResult = {
     wallPath: [], gates: [], interiorPolygonIds: new Set(),
@@ -109,6 +114,7 @@ export function generateWallsAndGates(
 
   const rng = seededPRNG(`${seed}_city_${cityName}_walls_gates`);
   const edgeOwnership = buildEdgeOwnership(polygons);
+  const water = waterPolygonIds ?? new Set<number>();
 
   // ── Outer wall (or virtual entry points when unwalled) ──────────────────────
   // Walled cities trace the footprint boundary as a masonry wall and pick
@@ -116,11 +122,16 @@ export function generateWallsAndGates(
   // same number of entry points from the footprint boundary using the same
   // angular-distribution logic — roads then connect those entry points to the
   // city centre, giving unwalled settlements a street network and proper blocks.
+  //
+  // Coastal cities pass `water` through to `collectWallBoundaryEdges` so seams
+  // between interior polygons and water polygons are dropped — walls never
+  // border water (spec). The resulting path may be an OPEN polyline instead
+  // of a closed ring; `chainWallPath` handles both.
   let wallPath: Point[] = [];
   let gates: { edge: Edge; dir: GateDir }[] = [];
   let wallTowers: Point[] = [];
 
-  const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
+  const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership, water);
   const footprintPath = chainWallPath(boundaryEdges);
 
   if (wallConfig.hasOuterWall) {
@@ -244,7 +255,9 @@ function collectWallBoundaryEdges(
   polygons: CityPolygon[],
   interior: Set<number>,
   edgeOwnership: Map<string, EdgeRecord>,
+  waterPolygonIds?: Set<number>,
 ): Edge[] {
+  const water = waterPolygonIds ?? new Set<number>();
   const edges: Edge[] = [];
   for (const rec of edgeOwnership.values()) {
     let insideCount = 0;
@@ -254,10 +267,15 @@ function collectWallBoundaryEdges(
     if (insideCount !== 1) continue;
 
     let interiorId = -1;
+    let otherId = -1;
     for (const id of rec.polyIds) {
-      if (interior.has(id)) { interiorId = id; break; }
+      if (interior.has(id)) interiorId = id;
+      else otherId = id;
     }
     if (interiorId === -1) continue;
+    // [Voronoi-polygon] Coastal skip: if the non-interior neighbor is a
+    // water polygon, this seam is the coastline — no wall is built here.
+    if (otherId !== -1 && water.has(otherId)) continue;
     const owner = polygons[interiorId];
     const verts = owner.vertices;
     const vn = verts.length;
@@ -280,6 +298,11 @@ function collectWallBoundaryEdges(
 // Wall path chaining
 // ─────────────────────────────────────────────────────────────────────────────
 
+// [Voronoi-polygon] Chain the boundary edges into the longest polyline we
+// can walk. Returns a closed ring for fully-walled footprints (typical
+// inland cities) OR an open polyline for coastal cities where the
+// water-facing seam has been dropped from the edge set. The caller treats
+// a polyline with `path[0] !== path[last]` as open and renders it as-is.
 function chainWallPath(edges: Edge[]): Point[] {
   if (edges.length === 0) return [];
 
@@ -290,10 +313,32 @@ function chainWallPath(edges: Edge[]): Point[] {
     adj.get(k)!.push([b[0], b[1]]);
   }
 
-  let start: Point = edges[0][0];
+  // Prefer to start at a vertex with exactly one outgoing edge — that's
+  // an endpoint of an OPEN chain (an uncut ring has in/out degree 2 at
+  // every vertex). If no endpoints exist, fall back to the previous
+  // lex-min starting rule so inland cities remain byte-stable.
+  const inDegree = new Map<string, number>();
+  for (const [, b] of edges) {
+    const k = vertexKey(b);
+    inDegree.set(k, (inDegree.get(k) ?? 0) + 1);
+  }
+  let start: Point | null = null;
   for (const [a] of edges) {
-    if (a[1] < start[1] || (a[1] === start[1] && a[0] < start[0])) {
-      start = [a[0], a[1]];
+    const k = vertexKey(a);
+    const outDeg = adj.get(k)?.length ?? 0;
+    const inDeg = inDegree.get(k) ?? 0;
+    if (outDeg === 1 && inDeg === 0) {
+      if (!start || a[1] < start[1] || (a[1] === start[1] && a[0] < start[0])) {
+        start = [a[0], a[1]];
+      }
+    }
+  }
+  if (!start) {
+    start = edges[0][0];
+    for (const [a] of edges) {
+      if (a[1] < start[1] || (a[1] === start[1] && a[0] < start[0])) {
+        start = [a[0], a[1]];
+      }
     }
   }
 
@@ -340,7 +385,6 @@ function chainWallPath(edges: Edge[]): Point[] {
   }
 
   if (path.length < 4) return [];
-  if (vertexKey(path[0]) !== vertexKey(path[path.length - 1])) return [];
   return path;
 }
 
@@ -471,7 +515,11 @@ function computeTowerPositions(wallPath: Point[]): Point[] {
   const towers: Point[] = [];
   if (wallPath.length < 2) return towers;
 
-  const n = wallPath.length - 1; // exclude closing duplicate
+  // Closed rings carry a repeated vertex at the end; open chains don't.
+  // Probe both endpoints and drop the closing duplicate only when present,
+  // so open coast-facing walls don't lose their last real tower vertex.
+  const closed = vertexKey(wallPath[0]) === vertexKey(wallPath[wallPath.length - 1]);
+  const n = closed ? wallPath.length - 1 : wallPath.length;
   const towerSet = new Set<string>();
 
   const addTower = (pt: Point) => {
