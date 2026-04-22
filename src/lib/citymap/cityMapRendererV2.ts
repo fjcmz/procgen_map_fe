@@ -92,10 +92,6 @@ const TOWER_RADIUS = 4.5;  // outer wall towers
 const MIDDLE_TOWER_RADIUS = 3.5;  // middle wall towers
 const INNER_TOWER_RADIUS = 3;     // inner wall towers
 
-// Exit roads — dashed lines from gates to canvas boundary.
-const EXIT_ROAD_INK = '#7c7c78';
-const EXIT_ROAD_WIDTH = 2;
-const EXIT_ROAD_DASH: number[] = [6, 5];
 
 // Layer 5 — river styling (PR 3).
 const RIVER_CHANNEL_INK = '#a8d4f0';
@@ -221,10 +217,6 @@ export function renderCityMapV2(
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
   drawSprawl(ctx, data);
 
-  // ── Exit roads — dashed lines from gates to canvas boundary ─────────────
-  // Drawn on top of sprawl so the exit road visibly crosses any hut it runs over.
-  drawExitRoads(ctx, data);
-
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
   drawOpenSpaces(ctx, data, seed, cityName);
 
@@ -247,10 +239,13 @@ export function renderCityMapV2(
   // ── Tower dots — drawn on top of wall lines ─────────────────────────────
   drawWallTowers(ctx, data);
 
-  // ── Layer 7: roads (PR 3) — bridge-aware ─────────────────────────────
+  // ── Layer 7: roads + exit roads (PR 3) ────────────────────────────────
   // Roads are drawn bending through the bridge midpoint instead of along the
   // river edge, so they visually approach the bridge perpendicularly.
+  // Exit roads share the same style and are drawn in the same pass so they
+  // read as a continuous road network from boundary through gate to center.
   drawRoadsWithBridgeRedirect(ctx, data);
+  drawExitRoads(ctx, data);
 
   // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
   drawRiver(ctx, data);
@@ -354,24 +349,11 @@ function drawWallTowers(ctx: CanvasRenderingContext2D, data: CityMapDataV2): voi
   }
 }
 
-// [Voronoi-polygon] Draw exit roads as dashed lines from each gate outward
-// to the canvas boundary, representing roads to off-map destinations.
+// [Voronoi-polygon] Draw exit roads — polygon-edge paths from each gate to
+// the canvas boundary — using the same solid style as internal roads so the
+// road network reads as continuous from boundary through gate to city center.
 function drawExitRoads(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
-  if (!data.exitRoads || data.exitRoads.length === 0) return;
-  ctx.strokeStyle = EXIT_ROAD_INK;
-  ctx.lineWidth = EXIT_ROAD_WIDTH;
-  ctx.lineCap = 'round';
-  ctx.setLineDash(EXIT_ROAD_DASH);
-  ctx.beginPath();
-  for (const road of data.exitRoads) {
-    if (road.length < 2) continue;
-    ctx.moveTo(road[0][0], road[0][1]);
-    for (let i = 1; i < road.length; i++) {
-      ctx.lineTo(road[i][0], road[i][1]);
-    }
-  }
-  ctx.stroke();
-  ctx.setLineDash([]);
+  drawPathList(ctx, data.exitRoads, ROAD_INK, ROAD_WIDTH);
 }
 
 // Shared helper — stroke a polyline with the given style.

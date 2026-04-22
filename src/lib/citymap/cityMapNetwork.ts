@@ -326,10 +326,23 @@ export function generateNetwork(
   }
 
   // ── Exit roads ────────────────────────────────────────────────────────
-  // [Voronoi-polygon] For each gate, compute a straight segment from the gate
-  // midpoint outward (in the outward-normal direction) to the canvas boundary.
-  // These represent connections to off-map cities and are rendered as dashed
-  // lines on top of the outside-walls sprawl.
+  // [Voronoi-polygon] For each gate, A* along polygon edges from the gate's
+  // nearest vertex to the nearest canvas-boundary vertex in the gate's outward
+  // direction. Gives exit roads the same organic polygon-edge character as
+  // internal roads instead of straight ray-casts.
+
+  // Collect all canvas-boundary vertices (within 1 px of any canvas edge).
+  const BOUNDARY_EPS = 1.0;
+  const boundaryVertexKeys: string[] = [];
+  for (const [k, p] of graph.vertexPoints) {
+    if (
+      p[0] <= BOUNDARY_EPS || p[0] >= canvasSize - BOUNDARY_EPS ||
+      p[1] <= BOUNDARY_EPS || p[1] >= canvasSize - BOUNDARY_EPS
+    ) {
+      boundaryVertexKeys.push(k);
+    }
+  }
+
   const exitRoads: Point[][] = [];
   for (const gate of wall.gates) {
     const [ga, gb] = gate.edge;
@@ -340,23 +353,46 @@ export function generateNetwork(
     const dx = gb[0] - ga[0];
     const dy = gb[1] - ga[1];
     const len = Math.hypot(dx, dy) || 1;
-    // Outward normal for CW polygon (y-down): (dy/len, -dx/len)
     const nx = dy / len;
     const ny = -dx / len;
 
-    // Ray-cast outward until we hit a canvas boundary.
-    // Parameter t such that [mx + nx*t, my + ny*t] first crosses 0 or canvasSize.
+    // Project outward to find the expected canvas-boundary exit point.
     let tBest = Infinity;
-    if (nx > 0)  tBest = Math.min(tBest, (canvasSize - mx) / nx);
-    if (nx < 0)  tBest = Math.min(tBest, -mx / nx);
-    if (ny > 0)  tBest = Math.min(tBest, (canvasSize - my) / ny);
-    if (ny < 0)  tBest = Math.min(tBest, -my / ny);
-
-    if (!isFinite(tBest) || tBest <= 0) continue;
+    if (nx > 0) tBest = Math.min(tBest, (canvasSize - mx) / nx);
+    if (nx < 0) tBest = Math.min(tBest, -mx / nx);
+    if (ny > 0) tBest = Math.min(tBest, (canvasSize - my) / ny);
+    if (ny < 0) tBest = Math.min(tBest, -my / ny);
+    if (!isFinite(tBest) || tBest <= 0 || boundaryVertexKeys.length === 0) continue;
 
     const ex = mx + nx * tBest;
     const ey = my + ny * tBest;
-    exitRoads.push([[mx, my], [ex, ey]]);
+
+    // Find the nearest canvas-boundary vertex to the projected exit point.
+    let exitTargetKey: string | null = null;
+    let bestExitD2 = Infinity;
+    for (const k of boundaryVertexKeys) {
+      const p = graph.vertexPoints.get(k)!;
+      const ddx = p[0] - ex;
+      const ddy = p[1] - ey;
+      const d2 = ddx * ddx + ddy * ddy;
+      if (d2 < bestExitD2) {
+        bestExitD2 = d2;
+        exitTargetKey = k;
+      }
+    }
+    if (!exitTargetKey) continue;
+
+    const startKey = nearestVertexKey(graph, [mx, my]);
+    if (!startKey || startKey === exitTargetKey) continue;
+
+    // Simple distance cost — A*'s outward heuristic naturally keeps the path
+    // heading toward the canvas boundary without needing a turn penalty.
+    const pathKeys = aStarEdgeGraph(
+      graph, startKey, exitTargetKey,
+      (_currKey, _currPoint, nb) => nb.edgeLen,
+    );
+    if (!pathKeys || pathKeys.length < 2) continue;
+    exitRoads.push(keyPathToPoints(graph, pathKeys));
   }
 
   return { roads, streets, bridges, exitRoads };
