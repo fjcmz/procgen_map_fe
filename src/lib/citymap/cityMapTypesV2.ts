@@ -24,7 +24,7 @@ import type { BiomeType } from '../types';
 
 export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
 
-export type DistrictRole = 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum';
+export type DistrictRole = 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock';
 
 export interface CityEnvironment {
   biome: BiomeType;
@@ -125,6 +125,14 @@ export interface CityMapDataV2 {
   cityPolygonCount: number;
   /** Voronoi polygon foundation — the primary data contract for PR 2-5. */
   polygons: CityPolygon[];
+  /**
+   * Polygon ids that are rendered as water (coastal cities only). Up to 25%
+   * of `polygonCount`, carved from the `env.waterSide` edge of the canvas.
+   * Walls skip water-adjacent seams, roads never cross water edges, and the
+   * standard block flood excludes these polygons entirely; only the special
+   * `dock` block role (large+ cities) is allowed to sit on water.
+   */
+  waterPolygonIds: number[];
 
   // TODO PR 2: closed polyline walking the wall boundary along polygon edges.
   wallPath: [number, number][];

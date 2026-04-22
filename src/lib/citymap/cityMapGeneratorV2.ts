@@ -35,6 +35,7 @@ import { generateBlocks } from './cityMapBlocks';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
+import { generateWaterPolygons } from './cityMapWater';
 
 // ── Environment derivation ──
 
@@ -268,11 +269,26 @@ export function generateCityMapV2(
     );
   }
 
+  // ── Coastal water polygons ──
+  // For coastal cities, carve out up to 25% of the canvas polygons as water
+  // along the matching `env.waterSide` edge. Downstream generators (shape,
+  // walls, network, blocks, open spaces) all consume this set to keep land
+  // and sea cleanly separated. Inland cities get an empty set — no
+  // behavior change relative to pre-coastal builds.
+  const waterPolygonIds = generateWaterPolygons(
+    seed,
+    cityName,
+    env,
+    polygons,
+    CANVAS_SIZE,
+  );
+
   // City footprint allocation. Picks an organic shape (50% spheroid /
   // 30% rectangle / 15% half-sphere / 5% triangle) and allocates exactly
   // `POLYGON_COUNTS[env.size]` polygons from the canvas, growing outward
-  // from the canvas center. The wall traces this set; downstream features
-  // query `wall.interiorPolygonIds` for "inside the city?" tests. See
+  // from the canvas center (shifted toward the coast for coastal cities).
+  // The wall traces this set; downstream features query
+  // `wall.interiorPolygonIds` for "inside the city?" tests. See
   // `cityMapShape.ts` for the score-and-pick algorithm and the rationale
   // for dropping the old percentage-based coverage roll.
   const cityPolygonCount = POLYGON_COUNTS[env.size];
@@ -283,6 +299,7 @@ export function generateCityMapV2(
     polygons,
     CANVAS_SIZE,
     cityPolygonCount,
+    waterPolygonIds,
   );
 
   // PR 2 — walls + gates.
@@ -331,6 +348,7 @@ export function generateCityMapV2(
     footprint.interior,
     CANVAS_SIZE,
     wallConfig,
+    waterPolygonIds,
   );
   const { wallPath, gates, wallTowers, innerWallPath, innerGates, middleWallPath, middleGates } = wall;
 
@@ -355,6 +373,7 @@ export function generateCityMapV2(
     wall,
     river,
     CANVAS_SIZE,
+    waterPolygonIds,
   );
 
   // PR 4 (open-spaces slice) — civic square + markets + parks. Polygon-based
@@ -374,6 +393,7 @@ export function generateCityMapV2(
     river,
     roads,
     CANVAS_SIZE,
+    waterPolygonIds,
   );
 
   // PR 4 (blocks slice) — polygon-graph flood bounded by wall / river / road /
@@ -396,6 +416,8 @@ export function generateCityMapV2(
     streets,
     openSpaces,
     CANVAS_SIZE,
+    waterPolygonIds,
+    cityPolygonCount,
   );
 
   // PR 4 (landmarks slice) — capital castle/palace + temple-per-religion +
@@ -463,6 +485,7 @@ export function generateCityMapV2(
     polygonCount: polygons.length,
     cityPolygonCount,
     polygons,
+    waterPolygonIds: [...waterPolygonIds].sort((a, b) => a - b),
     wallPath,
     gates,
     river,

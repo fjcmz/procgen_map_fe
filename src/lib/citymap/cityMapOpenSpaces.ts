@@ -108,7 +108,9 @@ export function generateOpenSpaces(
   river: RiverGenerationResult | null,
   roads: Point[][],
   canvasSize: number,
+  waterPolygonIds?: Set<number>,
 ): OpenSpaceEntry[] {
+  const water = waterPolygonIds ?? new Set<number>();
   // ── Eligibility — interior polygons not already taken by infrastructure ──
   // [Voronoi-polygon] We exclude:
   //   1. polygon.isEdge === true       (PR 5 outside-walls sprawl)
@@ -137,6 +139,7 @@ export function generateOpenSpaces(
   const eligible = new Set<number>();
   for (const p of polygons) {
     if (p.isEdge) continue;
+    if (water.has(p.id)) continue; // open spaces never land on water
     if (hasWalls && !wall.interiorPolygonIds.has(p.id)) continue;
     if (touchesBlockedEdge(p, blockedEdgeKeys)) continue;
     eligible.add(p.id);

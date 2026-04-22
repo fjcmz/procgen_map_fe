@@ -79,6 +79,20 @@ const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
 const CITY_NAME_INK = '#2a241c';
 const QA_TAG_INK = '#8a8070';
 
+// Coastal water — polygons bordering `env.waterSide`. Light-blue sea fill
+// slightly bluer than the river channel so the two read as separate bodies.
+const WATER_FILL = '#9fc9e8';
+const WATER_EDGE_STROKE = 'rgba(70, 110, 140, 0.35)';
+
+// Dock blocks (large+ coastal cities) — wooden plank styling per spec.
+// Filled light brown with darker brown stripes to read as wharves / piers.
+const DOCK_FILL = '#c9a673';        // light brown base (weathered wood)
+const DOCK_STRIPE_INK = '#7a5a2e';  // darker brown plank seams
+const DOCK_STRIPE_WIDTH = 1.2;
+const DOCK_STRIPE_SPACING = 5;      // px between plank seams
+const DOCK_OUTLINE = '#5c4020';
+const DOCK_OUTLINE_WIDTH = 1;
+
 // Layer 11 — wall styling (PR 2). All rings use the same near-black ink;
 // width decreases inward so outer reads as the primary fortification.
 const WALL_INK = '#111118';
@@ -186,6 +200,11 @@ export function renderCityMapV2(
   ctx.fillStyle = BASE_FILL;
   ctx.fillRect(0, 0, size, size);
 
+  // ── Layer 1.5: coastal water polygons ────────────────────────────────────
+  // Drawn before the polygon-edge grid so the blue fill reads as a solid
+  // waterbody with the faint cadastral grid stroked across it.
+  drawWater(ctx, data);
+
   // ── Layer 2: faint Voronoi polygon edges (organic cadastral grid) ───────
   // [Voronoi foundation] — each polygon's vertex ring is stroked at 12% ink.
   ctx.strokeStyle = POLYGON_EDGE_STROKE;
@@ -207,6 +226,13 @@ export function renderCityMapV2(
   //   Layer 13 — district labels (PR 5)
   //   Layer 10 — buildings (PR 5) — drawn below after bridges and before walls.
   //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
+
+  // ── Layer 2.3: dock blocks (large+ coastal cities only) ─────────────────
+  // Dock blocks sit on water polygons but are rendered as solid wooden
+  // platforms — filled light brown with darker plank stripes. Drawn above
+  // the water layer but below sprawl / infrastructure so wall and road ink
+  // stays on top where a road happens to meet a dock.
+  drawDockBlocks(ctx, data);
 
   // ── Layer 2.5: block background fills (slum + agricultural) ─────────────
   // Fills the polygon areas of slum and agricultural blocks before any
@@ -267,6 +293,92 @@ export function renderCityMapV2(
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   ctx.fillText('V2', size - 8, size - 8);
+}
+
+// [Voronoi-polygon] Fill every water polygon with a light-blue sea colour
+// plus a faint darker outline so the coastline reads cleanly against the
+// cream land base. No RNG, no per-polygon variation — the sea is a single
+// connected body and should look uniform.
+function drawWater(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.waterPolygonIds || data.waterPolygonIds.length === 0) return;
+  ctx.fillStyle = WATER_FILL;
+  ctx.strokeStyle = WATER_EDGE_STROKE;
+  ctx.lineWidth = 1;
+  ctx.lineJoin = 'round';
+  for (const pid of data.waterPolygonIds) {
+    const polygon = data.polygons[pid];
+    if (!polygon || polygon.vertices.length < 3) continue;
+    tracePolygonRing(ctx, polygon);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// [Voronoi-polygon] Fill each dock block's polygons with a wooden platform
+// look: light brown base + evenly spaced darker plank stripes clipped to
+// the polygon shape. Clipping is per-polygon so the stripes don't bleed
+// across block boundaries. Stripe orientation is keyed off the block's
+// polygon-id mod 2 so adjacent docks alternate between vertical and
+// horizontal plank runs for visual variety (no RNG — deterministic).
+function drawDockBlocks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.blocks.length === 0) return;
+
+  for (const block of data.blocks) {
+    if (block.role !== 'dock') continue;
+    // Orientation: polygon-id parity picks vertical or horizontal stripes
+    // so neighbouring docks read as separate structures.
+    const firstPid = block.polygonIds[0] ?? 0;
+    const vertical = (firstPid % 2) === 0;
+
+    for (const pid of block.polygonIds) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+
+      // Fill the wooden base.
+      tracePolygonRing(ctx, polygon);
+      ctx.fillStyle = DOCK_FILL;
+      ctx.fill();
+
+      // Clip to the polygon and stroke stripes across it.
+      ctx.save();
+      tracePolygonRing(ctx, polygon);
+      ctx.clip();
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const [vx, vy] of polygon.vertices) {
+        if (vx < minX) minX = vx;
+        if (vx > maxX) maxX = vx;
+        if (vy < minY) minY = vy;
+        if (vy > maxY) maxY = vy;
+      }
+
+      ctx.strokeStyle = DOCK_STRIPE_INK;
+      ctx.lineWidth = DOCK_STRIPE_WIDTH;
+      ctx.lineCap = 'butt';
+      ctx.beginPath();
+      if (vertical) {
+        const start = Math.floor(minX / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
+        for (let x = start; x <= maxX; x += DOCK_STRIPE_SPACING) {
+          ctx.moveTo(x, minY);
+          ctx.lineTo(x, maxY);
+        }
+      } else {
+        const start = Math.floor(minY / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
+        for (let y = start; y <= maxY; y += DOCK_STRIPE_SPACING) {
+          ctx.moveTo(minX, y);
+          ctx.lineTo(maxX, y);
+        }
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      // Outline — dark brown border so the dock reads as a distinct block.
+      tracePolygonRing(ctx, polygon);
+      ctx.strokeStyle = DOCK_OUTLINE;
+      ctx.lineWidth = DOCK_OUTLINE_WIDTH;
+      ctx.stroke();
+    }
+  }
 }
 
 // [Voronoi-polygon] Fill block polygons for slum and agricultural districts

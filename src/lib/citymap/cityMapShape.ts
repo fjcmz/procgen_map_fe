@@ -92,6 +92,12 @@ const FBM_AMPLITUDE = 0.6;
 // only get picked if N exceeds the half's polygon capacity.
 const HALF_SPHERE_WRONG_SIDE_PENALTY = 100;
 
+// Coastal cities shift their footprint-scoring center toward the water side
+// by this fraction of the canvas so the built city sits close to the coast
+// rather than dead-center (spec: "A city on the coast will have its city
+// centre close to the cost and will organically grow from there").
+const COAST_CENTER_SHIFT_FRACTION = 0.22;
+
 /**
  * Pick a city shape and allocate `POLYGON_COUNTS[env.size]` polygons for the
  * built city, growing outward from the canvas center.
@@ -107,24 +113,41 @@ export function selectCityFootprint(
   polygons: CityPolygon[],
   canvasSize: number,
   cityPolygonCount: number,
+  waterPolygonIds?: Set<number>,
 ): CityFootprintResult {
-  // Reserved for future shape-orientation hooks (e.g. align the rectangle's
-  // long axis with `env.waterSide`). Unused today.
-  void env;
-
   const rng = seededPRNG(`${seed}_city_${cityName}_shape`);
   const samplers = createNoiseSamplers(`${seed}_city_${cityName}_shape_noise`);
 
   const shape = pickShape(rng);
 
-  const cx = canvasSize / 2;
-  const cy = canvasSize / 2;
+  // [Voronoi-polygon] Coastal cities grow their footprint close to the water
+  // side — the "city centre close to the coast" part of the coast spec.
+  // Shift the shape's scoring center toward `env.waterSide` by a bounded
+  // fraction of the canvas radius so the built city presses up against the
+  // coastline rather than sitting dead-center with a strip of water bolted
+  // onto one edge.
+  const baseCenterX = canvasSize / 2;
+  const baseCenterY = canvasSize / 2;
+  const shiftPx = canvasSize * COAST_CENTER_SHIFT_FRACTION;
+  let cx = baseCenterX;
+  let cy = baseCenterY;
+  if (env.isCoastal && env.waterSide) {
+    switch (env.waterSide) {
+      case 'north': cy = baseCenterY - shiftPx; break;
+      case 'south': cy = baseCenterY + shiftPx; break;
+      case 'west':  cx = baseCenterX - shiftPx; break;
+      case 'east':  cx = baseCenterX + shiftPx; break;
+    }
+  }
   const maxR = canvasSize / 2;
+
+  const water = waterPolygonIds ?? new Set<number>();
 
   type Scored = { id: number; score: number };
   const scored: Scored[] = [];
   for (const p of polygons) {
     if (p.isEdge) continue;
+    if (water.has(p.id)) continue; // water polygons are never part of the city footprint
     const [sx, sy] = p.site;
     const sd = shape.distance(sx - cx, sy - cy, maxR);
     const noise = fbm(samplers.elevation, sx * FBM_SCALE, sy * FBM_SCALE, 4);
@@ -163,11 +186,13 @@ export function selectCityFootprint(
   // Hole-fill: flood from the `polygon.isEdge` frontier inward over
   // non-interior polygons. Anything the flood can't reach AND isn't
   // already interior must be a hole — flip it to interior so the wall
-  // trace doesn't loop around it.
+  // trace doesn't loop around it. Water polygons are also seeded into the
+  // exterior set so holes on the water side don't swallow the coast.
   const exterior = new Set<number>();
   const exQueue: number[] = [];
   for (const p of polygons) {
-    if (p.isEdge && !interior.has(p.id)) {
+    if (interior.has(p.id)) continue;
+    if (p.isEdge || water.has(p.id)) {
       exterior.add(p.id);
       exQueue.push(p.id);
     }
@@ -181,7 +206,7 @@ export function selectCityFootprint(
     }
   }
   for (const p of polygons) {
-    if (!interior.has(p.id) && !exterior.has(p.id)) {
+    if (!interior.has(p.id) && !exterior.has(p.id) && !water.has(p.id)) {
       interior.add(p.id);
     }
   }
