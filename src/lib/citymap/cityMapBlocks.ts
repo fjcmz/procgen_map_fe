@@ -163,7 +163,15 @@ export function generateBlocks(
   // [Voronoi-polygon] Iterate polygons by `id` ascending so block ordering
   // is seed-stable across runs. For each unvisited polygon, BFS via
   // `polygon.neighbors`, refusing to cross any neighbor whose shared edge
-  // is in `barrierEdgeKeys`.
+  // is in `barrierEdgeKeys`, AND refusing to cross the footprint boundary
+  // (a polygon in `wall.interiorPolygonIds` never floods into a polygon
+  // outside it, and vice versa). The footprint-boundary barrier is an
+  // O(1) membership test independent of the wall path — it's what lets
+  // unwalled cities still produce a clean interior/exterior partition
+  // so downstream buildings / landmarks / sprawl classify correctly.
+  // For walled cities the wall edges already block the same seam, so
+  // this is a no-op on the flood result.
+  const interior = wall.interiorPolygonIds;
   const visited = new Set<number>();
   const rawBlocks: number[][] = [];
   for (const seedPoly of polygons) {
@@ -177,6 +185,7 @@ export function generateBlocks(
       const curr = polygons[currId];
       for (const nbId of curr.neighbors) {
         if (visited.has(nbId)) continue;
+        if (interior.has(currId) !== interior.has(nbId)) continue; // footprint boundary
         const sharedKey = findSharedEdgeKey(curr, nbId, edgeOwnership);
         if (sharedKey === null) continue; // no shared Voronoi edge (very rare clip edge case)
         if (barrierEdgeKeys.has(sharedKey)) continue; // blocked by infrastructure
@@ -215,6 +224,7 @@ export function generateBlocks(
     const role = classifyBlock(
       polygonIds,
       polygons,
+      interior,
       civicPolygonIds,
       marketPolygonIds,
       env,
@@ -270,14 +280,16 @@ function blockCentroid(polygonIds: number[], polygons: CityPolygon[]): Point {
   return [sx / n, sy / n];
 }
 
-// [Voronoi-polygon] A block is "exterior" iff it contains any polygon with
-// `polygon.isEdge === true`. PR 5 will render those as outside-walls sprawl;
-// PR 4 classifies them here so the name combiner can tag them.
-function isExteriorBlock(polygonIds: number[], polygons: CityPolygon[]): boolean {
-  for (const pid of polygonIds) {
-    if (polygons[pid].isEdge) return true;
-  }
-  return false;
+// [Voronoi-polygon] A block is "exterior" iff its polygons sit OUTSIDE the
+// city footprint (`wall.interiorPolygonIds`). The footprint boundary is
+// enforced as an implicit flood barrier in Step 2, so every block is either
+// fully inside or fully outside — checking any one polygon is sufficient.
+// This deliberately decouples "outside the city" from `polygon.isEdge`
+// (which is the canvas-bbox marker): unwalled cities still need their
+// outside-footprint polygons tagged as sprawl territory even though walls
+// don't draw the boundary.
+function isExteriorBlock(polygonIds: number[], interior: Set<number>): boolean {
+  return polygonIds.length > 0 && !interior.has(polygonIds[0]);
 }
 
 // [Voronoi-polygon] True iff the block centroid sits within `harborBand`
@@ -308,6 +320,7 @@ function isHarborBlock(
 function classifyBlock(
   polygonIds: number[],
   polygons: CityPolygon[],
+  interior: Set<number>,
   civicPolygonIds: Set<number>,
   marketPolygonIds: Set<number>,
   env: CityEnvironment,
@@ -315,7 +328,7 @@ function classifyBlock(
   canvasSize: number,
   harborBand: number,
 ): DistrictRole {
-  if (isExteriorBlock(polygonIds, polygons)) {
+  if (isExteriorBlock(polygonIds, interior)) {
     return polygonIds.length <= slumThreshold ? 'slum' : 'agricultural';
   }
 
