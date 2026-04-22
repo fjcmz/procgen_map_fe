@@ -3,60 +3,50 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// This module lands the "buildings" slice of the spec's PR 5 (line 71):
+// This module generates building footprints by subdividing each eligible block
+// polygon into Voronoi lots and insetting each lot uniformly from its edges.
 //
-//   "Per-tile building packing: 4–12 axis-aligned rects per non-reserved
-//    interior tile, 1 px mortar, seeded mix of hollow outlined and solid
-//    #2a241c ink."
+// ALGORITHM (per eligible polygon):
+//   1. Determine N = number of building lots (role + area formula, 1–6).
+//   2. Rejection-sample N random seed points inside the polygon.
+//   3. Run D3 Delaunay/Voronoi on those seeds, clipped to the polygon bbox.
+//   4. Clip each Voronoi cell to the parent polygon via Sutherland–Hodgman.
+//   5. Inset the clipped lot polygon by BUILDING_INSET_PX (parallel offset).
+//   6. If the result has area >= MIN_FOOTPRINT_AREA, emit it as a CityBuildingV2.
 //
-// Polygon-graph translation of that one spec sentence:
+// The inset uses a centroid-directed parallel-offset: for each edge the inward
+// normal is computed (the perpendicular direction toward the polygon centroid),
+// the edge is offset by BUILDING_INSET_PX, and adjacent offset edges are
+// intersected to find the new vertex. This produces straight building walls
+// parallel to the street/lot boundary — the "set-back from the street" read
+// that top-down city maps use. Voronoi lots from convex parents are also convex,
+// so the inset is always valid when BUILDING_INSET_PX < the lot's inradius.
 //
-//   BUILDING := an axis-aligned rect (x, y, w, h, solid, polygonId) packed
-//               inside a single `CityPolygon`'s interior via rejection
-//               sampling. "Per-tile" → "per polygon". "Non-reserved interior
-//               tile" → "interior polygon (isEdge=false) whose block role is
-//               civic/market/harbor/residential AND whose id is NOT in the
-//               reserved set (openSpaces ∪ landmarks)".
+// ELIGIBLE POLYGONS — same criteria as before:
+//   • block role in {civic, market, harbor, residential}
+//   • polygon not in reservedPolygonIds (openSpaces ∪ landmarks)
+//   • polygon.isEdge === false (edge polygons belong to sprawl)
+//   • polygon.area >= MIN_PARENT_AREA
 //
-// The remaining PR 5 features stay deferred — `cityMapBuildings.ts` does
-// NOT handle any of these, they get their own modules / RNG streams later:
+// Seed generation uses a rejection-sampler bounded by the polygon bbox.
+// Sutherland–Hodgman works for any convex clip polygon regardless of winding —
+// the sign of the shoelace sum is detected at runtime so the "inside" test
+// always points toward the interior. D3 Voronoi cells and city polygons are
+// both from the same D3 pipeline and share the same CW-in-screen winding
+// (positive shoelace sum), but the detection makes this robust if that ever
+// changes.
 //
-//   • Outside-walls sprawl — slum / agricultural blocks (all isEdge polygons).
-//   • Dock hatching        — perpendicular dashes along env.waterSide coast.
-//   • District labels      — rotated "BLUEGATE" text sized by block area.
+// RNG sub-stream: `${seed}_city_${cityName}_buildings` — same key as before,
+// so old snapshots re-rendered with the new generator keep a consistent stream.
+// Iteration order: block order → polygon.id order → seed roll → solid roll,
+// fully deterministic and seed-stable across re-runs.
 //
-// Every geometric primitive this module consumes comes from the `CityPolygon`
-// contract:
-//   • `polygon.id`         — output identity (`CityBuildingV2.polygonId`)
-//   • `polygon.vertices`   — unclosed ring; used for point-in-polygon and
-//                             distance-to-edge checks during rejection sampling
-//   • `polygon.area`       — drives the per-role N-count formula (larger
-//                             polygons hold more rects within the 4–12 band)
-//   • `polygon.isEdge`     — defensive skip (sprawl territory, future pass)
-//
-// NO tile lattice. NO `Math.random`. RNG: one dedicated sub-stream keyed on
-// `${seed}_city_${cityName}_buildings`. Iteration order is fixed — block
-// order from `blocks[]`, then polygon id order inside each block, then
-// slot-by-slot packing — so seed stability is preserved across re-runs.
-//
-// Rejection sampling is polygon-interior only — we do NOT compute an inset
-// polygon ring. Voronoi cells are convex, so requiring all four corners of a
-// candidate rect to (a) pass `pointInPolygon` AND (b) sit at least `INSET_PX`
-// away from every polygon edge gives the same effect as an explicit inset
-// without the geometric-inset math. Cost is `O(4 × edges × MAX_RETRIES × N)`
-// per polygon, which even at the megalopolis 1000-polygon tier is negligible.
-//
-// Reference patterns:
-//   • cityMapOpenSpaces.ts        — polygon eligibility + RNG sub-stream naming
-//   • cityMapLandmarks.ts         — role-filtered iteration over blocks with a
-//                                    shared `used`/`reserved` set
-//   • cityMapBlocks.ts            — polygon.id iteration order inside a block
-//   • cityMapEdgeGraph.ts         — INTENTIONALLY NOT IMPORTED: buildings are
-//                                    polygon-interior rejection sampling, not
-//                                    edge-graph traversal; no A* / no canonical
-//                                    edge keys / no edge ownership is needed.
+// NO tile lattice. NO `Math.random`. Every geometric helper is file-local so
+// there is no dependency on `cityMapEdgeGraph.ts` — this module does polygon-
+// interior work, not edge-graph traversal.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { Delaunay } from 'd3-delaunay';
 import { seededPRNG } from '../terrain/noise';
 import type {
   CityBlockV2,
@@ -70,10 +60,6 @@ import type {
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
-// Roles that receive dense interior packing. `slum` and `agricultural` are
-// deliberately skipped — they live on `polygon.isEdge` polygons and belong to
-// the outside-walls sprawl slice of PR 5 (scattered rects, different style,
-// different RNG stream, different generator).
 const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'civic',
   'market',
@@ -81,68 +67,64 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'residential',
 ]);
 
-// Per-role building-count formula — N = clamp(4, 12, baseCount + area / densityDivisor).
-// Larger polygons carry more rects, smaller polygons fewer, with the 4..12
-// clamp honouring the spec's explicit range. Coefficients tuned by eye on
-// medium-tier cities; retune here if the density feels off after visual QA.
-const BASE_COUNT: Record<DistrictRole, number> = {
-  civic: 5,
-  market: 8,
-  harbor: 7,
-  residential: 10,
-  slum: 0, // unused (PACKING_ROLES excludes these two)
+// Per-role lot-count formula: N = clamp(min, max, round(base + area / divisor)).
+// Tuned so civic blocks get a few large administrative footprints, market blocks
+// get many small stalls, residential blocks get dense row-house clusters,
+// and harbor blocks get long warehouse rows.
+const LOT_BASE: Record<DistrictRole, number> = {
+  civic: 2,
+  market: 3,
+  harbor: 2,
+  residential: 3,
+  slum: 0,
   agricultural: 0,
 };
-const DENSITY_DIVISOR: Record<DistrictRole, number> = {
-  civic: 300,
-  market: 180,
-  harbor: 220,
-  residential: 140,
+const LOT_DIVISOR: Record<DistrictRole, number> = {
+  civic: 700,
+  market: 220,
+  harbor: 550,
+  residential: 280,
   slum: 1,
   agricultural: 1,
 };
-
-// Per-role rect size bands (px). Aspect is rolled per-rect; the longer side
-// always >= the shorter (orientation coin-flips below). Harbor gets elongated
-// warehouses; civic gets few-but-large administrative footprints; residential
-// is the classic dense block filler; market is the smallest / mixed.
-interface SizeBand {
-  min: number;
-  max: number;
-  aspectMin: number;
-  aspectMax: number;
-}
-const SIZE_BAND: Record<DistrictRole, SizeBand> = {
-  civic: { min: 12, max: 22, aspectMin: 1.0, aspectMax: 1.6 },
-  market: { min: 6, max: 12, aspectMin: 1.0, aspectMax: 1.4 },
-  harbor: { min: 10, max: 18, aspectMin: 1.4, aspectMax: 2.4 },
-  residential: { min: 8, max: 14, aspectMin: 1.0, aspectMax: 1.5 },
-  slum: { min: 1, max: 1, aspectMin: 1, aspectMax: 1 },
-  agricultural: { min: 1, max: 1, aspectMin: 1, aspectMax: 1 },
+const LOT_MIN: Record<DistrictRole, number> = {
+  civic: 1,
+  market: 2,
+  harbor: 1,
+  residential: 2,
+  slum: 0,
+  agricultural: 0,
+};
+const LOT_MAX: Record<DistrictRole, number> = {
+  civic: 4,
+  market: 6,
+  harbor: 4,
+  residential: 6,
+  slum: 0,
+  agricultural: 0,
 };
 
-const MIN_BUILDINGS_PER_POLYGON = 4;
-const MAX_BUILDINGS_PER_POLYGON = 12;
-const MAX_RETRIES_PER_SLOT = 12;
-const INSET_PX = 2; // candidate rect corners must sit >= this many px from every polygon edge
-const MORTAR_PX = 1; // gap enforced between any two accepted rects in the same polygon
-const SOLID_PROBABILITY = 0.55; // ~55% solid / ~45% hollow — tweak freely, no balance impact
+// Inset distance in pixels. Each lot polygon is shrunk inward by this amount
+// on all sides; the gap between adjacent buildings is ~2× this value.
+const BUILDING_INSET_PX = 3;
+
+// Minimum area filters.
+const MIN_PARENT_AREA = 100;      // px² — skip polygons too small to subdivide
+const MIN_FOOTPRINT_AREA = 16;    // px² — skip lots whose inset collapses them
+
+// Fraction of buildings drawn as solid vs. hollow outline.
+const SOLID_PROBABILITY = 0.55;
+
+// Max rejection-sampling attempts per seed point.
+const MAX_SEED_ATTEMPTS_MULTIPLIER = 40;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
- * Generate the `buildings: CityBuildingV2[]` payload for a V2 city map.
+ * Generate `buildings: CityBuildingV2[]` for a V2 city map.
  *
- * Signature matches the other PR 4 slice generators (`generateOpenSpaces`,
- * `generateBlocks`, `generateLandmarks`) so the V2 pipeline stays uniform:
- *
- *   (seed, cityName, env, polygons, <feature-specific context>, canvasSize)
- *
- * The `canvasSize` parameter is currently unused — every building rect sits
- * inside a polygon and polygons are already clipped to the canvas at the
- * generator layer — but it's kept in the signature for pipeline consistency
- * and so future tuning (e.g. scaling size bands with canvas size) can land
- * without an ABI change.
+ * Each building is a polygon footprint produced by Voronoi-subdividing the
+ * parent block polygon into lots and insetting each lot by BUILDING_INSET_PX.
  */
 export function generateBuildings(
   seed: string,
@@ -154,23 +136,11 @@ export function generateBuildings(
   landmarks: CityLandmarkV2[],
   canvasSize: number,
 ): CityBuildingV2[] {
-  // `env` and `canvasSize` are reserved for future tuning hooks (e.g. capital
-  // cities getting denser civic packing, canvas-scale-aware size bands) but
-  // are unused in this slice. Kept in the signature for pipeline uniformity
-  // with the other PR 4 slice generators.
   void env;
   void canvasSize;
 
-  // Degenerate input — empty polygons or no blocks yet. Matches the pattern
-  // the other PR 4 slice generators use: return [] so the caller can spread
-  // without special-casing.
   if (polygons.length === 0 || blocks.length === 0) return [];
 
-  // [Voronoi-polygon] Reserved set — polygons claimed by plazas / markets /
-  // parks (`openSpaces`) or landmark glyphs (`landmarks`). Buildings NEVER
-  // overwrite these — the renderer already fills plazas on Layer 9 and stamps
-  // landmark silhouettes on Layer 12. Building the set once at the start is
-  // O(openSpaces + landmarks), then per-polygon lookup is O(1).
   const reservedPolygonIds = new Set<number>();
   for (const entry of openSpaces) {
     for (const id of entry.polygonIds) reservedPolygonIds.add(id);
@@ -180,19 +150,16 @@ export function generateBuildings(
   const rng = seededPRNG(`${seed}_city_${cityName}_buildings`);
   const out: CityBuildingV2[] = [];
 
-  // [Voronoi-polygon] Iterate blocks in their natural order — the flood in
-  // `cityMapBlocks.ts` produces a stable ordering seeded by polygon.id, so
-  // this iteration is deterministic. Within a block we walk `polygonIds` in
-  // the order the block generator stored them (already polygon.id ascending).
   for (const block of blocks) {
-    if (!PACKING_ROLES.has(block.role)) continue; // slum / agricultural → sprawl, deferred
+    if (!PACKING_ROLES.has(block.role)) continue;
 
     for (const polygonId of block.polygonIds) {
-      if (reservedPolygonIds.has(polygonId)) continue; // plaza / park / landmark — skip
+      if (reservedPolygonIds.has(polygonId)) continue;
       const polygon = polygons[polygonId];
       if (!polygon) continue;
-      if (polygon.isEdge) continue; // defensive — edge polys are sprawl territory
-      if (polygon.vertices.length < 3) continue; // degenerate clip
+      if (polygon.isEdge) continue;
+      if (polygon.vertices.length < 3) continue;
+      if (polygon.area < MIN_PARENT_AREA) continue;
 
       packBuildingsInPolygon(polygon, block.role, rng, out);
     }
@@ -201,29 +168,55 @@ export function generateBuildings(
   return out;
 }
 
-// ─── Per-polygon rejection-sampling packer ───────────────────────────────────
+// ─── Core packing logic ───────────────────────────────────────────────────────
 
 function packBuildingsInPolygon(
-  // [Voronoi-polygon] Source geometry — polygon.vertices (unclosed ring) and
-  // polygon.area drive both the count formula and every inside-polygon test.
   polygon: CityPolygon,
   role: DistrictRole,
   rng: () => number,
   out: CityBuildingV2[],
 ): void {
-  const base = BASE_COUNT[role];
-  const divisor = DENSITY_DIVISOR[role];
-  const targetN = clamp(
-    MIN_BUILDINGS_PER_POLYGON,
-    MAX_BUILDINGS_PER_POLYGON,
-    Math.round(base + polygon.area / divisor),
+  const n = clamp(
+    LOT_MIN[role],
+    LOT_MAX[role],
+    Math.round(LOT_BASE[role] + polygon.area / LOT_DIVISOR[role]),
   );
-  const band = SIZE_BAND[role];
+  if (n === 0) return;
 
-  // [Voronoi-polygon] Polygon bounding box — the rejection-sampling envelope.
-  // Cheap single-pass O(vertices) scan; Voronoi cells at our tier are < 12
-  // vertices each on average.
-  const verts = polygon.vertices;
+  // [Voronoi-polygon] Generate n seed points inside the polygon.
+  const seeds = generateSeedsInPolygon(polygon.vertices, n, rng);
+  if (seeds.length === 0) return;
+
+  // [Voronoi-polygon] Subdivide the polygon into Voronoi lots and clip each
+  // lot to the parent polygon boundary.
+  const lots = seeds.length === 1
+    ? [polygon.vertices as [number, number][]]
+    : subdivideToLots(polygon, seeds);
+
+  // [Voronoi-polygon] Inset each lot polygon to produce the building footprint.
+  for (const lot of lots) {
+    if (polygonArea(lot) < MIN_FOOTPRINT_AREA * 4) continue; // too small to inset
+    const footprint = insetPolygon(lot, BUILDING_INSET_PX);
+    if (!footprint || footprint.length < 3) continue;
+    if (polygonArea(footprint) < MIN_FOOTPRINT_AREA) continue;
+
+    out.push({
+      vertices: footprint,
+      solid: rng() < SOLID_PROBABILITY,
+      polygonId: polygon.id,
+    });
+  }
+}
+
+// ─── Seed generation ─────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Rejection-sample `n` random points inside the polygon
+// ring. Bounded by the polygon's axis-aligned bounding box.
+function generateSeedsInPolygon(
+  verts: [number, number][],
+  n: number,
+  rng: () => number,
+): [number, number][] {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -235,87 +228,181 @@ function packBuildingsInPolygon(
     if (vy > maxY) maxY = vy;
   }
 
-  // Track accepted rects in this polygon for intra-polygon mortar overlap
-  // tests. Inter-polygon overlap is geometrically impossible because each
-  // rect is strictly inside its owning polygon.
-  const accepted: CityBuildingV2[] = [];
-
-  for (let slot = 0; slot < targetN; slot++) {
-    let placed = false;
-    for (let attempt = 0; attempt < MAX_RETRIES_PER_SLOT; attempt++) {
-      // Size — axis-aligned w × h with a role-driven aspect, orientation
-      // flipped 50/50 so warehouses don't all point the same way.
-      let shorter = lerp(band.min, band.max, rng());
-      const aspect = lerp(band.aspectMin, band.aspectMax, rng());
-      let longer = shorter * aspect;
-      // Clamp longer to the band cap so civic blobs don't balloon past max.
-      if (longer > band.max) {
-        longer = band.max;
-        shorter = Math.min(shorter, longer / band.aspectMin);
-      }
-      const horizontal = rng() < 0.5;
-      const w = horizontal ? longer : shorter;
-      const h = horizontal ? shorter : longer;
-
-      // Skip if the polygon bbox is smaller than the rect — nothing to try.
-      if (w > maxX - minX || h > maxY - minY) continue;
-
-      const x = lerp(minX, maxX - w, rng());
-      const y = lerp(minY, maxY - h, rng());
-
-      // [Voronoi-polygon] All four rect corners must be inside the polygon
-      // ring AND sit at least INSET_PX from every polygon edge. Convex-cell
-      // guarantee: all-four-corners-inside ⇒ whole rect inside.
-      const corners: [number, number][] = [
-        [x, y],
-        [x + w, y],
-        [x + w, y + h],
-        [x, y + h],
-      ];
-      let ok = true;
-      for (const c of corners) {
-        if (!pointInPolygon(c, verts)) { ok = false; break; }
-        if (distanceToPolygonEdge(c, verts) < INSET_PX) { ok = false; break; }
-      }
-      if (!ok) continue;
-
-      // Mortar overlap — AABB with MORTAR_PX padding on each side.
-      let overlaps = false;
-      for (const prev of accepted) {
-        if (rectsOverlapWithMortar(
-          { x, y, w, h },
-          prev,
-          MORTAR_PX,
-        )) { overlaps = true; break; }
-      }
-      if (overlaps) continue;
-
-      const building: CityBuildingV2 = {
-        x,
-        y,
-        w,
-        h,
-        solid: rng() < SOLID_PROBABILITY,
-        polygonId: polygon.id,
-      };
-      accepted.push(building);
-      out.push(building);
-      placed = true;
-      break;
-    }
-    // If `placed === false` after MAX_RETRIES, drop this slot silently. The
-    // polygon ends up slightly under-filled — still > MIN_BUILDINGS because
-    // the count N starts at 4 and retries only fail on tightly packed polygons
-    // that already hold most of their target anyway.
-    void placed;
+  const seeds: [number, number][] = [];
+  const maxAttempts = n * MAX_SEED_ATTEMPTS_MULTIPLIER;
+  let attempts = 0;
+  while (seeds.length < n && attempts < maxAttempts) {
+    const x = minX + rng() * (maxX - minX);
+    const y = minY + rng() * (maxY - minY);
+    if (pointInPolygon([x, y], verts)) seeds.push([x, y]);
+    attempts++;
   }
+  return seeds;
 }
 
-// ─── Local helpers — [Voronoi-polygon] geometry on CityPolygon.vertices ──────
+// ─── Voronoi subdivision + Sutherland–Hodgman clipping ───────────────────────
 
-// [Voronoi-polygon] Classic ray-cast point-in-polygon. Operates on the
-// UNCLOSED vertex ring from `CityPolygon.vertices` — uses `(j + 1) % n` for
-// the partner vertex rather than any closing duplicate.
+// [Voronoi-polygon] Build D3 Voronoi on `seeds`, clipped to the polygon bbox,
+// then clip each cell to the parent polygon using Sutherland–Hodgman. The
+// parent polygon is convex (it is itself a Voronoi cell from the city graph),
+// and convex × convex intersection is always convex — so the resulting lots
+// are convex and the inset is always well-defined.
+function subdivideToLots(
+  polygon: CityPolygon,
+  seeds: [number, number][],
+): [number, number][][] {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [vx, vy] of polygon.vertices) {
+    if (vx < minX) minX = vx;
+    if (vx > maxX) maxX = vx;
+    if (vy < minY) minY = vy;
+    if (vy > maxY) maxY = vy;
+  }
+
+  const delaunay = Delaunay.from(seeds);
+  const voronoi = delaunay.voronoi([minX, minY, maxX, maxY]);
+
+  const lots: [number, number][][] = [];
+  for (let i = 0; i < seeds.length; i++) {
+    const cell = voronoi.cellPolygon(i);
+    if (!cell || cell.length < 4) continue;
+
+    // D3 returns a closed ring (last === first); strip the closing vertex.
+    const cellVerts: [number, number][] = [];
+    for (let j = 0; j < cell.length - 1; j++) {
+      cellVerts.push([cell[j][0], cell[j][1]]);
+    }
+
+    const clipped = sutherlandHodgmanClip(cellVerts, polygon.vertices);
+    if (clipped.length >= 3) lots.push(clipped);
+  }
+
+  return lots;
+}
+
+// [Voronoi-polygon] Sutherland–Hodgman polygon clipping. Clips `subject`
+// (arbitrary polygon) against `clip` (convex polygon). The winding of `clip`
+// is detected at runtime (positive shoelace sum = CW in screen-space, which is
+// the D3 Voronoi convention). For each clip edge the algorithm tests which side
+// of the edge the "inside" is on, consistent with the detected winding.
+function sutherlandHodgmanClip(
+  subject: [number, number][],
+  clip: [number, number][],
+): [number, number][] {
+  // Detect clip-polygon winding.
+  let clipSum = 0;
+  const cn = clip.length;
+  for (let i = 0; i < cn; i++) {
+    const [ax, ay] = clip[i];
+    const [bx, by] = clip[(i + 1) % cn];
+    clipSum += ax * by - bx * ay;
+  }
+  // Positive shoelace sum → CW in screen coords → inside when cross >= 0.
+  // Negative shoelace sum → CCW in screen coords → inside when cross <= 0.
+  const cwClip = clipSum >= 0;
+
+  let output: [number, number][] = subject.slice();
+
+  for (let i = 0; i < cn; i++) {
+    if (output.length === 0) return [];
+    const input = output;
+    output = [];
+    const a = clip[i];
+    const b = clip[(i + 1) % cn];
+
+    for (let j = 0; j < input.length; j++) {
+      const p = input[j];
+      const q = input[(j + 1) % input.length];
+      const crossP = edgeCross(a, b, p);
+      const crossQ = edgeCross(a, b, q);
+      const pIn = cwClip ? crossP >= 0 : crossP <= 0;
+      const qIn = cwClip ? crossQ >= 0 : crossQ <= 0;
+      if (pIn) output.push(p);
+      if (pIn !== qIn) {
+        const ix = lineIntersect(p, q, a, b);
+        if (ix) output.push(ix);
+      }
+    }
+  }
+  return output;
+}
+
+// ─── Polygon inset (parallel offset) ─────────────────────────────────────────
+
+// [Voronoi-polygon] Inset a convex polygon by `dist` pixels on all sides using
+// a parallel-edge offset. For each vertex the two adjacent edges are each
+// shifted inward by `dist` along their inward normal (directed toward the
+// centroid), and the new vertex is the intersection of the two shifted edges.
+// This produces building walls that are exactly parallel to the lot boundary —
+// the "set-back from the street" look — unlike a centroid-blend which gives
+// non-uniform gaps on elongated polygons.
+function insetPolygon(
+  verts: [number, number][],
+  dist: number,
+): [number, number][] | null {
+  const n = verts.length;
+  if (n < 3) return null;
+
+  // Compute centroid for inward-normal direction disambiguation.
+  let cx = 0;
+  let cy = 0;
+  for (const [x, y] of verts) { cx += x; cy += y; }
+  cx /= n;
+  cy /= n;
+
+  const result: [number, number][] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prev = verts[(i - 1 + n) % n];
+    const curr = verts[i];
+    const next = verts[(i + 1) % n];
+
+    // Inward-directed normal for edge prev→curr.
+    const d1x = curr[0] - prev[0];
+    const d1y = curr[1] - prev[1];
+    const len1 = Math.hypot(d1x, d1y);
+    if (len1 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
+    let n1x = -d1y / len1;
+    let n1y =  d1x / len1;
+    const mid1x = (prev[0] + curr[0]) * 0.5;
+    const mid1y = (prev[1] + curr[1]) * 0.5;
+    if (n1x * (cx - mid1x) + n1y * (cy - mid1y) < 0) { n1x = -n1x; n1y = -n1y; }
+
+    // Inward-directed normal for edge curr→next.
+    const d2x = next[0] - curr[0];
+    const d2y = next[1] - curr[1];
+    const len2 = Math.hypot(d2x, d2y);
+    if (len2 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
+    let n2x = -d2y / len2;
+    let n2y =  d2x / len2;
+    const mid2x = (curr[0] + next[0]) * 0.5;
+    const mid2y = (curr[1] + next[1]) * 0.5;
+    if (n2x * (cx - mid2x) + n2y * (cy - mid2y) < 0) { n2x = -n2x; n2y = -n2y; }
+
+    // Offset both edges inward and intersect them.
+    const a1: [number, number] = [prev[0] + n1x * dist, prev[1] + n1y * dist];
+    const b1: [number, number] = [curr[0] + n1x * dist, curr[1] + n1y * dist];
+    const a2: [number, number] = [curr[0] + n2x * dist, curr[1] + n2y * dist];
+    const b2: [number, number] = [next[0] + n2x * dist, next[1] + n2y * dist];
+
+    const p = lineIntersect(a1, b1, a2, b2);
+    if (!p) {
+      // Parallel adjacent edges — use the average of the two offset endpoints.
+      result.push([(b1[0] + a2[0]) * 0.5, (b1[1] + a2[1]) * 0.5]);
+    } else {
+      result.push(p);
+    }
+  }
+
+  return result.length >= 3 ? result : null;
+}
+
+// ─── Local geometry helpers — [Voronoi-polygon] ───────────────────────────────
+
+// [Voronoi-polygon] Classic ray-cast point-in-polygon on an UNCLOSED ring.
 function pointInPolygon(p: [number, number], verts: [number, number][]): boolean {
   const [px, py] = p;
   const n = verts.length;
@@ -331,55 +418,46 @@ function pointInPolygon(p: [number, number], verts: [number, number][]): boolean
   return inside;
 }
 
-// [Voronoi-polygon] Minimum distance from point `p` to any edge of the
-// polygon ring. Standard point-to-segment distance iterated over every
-// `(verts[i], verts[(i+1) % n])` pair. Used to enforce the INSET_PX gap
-// between accepted rect corners and the polygon boundary — avoids building
-// edges kissing streets / roads / walls, which all live on polygon edges.
-function distanceToPolygonEdge(p: [number, number], verts: [number, number][]): number {
-  const n = verts.length;
-  let best = Infinity;
-  for (let i = 0; i < n; i++) {
-    const a = verts[i];
-    const b = verts[(i + 1) % n];
-    const d = pointSegmentDistance(p, a, b);
-    if (d < best) best = d;
-  }
-  return best;
-}
-
-function pointSegmentDistance(
-  p: [number, number],
+// [Voronoi-polygon] Signed 2D cross product of edge a→b with vector a→p.
+// Positive → p is to the left of a→b (in standard math / CCW convention).
+function edgeCross(
   a: [number, number],
   b: [number, number],
+  p: [number, number],
 ): number {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]); // degenerate edge
-  let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / lenSq;
-  if (t < 0) t = 0;
-  else if (t > 1) t = 1;
-  const cx = a[0] + t * dx;
-  const cy = a[1] + t * dy;
-  return Math.hypot(p[0] - cx, p[1] - cy);
+  return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
 }
 
-interface AABB { x: number; y: number; w: number; h: number }
+// [Voronoi-polygon] Line–line intersection of segments a→b and c→d, returned
+// as the point on line a→b parameterized by t. Returns null for parallel lines.
+function lineIntersect(
+  a: [number, number],
+  b: [number, number],
+  c: [number, number],
+  d: [number, number],
+): [number, number] | null {
+  const dx1 = b[0] - a[0];
+  const dy1 = b[1] - a[1];
+  const dx2 = d[0] - c[0];
+  const dy2 = d[1] - c[1];
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-10) return null;
+  const t = ((c[0] - a[0]) * dy2 - (c[1] - a[1]) * dx2) / denom;
+  return [a[0] + t * dx1, a[1] + t * dy1];
+}
 
-function rectsOverlapWithMortar(a: AABB, b: AABB, mortar: number): boolean {
-  return (
-    a.x < b.x + b.w + mortar &&
-    a.x + a.w + mortar > b.x &&
-    a.y < b.y + b.h + mortar &&
-    a.y + a.h + mortar > b.y
-  );
+// [Voronoi-polygon] Shoelace absolute area of an unclosed polygon ring.
+function polygonArea(verts: [number, number][]): number {
+  let area = 0;
+  const n = verts.length;
+  for (let i = 0; i < n; i++) {
+    const [ax, ay] = verts[i];
+    const [bx, by] = verts[(i + 1) % n];
+    area += ax * by - bx * ay;
+  }
+  return Math.abs(area) * 0.5;
 }
 
 function clamp(min: number, max: number, v: number): number {
   return v < min ? min : v > max ? max : v;
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }

@@ -65,16 +65,15 @@ export interface CityBlockV2 {
 }
 
 /**
- * An axis-aligned building rectangle placed inside a specific polygon. PR 5
- * will pack 4–12 of these per interior polygon.
+ * A building footprint polygon placed inside a specific lot polygon. Produced
+ * by subdividing each block polygon into Voronoi lots and insetting each lot
+ * by a uniform distance from its edges.
  */
 export interface CityBuildingV2 {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  /** Inset polygon vertices (unclosed ring) in canvas pixels. */
+  vertices: [number, number][];
   solid: boolean;
-  /** Owning polygon id — for rendering order and block queries. */
+  /** Owning block-polygon id — for rendering order and block queries. */
   polygonId: number;
 }
 
@@ -117,7 +116,8 @@ export interface CityMapDataV2 {
   blocks: CityBlockV2[];
   // TODO PR 4: reserved squares, markets, and parks (polygon-keyed).
   openSpaces: { kind: 'square' | 'market' | 'park'; polygonIds: number[] }[];
-  // TODO PR 5: axis-aligned top-down building rects (dense per polygon).
+  // PR 5: per-lot building footprint polygons — Voronoi-subdivided lots inset
+  // from their edges, one footprint per lot.
   buildings: CityBuildingV2[];
   // PR 5 (sprawl slice): sparse rects on isEdge polygons in slum/agricultural
   // blocks — the "outside-walls fringe" from spec line 73. Kept separate from
