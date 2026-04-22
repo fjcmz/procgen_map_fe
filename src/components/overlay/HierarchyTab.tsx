@@ -1,8 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { City, Country, EmpireSnapshotEntry, HistoryData, SelectedEntity } from '../../lib/types';
+import type { City, Country, EmpireSnapshotEntry, HistoryData, MapData, SelectedEntity } from '../../lib/types';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import { getEmpiresAtYear } from '../../lib/history';
 import { formatYear } from '../Timeline';
+import type { CityEnvironment } from '../../lib/citymap';
+import { deriveCityEnvironment } from '../../lib/citymap';
+import { CityMapPopupV2 } from '../CityMapPopupV2';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
@@ -13,15 +16,26 @@ interface HierarchyTabProps {
   citySizesAtYear?: Uint8Array;
   onNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
   onSelectEntity?: (entity: SelectedEntity | null) => void;
+  mapData?: MapData;
+  seed?: string;
 }
 
-/** Short label rendered after each city name. */
+const ALL_CITY_SIZES: City['size'][] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
+
+/** Unicode icon and tooltip label per city size, conveying scale progression. */
+const SIZE_ICONS: Record<City['size'], string> = {
+  small:       '·',  // ·  middle dot
+  medium:      '•',  // •  bullet
+  large:       '●',  // ●  black circle
+  metropolis:  '⬤',  // ⬤  black large circle
+  megalopolis: '★',  // ★  star
+};
 const SIZE_LABELS: Record<City['size'], string> = {
-  small: 'small',
-  medium: 'medium',
-  large: 'large',
-  metropolis: 'metropolis',
-  megalopolis: 'megalopolis',
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+  metropolis: 'Metropolis',
+  megalopolis: 'Megalopolis',
 };
 
 interface CountryNode {
@@ -42,18 +56,35 @@ interface Tree {
   unassignedCities: City[];
 }
 
-export function HierarchyTab({ historyData, cities, selectedYear, convertYears, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity }: HierarchyTabProps) {
-  // All top-level nodes (empires, stateless, free cities) default to collapsed.
-  // Countries also default to collapsed.
-  // Keys: 'emp:<empireId>' | 'cty:<countryIndex>' | 'stateless' | 'unassigned'.
+interface CityMapState {
+  city: City;
+  environment: CityEnvironment;
+}
+
+export function HierarchyTab({ historyData, cities, selectedYear, convertYears, ownershipAtYear, citySizesAtYear, onNavigate, onSelectEntity, mapData, seed }: HierarchyTabProps) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set<string>());
   const [searchQuery, setSearchQuery] = useState('');
+  const [enabledSizes, setEnabledSizes] = useState<Set<City['size']>>(() => new Set(ALL_CITY_SIZES));
+  const [cityMapState, setCityMapState] = useState<CityMapState | null>(null);
 
   const toggle = (key: string) => {
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSize = (size: City['size']) => {
+    setEnabledSizes(prev => {
+      const next = new Set(prev);
+      if (next.has(size)) {
+        // Keep at least one size enabled
+        if (next.size > 1) next.delete(size);
+      } else {
+        next.add(size);
+      }
       return next;
     });
   };
@@ -98,20 +129,43 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     onNavigate?.(cells, centerCell);
   }, [onNavigate, getCellsForCountries, historyData.countries]);
 
-  // Keep the empire tree defaulted-expanded even when the snapshot changes
-  // as the user scrubs: seed any newly-seen empire ids into the expanded set.
+  const handleOpenCityMap = useCallback((city: City) => {
+    if (!mapData || !seed) return;
+    const wonderSnap = (() => {
+      const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+      for (let y = floored; y >= 0; y -= 20) {
+        if (historyData.wonderSnapshots?.[y]) return historyData.wonderSnapshots[y];
+      }
+      return [];
+    })();
+    const religionSnap = (() => {
+      const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+      for (let y = floored; y >= 0; y -= 20) {
+        if (historyData.religionSnapshots?.[y]) return historyData.religionSnapshots[y];
+      }
+      return [];
+    })();
+    const environment = deriveCityEnvironment(
+      city,
+      mapData.cells,
+      mapData,
+      citySizesAtYear,
+      selectedYear,
+      wonderSnap.map(w => w.cellIndex),
+      religionSnap,
+    );
+    setCityMapState({ city, environment });
+  }, [mapData, seed, historyData, selectedYear, citySizesAtYear]);
+
   const snapshot = useMemo(
     () => getEmpiresAtYear(historyData, selectedYear),
     [historyData, selectedYear],
   );
 
-  // Empire entity selection uses the exact selected year since getEmpiresAtYear
-  // already replays events to that point.
   const snapKey = selectedYear;
 
   const tree = useMemo<Tree>(() => {
     const { countries } = historyData;
-    // Map each country index → empire entry (if any).
     const countryToEmpire = new Map<number, EmpireSnapshotEntry>();
     for (const emp of snapshot) {
       for (const memberIdx of emp.memberCountryIndices) {
@@ -119,12 +173,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       }
     }
 
-    // Bucket cities by owning country at the selected year.
-    // When ownershipAtYear is available, use it for dynamic attribution that
-    // matches the map's visual ownership (reflects conquests). Fall back to
-    // the static kingdomId when ownership data is unavailable.
-    // Cities whose region never formed a country carry kingdomId === -1 and
-    // go into the unassignedCities bucket instead (rendered as "Free Cities").
     const citiesByCountry = new Map<number, City[]>();
     const unassignedCities: City[] = [];
     for (const city of cities) {
@@ -139,7 +187,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
         if (cellOwner >= 0) {
           owner = cellOwner;
         } else {
-          // Cell is unclaimed (-1) or impassable (-2) at this year
           unassignedCities.push(city);
           continue;
         }
@@ -150,7 +197,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       if (!list) { list = []; citiesByCountry.set(owner, list); }
       list.push(city);
     }
-    // Sort: capital of the *current* owning country first, then alphabetical
     for (const [countryIdx, list] of citiesByCountry.entries()) {
       const capitalCell = countries[countryIdx]?.capitalCellIndex;
       list.sort((a, b) => {
@@ -162,7 +208,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     }
     unassignedCities.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Group countries into empires + stateless.
     const empireMap = new Map<string, EmpireNode>();
     for (const emp of snapshot) {
       empireMap.set(emp.empireId, { entry: emp, countries: [], totalCities: 0 });
@@ -171,12 +216,8 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     let statelessCityCount = 0;
 
     for (const country of countries) {
-      // Skip countries not yet founded at the selected year
       if (country.foundedYear > selectedYear) continue;
       const countryCities = citiesByCountry.get(country.id) ?? [];
-      // Skip countries that have no cities AND are dead at the selected year.
-      // Use diedYear when available for year-accurate filtering; fall back to
-      // the static isAlive flag (final-year state) when diedYear is absent.
       const aliveAtYear = country.diedYear === undefined || country.diedYear > selectedYear;
       if (!aliveAtYear && countryCities.length === 0) continue;
       const node: CountryNode = { country, cities: countryCities };
@@ -193,7 +234,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       statelessCityCount += countryCities.length;
     }
 
-    // Sort: member-count desc, then name asc. Founder first inside each empire.
     const empires = Array.from(empireMap.values())
       .filter(e => e.countries.length > 0)
       .sort((a, b) => {
@@ -214,75 +254,6 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     return { empires, stateless, statelessCityCount, unassignedCities };
   }, [historyData, snapshot, cities, selectedYear, ownershipAtYear]);
 
-  // --- Search filtering ---
-  const filteredTree = useMemo<Tree>(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return tree;
-
-    const matchesQuery = (name: string) => name.toLowerCase().includes(q);
-
-    const filterCountryNode = (node: CountryNode, parentMatched: boolean): CountryNode | null => {
-      const countryMatches = matchesQuery(node.country.name);
-      if (parentMatched || countryMatches) {
-        // Show all cities when country or its parent matched
-        return node;
-      }
-      // Check if any city matches
-      const matchedCities = node.cities.filter(c => matchesQuery(c.name));
-      if (matchedCities.length > 0) {
-        return { country: node.country, cities: matchedCities };
-      }
-      return null;
-    };
-
-    const filteredEmpires: EmpireNode[] = [];
-    for (const emp of tree.empires) {
-      const empireMatches = matchesQuery(emp.entry.name);
-      if (empireMatches) {
-        filteredEmpires.push(emp);
-        continue;
-      }
-      const filteredCountries: CountryNode[] = [];
-      let totalCities = 0;
-      for (const c of emp.countries) {
-        const fc = filterCountryNode(c, false);
-        if (fc) {
-          filteredCountries.push(fc);
-          totalCities += fc.cities.length;
-        }
-      }
-      if (filteredCountries.length > 0) {
-        filteredEmpires.push({ entry: emp.entry, countries: filteredCountries, totalCities });
-      }
-    }
-
-    const filteredStateless: CountryNode[] = [];
-    let filteredStatelessCityCount = 0;
-    for (const c of tree.stateless) {
-      const fc = filterCountryNode(c, false);
-      if (fc) {
-        filteredStateless.push(fc);
-        filteredStatelessCityCount += fc.cities.length;
-      }
-    }
-
-    const filteredUnassigned = tree.unassignedCities.filter(c => matchesQuery(c.name));
-
-    return {
-      empires: filteredEmpires,
-      stateless: filteredStateless,
-      statelessCityCount: filteredStatelessCityCount,
-      unassignedCities: filteredUnassigned,
-    };
-  }, [tree, searchQuery]);
-
-  // When searching, auto-expand all visible branches so matches are visible.
-  const isSearching = searchQuery.trim().length > 0;
-
-  const isExpanded = (key: string) => isSearching || expanded.has(key);
-
-  const totalLiveCountries = filteredTree.empires.reduce((s, e) => s + e.countries.length, 0) + filteredTree.stateless.length;
-
   // Map cellIndex → cities[] array index for dynamic size lookup
   const cityIdxMap = useMemo(() => {
     if (!citySizesAtYear) return undefined;
@@ -296,10 +267,106 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     return INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
   }, [citySizesAtYear, cityIdxMap]);
 
+  // Apply city-size filter on top of the raw tree.
+  // Countries with cities that are all filtered out are hidden; countries
+  // with naturally zero cities are kept as-is.
+  const sizeFilteredTree = useMemo<Tree>(() => {
+    if (enabledSizes.size === ALL_CITY_SIZES.length) return tree;
+
+    const filterCountryBySizes = (node: CountryNode): CountryNode | null => {
+      if (node.cities.length === 0) return node;
+      const filtered = node.cities.filter(c => enabledSizes.has(resolveCitySize(c)));
+      if (filtered.length === 0) return null;
+      return { ...node, cities: filtered };
+    };
+
+    const filteredEmpires: EmpireNode[] = [];
+    for (const emp of tree.empires) {
+      const filteredCountries: CountryNode[] = [];
+      let totalCities = 0;
+      for (const c of emp.countries) {
+        const fc = filterCountryBySizes(c);
+        if (fc) { filteredCountries.push(fc); totalCities += fc.cities.length; }
+      }
+      if (filteredCountries.length > 0) {
+        filteredEmpires.push({ ...emp, countries: filteredCountries, totalCities });
+      }
+    }
+
+    const filteredStateless: CountryNode[] = [];
+    let filteredStatelessCityCount = 0;
+    for (const c of tree.stateless) {
+      const fc = filterCountryBySizes(c);
+      if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
+    }
+
+    const filteredUnassigned = tree.unassignedCities.filter(c => enabledSizes.has(resolveCitySize(c)));
+
+    return {
+      empires: filteredEmpires,
+      stateless: filteredStateless,
+      statelessCityCount: filteredStatelessCityCount,
+      unassignedCities: filteredUnassigned,
+    };
+  }, [tree, enabledSizes, resolveCitySize]);
+
+  // Search filter applied on top of size filter
+  const filteredTree = useMemo<Tree>(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return sizeFilteredTree;
+
+    const matchesQuery = (name: string) => name.toLowerCase().includes(q);
+
+    const filterCountryNode = (node: CountryNode, parentMatched: boolean): CountryNode | null => {
+      const countryMatches = matchesQuery(node.country.name);
+      if (parentMatched || countryMatches) return node;
+      const matchedCities = node.cities.filter(c => matchesQuery(c.name));
+      if (matchedCities.length > 0) return { country: node.country, cities: matchedCities };
+      return null;
+    };
+
+    const filteredEmpires: EmpireNode[] = [];
+    for (const emp of sizeFilteredTree.empires) {
+      const empireMatches = matchesQuery(emp.entry.name);
+      if (empireMatches) { filteredEmpires.push(emp); continue; }
+      const filteredCountries: CountryNode[] = [];
+      let totalCities = 0;
+      for (const c of emp.countries) {
+        const fc = filterCountryNode(c, false);
+        if (fc) { filteredCountries.push(fc); totalCities += fc.cities.length; }
+      }
+      if (filteredCountries.length > 0) {
+        filteredEmpires.push({ entry: emp.entry, countries: filteredCountries, totalCities });
+      }
+    }
+
+    const filteredStateless: CountryNode[] = [];
+    let filteredStatelessCityCount = 0;
+    for (const c of sizeFilteredTree.stateless) {
+      const fc = filterCountryNode(c, false);
+      if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
+    }
+
+    const filteredUnassigned = sizeFilteredTree.unassignedCities.filter(c => matchesQuery(c.name));
+
+    return {
+      empires: filteredEmpires,
+      stateless: filteredStateless,
+      statelessCityCount: filteredStatelessCityCount,
+      unassignedCities: filteredUnassigned,
+    };
+  }, [sizeFilteredTree, searchQuery]);
+
+  const isSearching = searchQuery.trim().length > 0;
+  const isExpanded = (key: string) => isSearching || expanded.has(key);
+
+  const totalLiveCountries = filteredTree.empires.reduce((s, e) => s + e.countries.length, 0) + filteredTree.stateless.length;
+
   const renderCity = (city: City, dead: boolean, isCapitalHere: boolean) => {
     const isRuinNow = city.isRuin && city.ruinYear <= selectedYear;
     const sizeLabel = isRuinNow ? 'ruin' : SIZE_LABELS[resolveCitySize(city)];
-    const capitalMark = isRuinNow ? '\u2022 ' : isCapitalHere ? '\u2605 ' : '\u2022 ';
+    const capitalMark = isRuinNow ? '• ' : isCapitalHere ? '★ ' : '• ';
+    const canShowMap = !isRuinNow && !!mapData && !!seed;
     return (
       <div
         key={city.cellIndex}
@@ -324,12 +391,19 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
         <span style={styles.citySize}>
           {!isRuinNow && isCapitalHere ? 'capital, ' : ''}{sizeLabel}
         </span>
+        {canShowMap && (
+          <button
+            style={styles.cityMapBtn}
+            onClick={(e) => { e.stopPropagation(); handleOpenCityMap(city); }}
+            title={`Open city map for ${city.name}`}
+          >{'\u{1F5FA}'}</button>
+        )}
         {onNavigate && (
           <button
             style={styles.locateBtn}
             onClick={(e) => { e.stopPropagation(); handleLocateCity(city); }}
             title={`Locate ${city.name}`}
-          >{'\u25CE'}</button>
+          >{'◎'}</button>
         )}
       </div>
     );
@@ -348,7 +422,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           style={styles.countryHeader}
           onClick={() => toggle(key)}
         >
-          <span style={styles.chevron}>{isOpen ? '\u25BE' : '\u25B8'}</span>
+          <span style={styles.chevron}>{isOpen ? '▾' : '▸'}</span>
           {onSelectEntity ? (
             <button
               style={{ ...styles.nameLink, ...(dead ? styles.deadText : {}), flex: 1, fontSize: 11 }}
@@ -371,7 +445,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               style={styles.locateBtn}
               onClick={(e) => { e.stopPropagation(); handleLocateCountry(node.country); }}
               title={`Locate ${node.country.name}`}
-            >{'\u25CE'}</button>
+            >{'◎'}</button>
           )}
         </button>
         {isOpen && (
@@ -394,7 +468,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           style={styles.empireHeader}
           onClick={() => toggle(key)}
         >
-          <span style={styles.chevron}>{isOpen ? '\u25BE' : '\u25B8'}</span>
+          <span style={styles.chevron}>{isOpen ? '▾' : '▸'}</span>
           {onSelectEntity ? (
             <button
               style={{ ...styles.nameLink, flex: 1, fontWeight: 'bold', fontSize: 12 }}
@@ -416,7 +490,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               style={styles.locateBtn}
               onClick={(e) => { e.stopPropagation(); handleLocateEmpire(emp); }}
               title={`Locate ${emp.entry.name}`}
-            >{'\u25CE'}</button>
+            >{'◎'}</button>
           )}
         </button>
         {isOpen && (
@@ -456,8 +530,30 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
             style={styles.searchClear}
             onClick={() => setSearchQuery('')}
             title="Clear search"
-          >{'\u00D7'}</button>
+          >{'×'}</button>
         )}
+        <div style={styles.sizeFilterRow}>
+          {ALL_CITY_SIZES.map(size => {
+            const active = enabledSizes.has(size);
+            return (
+              <button
+                key={size}
+                style={{
+                  ...styles.sizeFilterBtn,
+                  opacity: active ? 1 : 0.3,
+                  background: active ? '#e8d4a8' : 'transparent',
+                  border: active ? '1px solid #b89050' : '1px solid #c8b07a',
+                }}
+                onClick={() => toggleSize(size)}
+                title={`${active ? 'Hide' : 'Show'} ${SIZE_LABELS[size]} cities`}
+                aria-pressed={active}
+              >
+                <span style={styles.sizeIcon}>{SIZE_ICONS[size]}</span>
+                <span style={styles.sizeFilterLabel}>{SIZE_LABELS[size][0]}{size === 'metropolis' ? 'tr' : size === 'megalopolis' ? 'eg' : ''}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={styles.treeList}>
@@ -465,7 +561,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           && filteredTree.stateless.length === 0
           && filteredTree.unassignedCities.length === 0 && (
           <div style={styles.emptyNote}>
-            {isSearching ? 'No matches.' : 'No realms yet.'}
+            {isSearching ? 'No matches.' : enabledSizes.size < ALL_CITY_SIZES.length ? 'No cities match the selected sizes.' : 'No realms yet.'}
           </div>
         )}
 
@@ -477,7 +573,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               style={styles.empireHeader}
               onClick={() => toggle('stateless')}
             >
-              <span style={styles.chevron}>{statelessOpen ? '\u25BE' : '\u25B8'}</span>
+              <span style={styles.chevron}>{statelessOpen ? '▾' : '▸'}</span>
               <span style={styles.empireName}>Stateless</span>
               <span style={styles.empireMeta}>
                 {filteredTree.stateless.length} {filteredTree.stateless.length === 1 ? 'country' : 'countries'}
@@ -499,7 +595,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               style={styles.empireHeader}
               onClick={() => toggle('unassigned')}
             >
-              <span style={styles.chevron}>{unassignedOpen ? '\u25BE' : '\u25B8'}</span>
+              <span style={styles.chevron}>{unassignedOpen ? '▾' : '▸'}</span>
               <span style={styles.empireName}>Free Cities</span>
               <span style={styles.empireMeta}>
                 {filteredTree.unassignedCities.length}{' '}
@@ -514,6 +610,16 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           </div>
         )}
       </div>
+
+      {cityMapState && seed && (
+        <CityMapPopupV2
+          isOpen={true}
+          onClose={() => setCityMapState(null)}
+          cityName={cityMapState.city.name}
+          environment={cityMapState.environment}
+          seed={seed}
+        />
+      )}
     </div>
   );
 }
@@ -692,6 +798,17 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
     opacity: 0.7,
   },
+  cityMapBtn: {
+    flexShrink: 0,
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 11,
+    color: '#7a5a30',
+    padding: '0 2px',
+    lineHeight: 1,
+    opacity: 0.75,
+  },
   deadText: {
     textDecoration: 'line-through',
     color: '#8a7a60',
@@ -721,8 +838,7 @@ const styles: Record<string, React.CSSProperties> = {
   searchClear: {
     position: 'absolute',
     right: 2,
-    top: '50%',
-    transform: 'translateY(-50%)',
+    top: 6,
     background: 'none',
     border: 'none',
     cursor: 'pointer',
@@ -730,5 +846,34 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#7a5a30',
     padding: '0 4px',
     lineHeight: 1,
+  },
+  sizeFilterRow: {
+    display: 'flex',
+    gap: 3,
+    marginTop: 4,
+  },
+  sizeFilterBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 2,
+    padding: '1px 4px',
+    borderRadius: 3,
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: 9,
+    color: '#3a1a00',
+    transition: 'opacity 0.15s',
+    flexShrink: 0,
+  },
+  sizeIcon: {
+    fontSize: 10,
+    lineHeight: 1,
+    color: '#5a3a00',
+  },
+  sizeFilterLabel: {
+    fontSize: 8,
+    letterSpacing: 0.2,
+    color: '#5a3a00',
+    textTransform: 'uppercase',
   },
 };

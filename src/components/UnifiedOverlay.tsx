@@ -260,6 +260,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 citySizesAtYear={props.citySizesAtYear}
                 onNavigate={props.onEntityNavigate}
                 onSelectEntity={props.onSelectEntity}
+                mapData={props.mapData}
+                seed={props.seed}
               />
             )}
             {activeTab === 'illustrates' && props.mapData?.history && (
