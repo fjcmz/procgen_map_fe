@@ -92,6 +92,14 @@ const CAPITAL_LARGE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
  * Wired into `cityMapGeneratorV2.ts` AFTER `generateBlocks` so the role-
  * filtered candidate pools (civic / market) are already computed.
  */
+// Spec: "Mountain polygons are 5 times more prone to having a temple or a
+// landmark." Temple and monument candidate pools concat each mountain
+// polygon id MOUNTAIN_LANDMARK_WEIGHT times so its random-pick probability
+// multiplies by the same factor. Capitals (castle / palace) still anchor
+// to civic polygons near canvas center — they do not migrate to mountain
+// peaks because the spec requires them on central civic blocks.
+const MOUNTAIN_LANDMARK_WEIGHT = 5;
+
 export function generateLandmarks(
   seed: string,
   cityName: string,
@@ -100,8 +108,10 @@ export function generateLandmarks(
   blocks: CityBlockV2[],
   openSpaces: OpenSpaceEntry[],
   canvasSize: number,
+  mountainPolygonIds?: Set<number>,
 ): CityLandmarkV2[] {
   if (blocks.length === 0) return [];
+  const mountains = mountainPolygonIds ?? new Set<number>();
 
   // ── Build candidate pools from block roles ───────────────────────────────
   // [Voronoi-polygon] Matches V1's `civicBlocks.flatMap(b => b.tiles)` shape
@@ -122,6 +132,25 @@ export function generateLandmarks(
   // (`cityMapGenerator.ts:1113-1116`). Preserves the monument hybrid-pool
   // weighting described in pass 3 below.
   const civicAndMarket: number[] = [...civicPool, ...marketPool];
+
+  // [Voronoi-polygon] Mountain polygons — weighted 5× for temple + monument
+  // pools so mountaintop shrines / peak-crowning monuments read as a common
+  // outcome when the city sits next to a range. Repeating each id
+  // MOUNTAIN_LANDMARK_WEIGHT times in the candidate array gives the pick
+  // probability a factor-of-N boost without changing the uniform-random
+  // RNG recipe. An exterior filter would bias the result toward absorbed
+  // mountain polygons; we deliberately skip that check so the weighting
+  // covers the whole mountain range, not just the foothills blocks
+  // absorbed into the city.
+  const mountainWeighted: number[] = [];
+  if (mountains.size > 0) {
+    const sorted = Array.from(mountains).sort((a, b) => a - b);
+    for (const pid of sorted) {
+      for (let i = 0; i < MOUNTAIN_LANDMARK_WEIGHT; i++) {
+        mountainWeighted.push(pid);
+      }
+    }
+  }
 
   // `used` is the single dedup set shared across all three passes. A polygon
   // that hosts the castle can never also host a temple or monument.
@@ -166,13 +195,16 @@ export function generateLandmarks(
   }
 
   // ── Pass 2: temples (one per env.religionCount) ─────────────────────────
-  // [Voronoi-polygon] Broad pool = civic+market block polygons minus anything
-  // already used by the capital pass. Random pick per religion, dropping the
-  // chosen polygon into `used` so the next iteration re-filters.
-  if (env.religionCount > 0 && civicAndMarket.length > 0) {
+  // [Voronoi-polygon] Broad pool = civic+market block polygons + mountain
+  // polygons (each mountain repeated MOUNTAIN_LANDMARK_WEIGHT times for a
+  // 5× pick boost, per spec), minus anything already used by the capital
+  // pass. Random pick per religion, dropping the chosen polygon into
+  // `used` so the next iteration re-filters.
+  const templePool = [...civicAndMarket, ...mountainWeighted];
+  if (env.religionCount > 0 && templePool.length > 0) {
     const templeRng = seededPRNG(`${seed}_city_${cityName}_landmarks_temples`);
     for (let i = 0; i < env.religionCount; i++) {
-      const candidates = filterUnused(civicAndMarket, used);
+      const candidates = filterUnused(templePool, used);
       if (candidates.length === 0) break;
       const pid = candidates[Math.floor(templeRng() * candidates.length)];
       landmarks.push({ polygonId: pid, type: 'temple' });
@@ -195,7 +227,10 @@ export function generateLandmarks(
         for (const pid of entry.polygonIds) squarePool.push(pid);
       }
     }
-    const fullPool: number[] = [...squarePool, ...civicAndMarket];
+    // Mountain polygons join the monument pool weighted 5× each so peak-
+    // crowning obelisks / cairns read as a common outcome when the city
+    // sits next to a range.
+    const fullPool: number[] = [...squarePool, ...civicAndMarket, ...mountainWeighted];
     if (fullPool.length > 0) {
       const monumentRng = seededPRNG(`${seed}_city_${cityName}_landmarks_monuments`);
       for (let i = 0; i < env.wonderCount; i++) {

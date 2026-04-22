@@ -40,6 +40,14 @@ export interface CityEnvironment {
   religionCount: number;
   isRuin: boolean;
   neighborBiomes: BiomeType[];
+  /**
+   * When the city sits within 5 BFS hops of a world cell with
+   * `elevation >= 0.75` (mountain threshold, see renderer.ts:655), this
+   * carries a unit vector pointing from the city toward the nearest
+   * mountain cell plus the discovery hop count. Null when no mountain is
+   * within range — downstream mountain-polygon generation is skipped.
+   */
+  mountainDirection: { dx: number; dy: number; distance: number } | null;
 }
 
 /**
@@ -133,6 +141,16 @@ export interface CityMapDataV2 {
    * `dock` block role (large+ cities) is allowed to sit on water.
    */
   waterPolygonIds: number[];
+  /**
+   * Polygon ids that are rendered as mountains — only populated when the
+   * city sits within 5 world-cell BFS hops of a mountain cell (elevation
+   * >= 0.75). Capped at 25% of `polygonCount`, biased to the canvas edge
+   * in the direction of the real-world mountains. Excluded from the
+   * standard city footprint; blocks may optionally absorb mountain-
+   * adjacent polygons up to 10% of `cityPolygonCount` so foothill
+   * districts read as integrated with the mountain.
+   */
+  mountainPolygonIds: number[];
 
   // TODO PR 2: closed polyline walking the wall boundary along polygon edges.
   wallPath: [number, number][];
