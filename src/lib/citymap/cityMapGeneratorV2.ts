@@ -30,6 +30,7 @@ import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks } from './cityMapBlocks';
 import { generateLandmarks } from './cityMapLandmarks';
+import { generateBuildings } from './cityMapBuildings';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -275,6 +276,27 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
+  // PR 5 (buildings slice) — polygon-interior rejection-sampling packer.
+  // For every non-reserved interior polygon inside a civic/market/harbor/
+  // residential block, pack 4–12 axis-aligned rects (role-driven size bands,
+  // 1 px mortar, mixed solid/hollow ink). Reserved set = openSpaces polygon
+  // ids ∪ landmarks polygon ids so plazas, parks, and landmark glyphs stay
+  // clean. Slum / agricultural blocks (all `isEdge` polygons) are skipped —
+  // they belong to the outside-walls sprawl slice of PR 5, landing later.
+  // Dedicated RNG sub-stream `_buildings` keeps the packing output decoupled
+  // from every PR 2-4 stream and from future PR 5 streams (sprawl / docks /
+  // labels). See cityMapBuildings.ts for the full polygon-interior algorithm.
+  const buildings = generateBuildings(
+    seed,
+    cityName,
+    env,
+    polygons,
+    blocks,
+    openSpaces,
+    landmarks,
+    CANVAS_SIZE,
+  );
+
   return {
     canvasSize: CANVAS_SIZE,
     polygonCount,
@@ -287,9 +309,9 @@ export function generateCityMapV2(
     streets,
     blocks,
     openSpaces,
-    buildings: [],
+    buildings,
     landmarks,
-    // TODO PR 5: rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
+    // TODO PR 5 (remainder): rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
     districtLabels: [],
   };
 }
