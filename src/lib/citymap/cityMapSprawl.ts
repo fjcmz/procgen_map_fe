@@ -40,7 +40,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { seededPRNG } from '../terrain/noise';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 import type {
   CityBlockV2,
   CityBuildingV2,

@@ -69,7 +69,7 @@ import type {
   CityMapDataV2,
   CityPolygon,
 } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 
 type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
 

@@ -34,7 +34,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 import { createNoiseSamplers, fbm } from '../terrain/noise';
 import {
   buildEdgeOwnership,

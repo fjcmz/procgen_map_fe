@@ -10,7 +10,7 @@ import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
 import { CityMapPopupV2 } from '../CityMapPopupV2';
-import { deriveCityEnvironment } from '../../lib/citymap/cityMapGenerator';
+import { deriveCityEnvironment } from '../../lib/citymap/cityMapGeneratorV2';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;

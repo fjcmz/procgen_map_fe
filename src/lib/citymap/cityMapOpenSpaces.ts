@@ -52,7 +52,7 @@
 
 import { seededPRNG } from '../terrain/noise';
 import type { CityEnvironment, CityMapDataV2, CityPolygon } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 import { canonicalEdgeKey, type Point } from './cityMapEdgeGraph';
 import type { WallGenerationResult } from './cityMapWalls';
 import type { RiverGenerationResult } from './cityMapRiver';

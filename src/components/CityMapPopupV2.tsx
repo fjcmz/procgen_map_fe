@@ -1,4 +1,3 @@
-// TODO(PR5): unify with CityMapPopup once V2 replaces V1.
 import { useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import type { CityEnvironment } from '../lib/citymap';
