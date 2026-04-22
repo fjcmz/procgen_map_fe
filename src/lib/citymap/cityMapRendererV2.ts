@@ -71,6 +71,7 @@ import type {
   CityMapDataV2,
   CityPolygon,
 } from './cityMapTypesV2';
+import type { BiomeType } from '../types';
 import { seededPRNG } from '../terrain/noise';
 
 const BASE_FILL = '#ece5d3';
@@ -92,7 +93,7 @@ const MIDDLE_TOWER_RADIUS = 3.5;  // middle wall towers
 const INNER_TOWER_RADIUS = 3;     // inner wall towers
 
 // Exit roads — dashed lines from gates to canvas boundary.
-const EXIT_ROAD_INK = '#c0b8a8';
+const EXIT_ROAD_INK = '#7c7c78';
 const EXIT_ROAD_WIDTH = 2;
 const EXIT_ROAD_DASH: number[] = [6, 5];
 
@@ -104,8 +105,8 @@ const RIVER_CHANNEL_WIDTH = 8;
 const STREET_INK = '#b8b0a0';
 const STREET_WIDTH = 1.5;
 
-// Layer 7 — road styling (PR 3). Thick light grey per spec.
-const ROAD_INK = '#c0b8a8';
+// Layer 7 — road styling (PR 3). Dark grey for strong visual contrast.
+const ROAD_INK = '#7c7c78';
 const ROAD_WIDTH = 5;
 
 // Layer 8 — bridge styling (PR 3, redesigned).
@@ -150,9 +151,31 @@ const LANDMARK_LABEL_TYPES: ReadonlySet<CityLandmarkV2['type']> = new Set<CityLa
   'palace',
 ]);
 
-// Block background fills for slum and agricultural districts.
-const BLOCK_SLUM_FILL = '#1a2818';        // dark green, almost black
-const BLOCK_AGRICULTURAL_FILL = '#f2e8a0'; // light yellow
+// Light pastel block fills keyed by city biome — used for both slum and
+// agricultural outside-wall districts so the fringe reads as the surrounding
+// terrain type rather than a generic colour.
+const BIOME_OUTSIDE_FILL: Record<BiomeType, string> = {
+  GRASSLAND:                  '#c8eab0',
+  SUBTROPICAL_DESERT:         '#f0e0a8',
+  TEMPERATE_DESERT:           '#ead8a0',
+  SHRUBLAND:                  '#ccdca0',
+  TAIGA:                      '#b4d4a0',
+  TEMPERATE_DECIDUOUS_FOREST: '#aac88e',
+  TEMPERATE_RAIN_FOREST:      '#a4c28a',
+  TROPICAL_SEASONAL_FOREST:   '#b0cc96',
+  TROPICAL_RAIN_FOREST:       '#9cc08e',
+  TUNDRA:                     '#ccd8b8',
+  BARE:                       '#d8d0c0',
+  SCORCHED:                   '#d4c4b0',
+  SNOW:                       '#ecf0f8',
+  MARSH:                      '#acd0ac',
+  ICE:                        '#dceef8',
+  ALPINE_MEADOW:               '#c8dca0',
+  LAKE:                       '#b4d8f4',
+  OCEAN:                      '#b4d0e4',
+  COAST:                      '#b4daf0',
+  BEACH:                      '#e8dcb8',
+};
 
 export function renderCityMapV2(
   ctx: CanvasRenderingContext2D,
@@ -161,8 +184,6 @@ export function renderCityMapV2(
   seed: string,
   cityName: string,
 ): void {
-  void env;
-
   const size = data.canvasSize;
 
   // ── Layer 1: flat cream base ────────────────────────────────────────────
@@ -195,7 +216,7 @@ export function renderCityMapV2(
   // Fills the polygon areas of slum and agricultural blocks before any
   // infrastructure or building layers so the colored ground shows through
   // the sparse sprawl rects placed on top.
-  drawBlockBackgrounds(ctx, data);
+  drawBlockBackgrounds(ctx, data, env);
 
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
   drawSprawl(ctx, data);
@@ -211,7 +232,7 @@ export function renderCityMapV2(
   drawPathList(ctx, data.streets, STREET_INK, STREET_WIDTH);
 
   // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
-  drawBuildings(ctx, data);
+  drawBuildings(ctx, data, seed, cityName);
 
   // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
   drawLandmarks(ctx, data);
@@ -254,18 +275,20 @@ export function renderCityMapV2(
 }
 
 // [Voronoi-polygon] Fill block polygons for slum and agricultural districts
-// so the ground color is visible through sparse sprawl buildings. Only these
-// two roles need a distinct background; all other roles read through the
-// cream base or the open-space / building layers above them.
-function drawBlockBackgrounds(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+// using a light pastel tint derived from the city's biome so the fringe reads
+// as surrounding terrain rather than a generic colour. Both roles use the same
+// tint (they are both outside the walls); the difference between them is
+// visible via the sparse sprawl buildings placed on top.
+function drawBlockBackgrounds(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  env: CityEnvironment,
+): void {
   if (data.blocks.length === 0) return;
+  const fill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
+  ctx.fillStyle = fill;
   for (const block of data.blocks) {
-    const fill =
-      block.role === 'slum' ? BLOCK_SLUM_FILL :
-      block.role === 'agricultural' ? BLOCK_AGRICULTURAL_FILL :
-      null;
-    if (!fill) continue;
-    ctx.fillStyle = fill;
+    if (block.role !== 'slum' && block.role !== 'agricultural') continue;
     for (const pid of block.polygonIds) {
       const polygon = data.polygons[pid];
       if (!polygon || polygon.vertices.length < 3) continue;
@@ -555,8 +578,10 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
 // PR 5 (slice) — buildings on Layer 10
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Layer 10 — building ink. Lighter fill per spec; dark outline for legibility.
-const BUILDING_FILL = '#d0c8b8';
+// Layer 10 — building ink. Three neutral light greys cycled randomly per
+// building (render-side seeded RNG). None of these shades appear elsewhere
+// (roads/streets use warm beige tones; walls/ink use near-black).
+const BUILDING_FILLS = ['#e6e6e4', '#d6d6d4', '#c6c6c4'] as const;
 const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
@@ -568,17 +593,24 @@ const SPRAWL_STROKE_WIDTH = 0.6;
 // [Voronoi-polygon] Render every entry in `data.buildings`. Each building
 // carries a `vertices` polygon ring (inset from the Voronoi lot boundary by
 // BUILDING_INSET_PX at generation time) and is drawn as a filled or outlined
-// polygon path. No RNG at render time — vertices are baked in at generation.
-function drawBuildings(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+// polygon path. Fill colour is one of three neutral light greys chosen per
+// building via a render-side seeded RNG (`_buildings_render` sub-stream).
+function drawBuildings(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  seed: string,
+  cityName: string,
+): void {
   if (data.buildings.length === 0) return;
 
+  const fillRng = seededPRNG(`${seed}_city_${cityName}_buildings_render`);
   ctx.lineWidth = BUILDING_STROKE_WIDTH;
   ctx.lineJoin = 'round';
 
   for (const b of data.buildings as CityBuildingV2[]) {
     if (b.vertices.length < 3) continue;
     traceClosedRing(ctx, b.vertices);
-    ctx.fillStyle = BUILDING_FILL;
+    ctx.fillStyle = BUILDING_FILLS[Math.floor(fillRng() * BUILDING_FILLS.length)];
     ctx.fill();
     ctx.strokeStyle = BUILDING_OUTLINE;
     ctx.stroke();
