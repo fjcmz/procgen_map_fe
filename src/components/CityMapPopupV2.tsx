@@ -21,11 +21,18 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const size = 720;
-    canvas.width = size * dpr;
-    canvas.height = size * dpr;
-    canvas.style.width = `${size}px`;
-    canvas.style.height = `${size}px`;
+    const internalSize = 720;
+
+    // Scale display size to fit viewport: subtract chrome (header ~40px + footer ~28px + padding ~48px = ~116px)
+    const availableW = window.innerWidth - 48;  // 24px margin each side
+    const availableH = window.innerHeight - 116;
+    const displaySize = Math.max(200, Math.min(internalSize, availableW, availableH));
+
+    // Keep backing buffer at full 720×720 for quality; only shrink the CSS display size
+    canvas.width = internalSize * dpr;
+    canvas.height = internalSize * dpr;
+    canvas.style.width = `${displaySize}px`;
+    canvas.style.height = `${displaySize}px`;
     ctx.scale(dpr, dpr);
 
     const data = generateCityMapV2(seed, cityName, environment);
@@ -81,6 +88,8 @@ const styles: Record<string, React.CSSProperties> = {
     justifyContent: 'center',
     backgroundColor: 'rgba(30, 20, 10, 0.6)',
     zIndex: 10000,
+    padding: '16px 12px',
+    boxSizing: 'border-box',
   },
   container: {
     background: '#f5e9c8',
@@ -89,8 +98,9 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
     display: 'flex',
     flexDirection: 'column',
-    maxWidth: 'calc(100vw - 32px)',
-    maxHeight: 'calc(100vh - 32px)',
+    maxWidth: '100%',
+    maxHeight: '100%',
+    overflow: 'hidden',
   },
   header: {
     display: 'flex',
@@ -100,6 +110,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid #d4b896',
     background: '#ecdbb8',
     borderRadius: '6px 6px 0 0',
+    flexShrink: 0,
   },
   title: {
     fontWeight: 'bold',
@@ -107,22 +118,37 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#3a1a00',
     letterSpacing: 0.5,
     fontFamily: 'serif',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    marginRight: 8,
   },
   closeBtn: {
     background: 'none',
     border: 'none',
     cursor: 'pointer',
-    fontSize: 20,
+    fontSize: 22,
     color: '#7a5a30',
-    padding: '0 4px',
+    padding: '4px 8px',
     lineHeight: 1,
     fontWeight: 'bold',
+    flexShrink: 0,
+    // Ensure a large-enough touch target on mobile
+    minWidth: 44,
+    minHeight: 44,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
   },
   canvasWrapper: {
     padding: 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'auto',
+    flexShrink: 1,
+    minHeight: 0,
   },
   canvas: {
     borderRadius: 3,
@@ -132,6 +158,7 @@ const styles: Record<string, React.CSSProperties> = {
     padding: '6px 12px',
     borderTop: '1px solid #d4b896',
     textAlign: 'center',
+    flexShrink: 0,
   },
   footerText: {
     fontSize: 11,
