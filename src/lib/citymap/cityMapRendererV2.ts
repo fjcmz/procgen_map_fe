@@ -68,13 +68,13 @@ import type {
 import { seededPRNG } from '../terrain/noise';
 
 const BASE_FILL = '#ece5d3';
-const POLYGON_EDGE_STROKE = 'rgba(0, 0, 0, 0.12)';
+const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
 const CITY_NAME_INK = '#2a241c';
 const QA_TAG_INK = '#8a8070';
 
 // Layer 11 — wall + gate styling (PR 2). All wall geometry is polygon-edge
 // based; see cityMapWalls.ts for the generator.
-const WALL_INK = '#2a241c';
+const WALL_INK = '#000000';
 const WALL_WIDTH = 4;          // 3-5 px per spec; 4 is the mid-range default
 const TOWER_RADIUS = 3;        // studs at wall corners (polygon vertices)
 const TOWER_CORNER_COS_THRESHOLD = 0.7; // dot < this between adjacent edges ⇒ corner
@@ -87,17 +87,17 @@ const GATE_MATCH_EPS = 1e-3;   // float compare tolerance when matching wall seg
 // see cityMapRiver.ts for the generator. Spec: "river channel fill #6d665a
 // with outline". We achieve the "channel fill + outline" reading with two
 // stacked strokes along the polygon edges.
-const RIVER_CHANNEL_INK = '#6d665a';
-const RIVER_OUTLINE_INK = 'rgba(0, 0, 0, 0.22)';
+const RIVER_CHANNEL_INK = '#a8d4f0';
+const RIVER_OUTLINE_INK = 'rgba(50, 120, 200, 0.4)';
 const RIVER_CHANNEL_WIDTH = 8;
 const RIVER_OUTLINE_WIDTH = 10;
 
 // Layer 6 — street styling (PR 3). Thin paths along polygon edges.
-const STREET_INK = '#b8ad92';
-const STREET_WIDTH = 2;
+const STREET_INK = '#b0b0b0';
+const STREET_WIDTH = 1.5;
 
 // Layer 7 — road styling (PR 3). Bold paths along polygon edges.
-const ROAD_INK = '#2a241c';
+const ROAD_INK = '#444444';
 const ROAD_WIDTH = 4;
 
 // Layer 8 — bridge styling (PR 3). A white rect perpendicular to each
@@ -110,35 +110,34 @@ const BRIDGE_HALF_WIDTH = 6;      // half-width of the rect perpendicular to the
 const BRIDGE_RAIL_OFFSET = 3;     // perpendicular offset of each rail from the edge centerline
 const BRIDGE_RAIL_WIDTH = 1.5;
 
-// Layer 9 — open-space styling (PR 4 slice). All geometry comes from the
-// polygon graph: each entry in `data.openSpaces` references one or more
-// polygons by id, and the renderer fills those polygons' vertex rings.
-// Colors land a shade above the cream base for plazas (paved feel) and a
-// muted sage for parks (planted feel), so the wall ink (Layer 11) and road
-// ink (Layer 7) drawn on top stay clearly readable.
-const OPEN_SPACE_PLAZA_FILL = '#efe7cb';   // squares + markets — paved / pale
-const OPEN_SPACE_PLAZA_STROKE = 'rgba(138, 128, 112, 0.55)'; // thin outline
-const OPEN_SPACE_PARK_FILL = '#d8dcbf';    // parks — muted greenish
-const OPEN_SPACE_PARK_STROKE = 'rgba(106, 122, 74, 0.55)';
-const MARKET_STALL_INK = '#2a241c';
+// Layer 9 — open-space styling (PR 4 slice). Each open space kind has a
+// distinct palette: civic squares (purple-white), markets (yellow-orange),
+// parks (greens).
+const OPEN_SPACE_SQUARE_FILL = '#e8d5f5';   // civic squares — light lavender
+const OPEN_SPACE_SQUARE_STROKE = 'rgba(100, 50, 150, 0.55)';
+const OPEN_SPACE_MARKET_FILL = '#f0b840';   // markets — warm amber-yellow
+const OPEN_SPACE_MARKET_STROKE = 'rgba(160, 80, 10, 0.6)';
+const OPEN_SPACE_PARK_FILL = '#7ec44a';     // parks — bright grass green
+const OPEN_SPACE_PARK_STROKE = 'rgba(30, 90, 10, 0.65)';
+const MARKET_STALL_INK = '#7a3a00';
 const MARKET_STALL_RADIUS = 1.5;
 const MARKET_STALLS_PER_POLYGON_MIN = 6;
 const MARKET_STALLS_PER_POLYGON_MAX = 12;
-const PARK_TREE_FILL = '#6a7a4a';
-const PARK_TREE_STROKE = 'rgba(40, 50, 30, 0.7)';
+const PARK_TREE_FILL = '#2d6a0a';
+const PARK_TREE_STROKE = 'rgba(10, 40, 5, 0.85)';
 const PARK_TREE_RADIUS = 3;
 const PARK_TREES_PER_POLYGON_MIN = 4;
 const PARK_TREES_PER_POLYGON_MAX = 10;
 
-// Layer 12 — landmark styling (PR 4 slice). Glyphs are sized from polygon
-// geometry (NOT from a V1 tileSize — V2 has no tile concept). Each glyph is
-// drawn as a small rectangular plaque ("all ink on white" per spec line 67),
-// centered on `polygon.site` and scaled by `√polygon.area`. Clamp keeps the
-// glyph readable on 150-polygon small cities and prevents megalopolis-tier
-// large polygons from blowing up the silhouette. Palette mirrors V1
-// `cityMapRenderer.ts:14` so the visual reading stays continuous.
-const LANDMARK_FILL = '#f5f0e8';
-const LANDMARK_INK = '#2a241c';
+// Layer 12 — landmark styling (PR 4 slice). Each landmark type has its own
+// palette: castle/palace = navy blue, temple = purple, monument = golden.
+// Fill is the plaque/body color; ink is the detail/label color on top.
+const LANDMARK_COLORS: Record<CityLandmarkV2['type'], { fill: string; ink: string }> = {
+  castle:   { fill: '#1a3a6e', ink: '#c8d8ff' }, // navy blue
+  palace:   { fill: '#1a3a6e', ink: '#c8d8ff' }, // navy blue
+  temple:   { fill: '#6a2080', ink: '#f0d0ff' }, // purple
+  monument: { fill: '#c89010', ink: '#fff5cc' }, // golden
+};
 const LANDMARK_SIZE_MIN = 20;
 const LANDMARK_SIZE_MAX = 36;
 const LANDMARK_SIZE_COEFF = 0.7; // multiplies √polygon.area before clamping
@@ -146,6 +145,10 @@ const LANDMARK_LABEL_TYPES: ReadonlySet<CityLandmarkV2['type']> = new Set<CityLa
   'castle',
   'palace',
 ]);
+
+// Block background fills for slum and agricultural districts.
+const BLOCK_SLUM_FILL = '#1a2818';        // dark green, almost black
+const BLOCK_AGRICULTURAL_FILL = '#f2e8a0'; // light yellow
 
 export function renderCityMapV2(
   ctx: CanvasRenderingContext2D,
@@ -183,6 +186,12 @@ export function renderCityMapV2(
   //   Layer 13 — district labels (PR 5)
   //   Layer 10 — buildings (PR 5) — drawn below after bridges and before walls.
   //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
+
+  // ── Layer 2.5: block background fills (slum + agricultural) ─────────────
+  // Fills the polygon areas of slum and agricultural blocks before any
+  // infrastructure or building layers so the colored ground shows through
+  // the sparse sprawl rects placed on top.
+  drawBlockBackgrounds(ctx, data);
 
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
   // [Voronoi-polygon] Sparse rects on slum / agricultural isEdge polygons.
@@ -259,6 +268,28 @@ export function renderCityMapV2(
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   ctx.fillText('V2', size - 8, size - 8);
+}
+
+// [Voronoi-polygon] Fill block polygons for slum and agricultural districts
+// so the ground color is visible through sparse sprawl buildings. Only these
+// two roles need a distinct background; all other roles read through the
+// cream base or the open-space / building layers above them.
+function drawBlockBackgrounds(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.blocks.length === 0) return;
+  for (const block of data.blocks) {
+    const fill =
+      block.role === 'slum' ? BLOCK_SLUM_FILL :
+      block.role === 'agricultural' ? BLOCK_AGRICULTURAL_FILL :
+      null;
+    if (!fill) continue;
+    ctx.fillStyle = fill;
+    for (const pid of block.polygonIds) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      tracePolygonRing(ctx, polygon);
+      ctx.fill();
+    }
+  }
 }
 
 // [Voronoi-polygon] Draw the wall + gate layer from the polygon-edge wall
@@ -590,10 +621,9 @@ function drawOpenSpaces(
 ): void {
   if (data.openSpaces.length === 0) return;
 
-  // Pass 1 — fill polygon rings (squares + markets share plaza colors;
-  // parks use sage). Drawn in a single pass per kind so style switches
-  // are minimised.
-  fillOpenSpaceKind(ctx, data, ['square', 'market'], OPEN_SPACE_PLAZA_FILL, OPEN_SPACE_PLAZA_STROKE);
+  // Pass 1 — fill polygon rings. Each kind has its own palette.
+  fillOpenSpaceKind(ctx, data, ['square'], OPEN_SPACE_SQUARE_FILL, OPEN_SPACE_SQUARE_STROKE);
+  fillOpenSpaceKind(ctx, data, ['market'], OPEN_SPACE_MARKET_FILL, OPEN_SPACE_MARKET_STROKE);
   fillOpenSpaceKind(ctx, data, ['park'], OPEN_SPACE_PARK_FILL, OPEN_SPACE_PARK_STROKE);
 
   // Pass 2 — market stall dots scattered inside each market polygon.
@@ -744,30 +774,32 @@ function drawLandmarks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void
   for (const lm of data.landmarks) {
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
-    const size = landmarkGlyphSize(polygon);
+    const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
+    const { fill, ink } = LANDMARK_COLORS[lm.type];
     switch (lm.type) {
-      case 'castle':   drawCastleGlyph(ctx, cx, cy, size); break;
-      case 'palace':   drawPalaceGlyph(ctx, cx, cy, size); break;
-      case 'temple':   drawTempleGlyph(ctx, cx, cy, size); break;
-      case 'monument': drawMonumentGlyph(ctx, cx, cy, size); break;
+      case 'castle':   drawCastleGlyph(ctx, cx, cy, sz, fill, ink); break;
+      case 'palace':   drawPalaceGlyph(ctx, cx, cy, sz, fill, ink); break;
+      case 'temple':   drawTempleGlyph(ctx, cx, cy, sz, fill, ink); break;
+      case 'monument': drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
     }
   }
 
   // Labels below castle / palace (mirrors V1 label pass) — centered on the
   // polygon site, placed just below the glyph bounding box.
-  ctx.fillStyle = LANDMARK_INK;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const lm of data.landmarks) {
     if (!LANDMARK_LABEL_TYPES.has(lm.type)) continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
-    const size = landmarkGlyphSize(polygon);
+    const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
-    const fontPx = Math.max(8, Math.round(size * 0.35));
+    const { ink } = LANDMARK_COLORS[lm.type];
+    const fontPx = Math.max(8, Math.round(sz * 0.35));
     ctx.font = `bold ${fontPx}px Georgia, 'Times New Roman', serif`;
-    ctx.fillText(lm.type.toUpperCase(), cx, cy + size / 2 + 1);
+    ctx.fillStyle = ink;
+    ctx.fillText(lm.type.toUpperCase(), cx, cy + sz / 2 + 1);
   }
 }
 
@@ -794,6 +826,8 @@ function drawCastleGlyph(
   cx: number,
   cy: number,
   size: number,
+  fill: string,
+  ink: string,
 ): void {
   const inset = size * 0.12;
   const x = cx - size / 2 + inset;
@@ -801,16 +835,16 @@ function drawCastleGlyph(
   const w = size - inset * 2;
   const h = size - inset * 2;
 
-  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillStyle = fill;
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = LANDMARK_INK;
+  ctx.strokeStyle = ink;
   ctx.lineWidth = Math.max(1, size * 0.06);
   ctx.strokeRect(x, y, w, h);
 
   // Crenellated top — alternating notches (V1 parity: 5 notches).
   const notches = 5;
   const notchW = w / (notches * 2 - 1);
-  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillStyle = ink;
   for (let i = 0; i < notches; i++) {
     const nx = x + i * 2 * notchW;
     ctx.fillRect(nx, y - notchW * 0.6, notchW, notchW * 0.6);
@@ -818,7 +852,7 @@ function drawCastleGlyph(
 
   // Tower circles at the 4 corners.
   const r = Math.max(2, size * 0.1);
-  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillStyle = fill;
   for (const [tx, ty] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
     ctx.beginPath();
     ctx.arc(tx, ty, r, 0, Math.PI * 2);
@@ -829,7 +863,7 @@ function drawCastleGlyph(
   // Central door.
   const doorW = w * 0.2;
   const doorH = h * 0.4;
-  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillStyle = ink;
   ctx.fillRect(x + w / 2 - doorW / 2, y + h - doorH, doorW, doorH);
 }
 
@@ -838,6 +872,8 @@ function drawPalaceGlyph(
   cx: number,
   cy: number,
   size: number,
+  fill: string,
+  ink: string,
 ): void {
   const inset = size * 0.08;
   const x = cx - size / 2 + inset;
@@ -845,9 +881,9 @@ function drawPalaceGlyph(
   const w = size - inset * 2;
   const h = size - inset * 2;
 
-  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillStyle = fill;
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = LANDMARK_INK;
+  ctx.strokeStyle = ink;
   ctx.lineWidth = Math.max(1, size * 0.05);
   ctx.strokeRect(x, y, w, h);
 
@@ -857,7 +893,7 @@ function drawPalaceGlyph(
 
   // Corner wings (solid squares).
   const sq = Math.max(2, size * 0.14);
-  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillStyle = ink;
   for (const [wx, wy] of [[x, y], [x + w - sq, y], [x, y + h - sq], [x + w - sq, y + h - sq]]) {
     ctx.fillRect(wx, wy, sq, sq);
   }
@@ -868,6 +904,8 @@ function drawTempleGlyph(
   cx: number,
   cy: number,
   size: number,
+  fill: string,
+  ink: string,
 ): void {
   const inset = size * 0.15;
   const x = cx - size / 2 + inset;
@@ -875,16 +913,16 @@ function drawTempleGlyph(
   const w = size - inset * 2;
   const h = size - inset * 2;
 
-  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillStyle = fill;
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = LANDMARK_INK;
+  ctx.strokeStyle = ink;
   ctx.lineWidth = Math.max(1, size * 0.05);
   ctx.strokeRect(x, y, w, h);
 
   // Dome (half circle at top) + cross (V1 parity).
   const mx = x + w / 2;
   const domeR = Math.min(w, h) * 0.22;
-  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillStyle = ink;
   ctx.beginPath();
   ctx.arc(mx, y + h * 0.45, domeR, Math.PI, 0, false);
   ctx.fill();
@@ -903,13 +941,15 @@ function drawMonumentGlyph(
   cx: number,
   cy: number,
   size: number,
+  fill: string,
+  _ink: string,
 ): void {
   const topY = cy - size / 2 + size * 0.18;
   const baseY = cy - size / 2 + size * 0.85;
   const halfW = size * 0.12;
 
   // Obelisk: tapered rectangle with a pointed cap.
-  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillStyle = fill;
   ctx.beginPath();
   ctx.moveTo(cx - halfW * 0.55, topY);
   ctx.lineTo(cx + halfW * 0.55, topY);
