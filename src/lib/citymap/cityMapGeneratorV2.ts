@@ -108,7 +108,7 @@ export function deriveCityEnvironment(
 // the canvas (~500–1350 polygons) hosts outside-walls sprawl,
 // agricultural/slum blocks, gate-exiting roads, and any other extramural
 // detail.
-export const CANVAS_POLYGON_COUNT = 1500;
+export const CANVAS_POLYGON_COUNT = 3000;
 
 // Single source of truth for the V2 CITY polygon counts per size tier.
 // These now describe the in-wall city footprint (what
