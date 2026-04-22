@@ -308,11 +308,11 @@ export function renderCityMapV2(
   drawBridges(ctx, data);
 
   // ── Ruin overlay pass — semi-transparent overgrowth polygons + moss on
-  //     remaining buildings. Drawn late (after all infrastructure) so the
-  //     moss/green reclaim reads on top of everything. Alpha on the polygon
-  //     fill keeps the underlying layers visible through the green.
+  //     remaining interior buildings. Drawn late (after all infrastructure)
+  //     so the reclaim wash reads on top of everything. Alpha on the polygon
+  //     fill keeps the underlying layers visible through the tint.
   if (ruinRng) {
-    drawRuinOvergrowth(ctx, data, ruinRng);
+    drawRuinOvergrowth(ctx, data, env, ruinRng);
   }
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
@@ -773,17 +773,17 @@ const RUIN_STREET_DROP_PROB = 0.55;    // streets are smaller roads — more rui
 const RUIN_EXIT_ROAD_DROP_PROB = 0.35;
 const RUIN_BUILDING_COLLAPSE_PROB = 0.40;  // per building, don't draw at all
 const RUIN_SPRAWL_COLLAPSE_PROB = 0.50;
-const RUIN_OVERGROWTH_POLY_PROB = 0.30;    // per non-water polygon, fill green
-const RUIN_OVERGROWTH_BLDG_PROB = 0.45;    // per standing building, add moss
+const RUIN_OVERGROWTH_POLY_PROB = 0.35;    // per interior polygon, fill w/ biome tint
+const RUIN_OVERGROWTH_BLDG_PROB = 0.45;    // per standing interior building, add moss
 const RUIN_OVERGROWTH_MOSS_DOT_MIN = 1;    // dots per mossy building
 const RUIN_OVERGROWTH_MOSS_DOT_MAX = 3;
 
-// Colors. Overgrowth fill is semi-transparent so the underlying base/streets
-// bleed through — reads as "reclaimed ground" rather than a solid layer.
-const RUIN_OVERGROWTH_FILL = 'rgba(70, 115, 40, 0.38)';
-const RUIN_OVERGROWTH_EDGE = 'rgba(40, 80, 20, 0.45)';
-const RUIN_MOSS_FILL = '#3d6a1c';
-const RUIN_MOSS_EDGE = 'rgba(20, 50, 5, 0.7)';
+// Alpha values for the biome-derived overgrowth fills. Biome colors live in
+// `BIOME_OUTSIDE_FILL` and are already pastel; alpha on top of the cream base
+// yields a tinted wash of the surrounding terrain reclaiming the ruined
+// blocks. Moss dots are small (1.8 px radius), so they use a higher alpha.
+const RUIN_OVERGROWTH_FILL_ALPHA = 0.55;
+const RUIN_MOSS_FILL_ALPHA = 0.85;
 const RUIN_MOSS_RADIUS = 1.8;
 
 // Standing buildings in a ruin city get a darker, cooler ink to read as
@@ -866,15 +866,43 @@ function drawSprawl(
   }
 }
 
-// [Voronoi-polygon] Ruin overgrowth post-pass. Two sub-passes:
-//   1. Per non-water polygon, flip a coin — on hit, fill the polygon's ring
-//      with a semi-transparent forest green (alpha 0.38) so underlying
-//      streets / buildings / walls bleed through as faded outlines. Reads as
-//      "nature reclaiming the district". A thin matching edge stroke gives
-//      the overgrowth a visible perimeter without solidifying the fill.
-//   2. Per building (interior + sprawl), flip a coin — on hit, stipple 1–3
-//      small filled green dots at random vertices of the building ring to
-//      suggest moss / vines on the remaining walls.
+// Block roles that count as "inside the city". External blocks (slum /
+// agricultural) sit outside the wall footprint and belong to the fringe —
+// the overgrowth pass skips them so decay reads as the biome reclaiming
+// the civic / residential core, not a uniform green wash over the canvas.
+// `dock` blocks sit on water and are also excluded.
+const RUIN_INTERIOR_ROLES: ReadonlySet<string> = new Set<string>([
+  'civic',
+  'market',
+  'residential',
+  'harbor',
+]);
+
+// Convert a `#rrggbb` color to an `rgba(r,g,b,a)` string. Used to derive the
+// overgrowth and moss fill colors from the `BIOME_OUTSIDE_FILL` table at
+// render time without maintaining a parallel alpha-baked palette.
+function hexToRgba(hex: string, alpha: number): string {
+  const h = hex.startsWith('#') ? hex.slice(1) : hex;
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// [Voronoi-polygon] Ruin overgrowth post-pass. Two sub-passes, both scoped
+// to *interior* city blocks (civic / market / residential / harbor) so the
+// biome tint reads as nature reclaiming the ruined city — external sprawl
+// fringe stays its biome-colored block background and is not double-tinted.
+//
+//   1. For each interior polygon, flip a coin — on hit, fill the polygon's
+//      ring with the city's biome colour (from `BIOME_OUTSIDE_FILL`) at
+//      alpha 0.55, so the underlying streets / buildings / walls bleed
+//      through as faded outlines under the tint.
+//   2. For each remaining interior building, flip a coin — on hit, stipple
+//      1–3 small biome-colored dots at random vertices of the building ring
+//      at alpha 0.85 to suggest moss / vines on the surviving walls. Sprawl
+//      buildings are skipped — they live on external blocks and already sit
+//      on a biome-colored background.
 //
 // Runs late (after every infrastructure + building layer) so the reclaim
 // pass sits on top of all the decayed structure. Drawn before the city
@@ -882,49 +910,53 @@ function drawSprawl(
 function drawRuinOvergrowth(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
+  env: CityEnvironment,
   rng: () => number,
 ): void {
-  // Build O(1) water-polygon lookup. `waterPolygonIds` is a sorted number[].
-  const waterIds = new Set<number>(data.waterPolygonIds);
+  // Interior polygon set from block roles — the authoritative "inside the
+  // city" partition maintained by `cityMapBlocks.ts`. Using block.role here
+  // (rather than `wall.interiorPolygonIds`) keeps the filter consistent
+  // with the same interior/exterior semantics the block layer uses.
+  const interiorIds = new Set<number>();
+  for (const block of data.blocks) {
+    if (!RUIN_INTERIOR_ROLES.has(block.role)) continue;
+    for (const pid of block.polygonIds) interiorIds.add(pid);
+  }
 
-  // Pass 1 — polygon overgrowth fills.
-  ctx.fillStyle = RUIN_OVERGROWTH_FILL;
-  ctx.strokeStyle = RUIN_OVERGROWTH_EDGE;
-  ctx.lineWidth = 0.75;
+  // Resolve biome palette; fall back to the same neutral used by
+  // `drawBlockBackgrounds` if the biome key somehow isn't in the table.
+  const biomeHex = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
+  const fillColor = hexToRgba(biomeHex, RUIN_OVERGROWTH_FILL_ALPHA);
+  const mossColor = hexToRgba(biomeHex, RUIN_MOSS_FILL_ALPHA);
+
+  // Pass 1 — polygon overgrowth fills (interior only).
+  ctx.fillStyle = fillColor;
   ctx.lineJoin = 'round';
   for (const polygon of data.polygons) {
-    if (waterIds.has(polygon.id)) continue;
+    if (!interiorIds.has(polygon.id)) continue;
     if (polygon.vertices.length < 3) continue;
     if (rng() >= RUIN_OVERGROWTH_POLY_PROB) continue;
     tracePolygonRing(ctx, polygon);
     ctx.fill();
-    ctx.stroke();
   }
 
-  // Pass 2 — moss dots on interior buildings + sprawl buildings. Each
-  // building rolls a coin; on hit, scatter a few dots at randomly chosen
-  // vertices of the building ring (vertices sit near walls, which is where
-  // moss reads naturally). Use the same ruin RNG so the whole overgrowth
-  // layer is seed-stable.
-  ctx.fillStyle = RUIN_MOSS_FILL;
-  ctx.strokeStyle = RUIN_MOSS_EDGE;
-  ctx.lineWidth = 0.5;
-  const stippleBuilding = (verts: [number, number][]) => {
-    if (verts.length < 3) return;
-    if (rng() >= RUIN_OVERGROWTH_BLDG_PROB) return;
+  // Pass 2 — moss dots on interior buildings. Sprawl is intentionally
+  // skipped: its parent blocks (slum / agricultural) are external.
+  ctx.fillStyle = mossColor;
+  for (const b of data.buildings) {
+    if (!interiorIds.has(b.polygonId)) continue;
+    if (b.vertices.length < 3) continue;
+    if (rng() >= RUIN_OVERGROWTH_BLDG_PROB) continue;
     const dots = RUIN_OVERGROWTH_MOSS_DOT_MIN +
       Math.floor(rng() * (RUIN_OVERGROWTH_MOSS_DOT_MAX - RUIN_OVERGROWTH_MOSS_DOT_MIN + 1));
     for (let i = 0; i < dots; i++) {
-      const vi = Math.floor(rng() * verts.length);
-      const [vx, vy] = verts[vi];
+      const vi = Math.floor(rng() * b.vertices.length);
+      const [vx, vy] = b.vertices[vi];
       ctx.beginPath();
       ctx.arc(vx, vy, RUIN_MOSS_RADIUS, 0, Math.PI * 2);
       ctx.fill();
-      ctx.stroke();
     }
-  };
-  for (const b of data.buildings) stippleBuilding(b.vertices);
-  for (const b of data.sprawlBuildings) stippleBuilding(b.vertices);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
