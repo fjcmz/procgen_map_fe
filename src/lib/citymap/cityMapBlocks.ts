@@ -94,6 +94,12 @@ const DOCK_ELIGIBLE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
 // Cap on dock-block water-polygon coverage as a fraction of cityPolygonCount.
 const DOCK_MAX_FRACTION_OF_CITY = 0.10;
 
+// Cap on mountain polygons absorbed into city blocks as a fraction of
+// cityPolygonCount. Spec: "City blocks can expand to mountain polygons but
+// no more than 10% of the total city polygons." Polygons beyond this budget
+// stay as pure mountain terrain.
+const MOUNTAIN_MAX_FRACTION_OF_CITY = 0.10;
+
 // Name combiner: retry attempts before falling back to a numeric DISTRICT N.
 const NAME_MAX_ATTEMPTS = 12;
 // Probability of inserting a space between prefix + suffix (else concatenate).
@@ -133,10 +139,24 @@ export function generateBlocks(
   canvasSize: number,
   waterPolygonIds?: Set<number>,
   cityPolygonCount?: number,
+  mountainPolygonIds?: Set<number>,
 ): CityBlockV2[] {
   if (polygons.length < 4) return [];
 
   const water = waterPolygonIds ?? new Set<number>();
+  const mountain = mountainPolygonIds ?? new Set<number>();
+
+  // Pick up to MOUNTAIN_MAX_FRACTION_OF_CITY × cityPolygonCount mountain
+  // polygons that sit adjacent to the city footprint to be absorbed into
+  // neighboring blocks (spec: "City blocks can expand to mountain polygons
+  // but no more than 10% of the total city polygons."). Unabsorbed mountain
+  // polygons stay out of the flood and remain pure terrain.
+  const absorbedMountain = pickAbsorbedMountainPolygons(
+    polygons,
+    mountain,
+    wall.interiorPolygonIds,
+    cityPolygonCount ?? 0,
+  );
 
   // ── Step 1: barrier edge keys ────────────────────────────────────────────
   // [Voronoi-polygon] Every wall / river / road / street segment is a
@@ -186,12 +206,21 @@ export function generateBlocks(
   // so downstream buildings / landmarks / sprawl classify correctly.
   // For walled cities the wall edges already block the same seam, so
   // this is a no-op on the flood result.
-  const interior = wall.interiorPolygonIds;
+  // Absorbed mountain polygons are treated as interior for the flood so
+  // the city's residential/civic/etc. blocks can extend into foothills.
+  // Unabsorbed mountains stay excluded.
+  const interior = new Set<number>(wall.interiorPolygonIds);
+  for (const id of absorbedMountain) interior.add(id);
   // Water polygons are excluded from the standard flood — they cannot be
   // part of civic / residential / harbor / slum / agricultural blocks.
   // Dock blocks (large+ cities) are synthesized in a separate pass below.
+  // Non-absorbed mountain polygons are also excluded — they remain pure
+  // terrain (rendered on a dedicated mountain layer).
   const visited = new Set<number>();
-  for (const p of polygons) if (water.has(p.id)) visited.add(p.id);
+  for (const p of polygons) {
+    if (water.has(p.id)) visited.add(p.id);
+    if (mountain.has(p.id) && !absorbedMountain.has(p.id)) visited.add(p.id);
+  }
   const rawBlocks: number[][] = [];
   for (const seedPoly of polygons) {
     if (visited.has(seedPoly.id)) continue;
@@ -205,6 +234,7 @@ export function generateBlocks(
       for (const nbId of curr.neighbors) {
         if (visited.has(nbId)) continue;
         if (water.has(nbId)) continue; // water polygons are never part of land blocks
+        if (mountain.has(nbId) && !absorbedMountain.has(nbId)) continue; // pure mountain — not floodable
         if (interior.has(currId) !== interior.has(nbId)) continue; // footprint boundary
         const sharedKey = findSharedEdgeKey(curr, nbId, edgeOwnership);
         if (sharedKey === null) continue; // no shared Voronoi edge (very rare clip edge case)
@@ -282,6 +312,46 @@ export function generateBlocks(
   }
 
   return blocks;
+}
+
+// ─── Mountain absorption helpers ───────────────────────────────────────────
+
+// [Voronoi-polygon] Pick mountain polygons adjacent to the city footprint
+// to be absorbed into neighboring blocks as foothill terrain. Cap at
+// MOUNTAIN_MAX_FRACTION_OF_CITY × cityPolygonCount. Deterministic: sorts
+// by number of interior-footprint neighbors (more contact = more central
+// to city), then by polygon id. No RNG.
+function pickAbsorbedMountainPolygons(
+  polygons: CityPolygon[],
+  mountain: Set<number>,
+  interior: Set<number>,
+  cityPolygonCount: number,
+): Set<number> {
+  if (mountain.size === 0 || cityPolygonCount <= 0) return new Set();
+  const budget = Math.floor(cityPolygonCount * MOUNTAIN_MAX_FRACTION_OF_CITY);
+  if (budget <= 0) return new Set();
+
+  type Candidate = { id: number; score: number };
+  const candidates: Candidate[] = [];
+  for (const pid of mountain) {
+    const poly = polygons[pid];
+    if (!poly) continue;
+    let interiorTouches = 0;
+    for (const nb of poly.neighbors) {
+      if (interior.has(nb)) interiorTouches++;
+    }
+    if (interiorTouches === 0) continue; // must touch the city footprint
+    // Lower score = pick first. More interior contact ranks first.
+    candidates.push({ id: pid, score: -interiorTouches * 10 });
+  }
+  candidates.sort((a, b) => (a.score - b.score) || (a.id - b.id));
+
+  const picked = new Set<number>();
+  for (const c of candidates) {
+    if (picked.size >= budget) break;
+    picked.add(c.id);
+  }
+  return picked;
 }
 
 // ─── Dock block helpers ─────────────────────────────────────────────────────

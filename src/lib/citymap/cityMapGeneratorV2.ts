@@ -36,6 +36,7 @@ import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
 import { generateWaterPolygons } from './cityMapWater';
+import { generateMountainPolygons } from './cityMapMountains';
 
 // ── Environment derivation ──
 
@@ -98,7 +99,60 @@ export function deriveCityEnvironment(
     religionCount: religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
     isRuin,
     neighborBiomes: neighborCells.map(n => n.biome),
+    mountainDirection: findNearestMountainDirection(cell, cells),
   };
+}
+
+// Mountain threshold mirrors renderer.ts:655 — any land cell with
+// elevation >= 0.75 is a mountain for icon rendering, so we reuse the same
+// cutoff when deciding whether a city is "near mountains".
+const MOUNTAIN_ELEVATION_THRESHOLD = 0.75;
+// Spec: "Cities that are close to mountains (5 or less cells away from a
+// mountain cell) should show some mountains". BFS over the cell neighbour
+// graph up to this depth.
+const MOUNTAIN_SEARCH_DEPTH = 5;
+
+/**
+ * BFS the world cell graph from the city's cell up to MOUNTAIN_SEARCH_DEPTH
+ * hops, looking for the nearest cell with `elevation >= 0.75` (and not
+ * water). Returns a unit direction vector from the city to that cell plus
+ * the hop count; `null` when no mountain cell is within range.
+ *
+ * Ties on hop distance resolve by choosing the smallest cell index, which
+ * keeps output deterministic across re-generations with the same seed.
+ */
+function findNearestMountainDirection(
+  originCell: Cell,
+  cells: Cell[],
+): { dx: number; dy: number; distance: number } | null {
+  const visited = new Set<number>([originCell.index]);
+  let frontier: number[] = [originCell.index];
+  for (let depth = 1; depth <= MOUNTAIN_SEARCH_DEPTH; depth++) {
+    const next: number[] = [];
+    let bestCellIdx = -1;
+    for (const idx of frontier) {
+      const cell = cells[idx];
+      for (const nbIdx of cell.neighbors) {
+        if (visited.has(nbIdx)) continue;
+        visited.add(nbIdx);
+        const nb = cells[nbIdx];
+        if (!nb.isWater && nb.elevation >= MOUNTAIN_ELEVATION_THRESHOLD) {
+          if (bestCellIdx === -1 || nbIdx < bestCellIdx) bestCellIdx = nbIdx;
+        }
+        next.push(nbIdx);
+      }
+    }
+    if (bestCellIdx !== -1) {
+      const target = cells[bestCellIdx];
+      const dx = target.x - originCell.x;
+      const dy = target.y - originCell.y;
+      const len = Math.hypot(dx, dy);
+      if (len === 0) return null;
+      return { dx: dx / len, dy: dy / len, distance: depth };
+    }
+    frontier = next;
+  }
+  return null;
 }
 
 // Every city renders on a fixed-size polygon canvas regardless of city
@@ -283,6 +337,32 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
+  // ── Mountain polygons ──
+  // When the city sits within 5 world-cell hops of a mountain cell
+  // (`env.mountainDirection` non-null), carve out a strip of canvas
+  // polygons along the matching canvas edge, capped at 25% of polygons.
+  // Mountain selection always excludes the water set so a coastal city
+  // never gets mountains on top of its sea. Downstream, mountains are
+  // treated like water for infrastructure purposes (no walls, roads, or
+  // plazas on a mountain face); blocks may optionally absorb mountain-
+  // adjacent polygons up to 10% of the city's polygons.
+  const mountainPolygonIds = generateMountainPolygons(
+    seed,
+    cityName,
+    env,
+    polygons,
+    CANVAS_SIZE,
+    waterPolygonIds,
+  );
+
+  // Combined obstacle set — used by shape / walls / network / openSpaces /
+  // river. These modules treat water and mountain identically: "not
+  // buildable, not traversable". Blocks and the data payload keep the two
+  // sets distinct because blocks can absorb mountains (not water) and the
+  // renderer styles them differently.
+  const obstaclePolygonIds = new Set<number>(waterPolygonIds);
+  for (const id of mountainPolygonIds) obstaclePolygonIds.add(id);
+
   // City footprint allocation. Picks an organic shape (50% spheroid /
   // 30% rectangle / 15% half-sphere / 5% triangle) and allocates exactly
   // `POLYGON_COUNTS[env.size]` polygons from the canvas, growing outward
@@ -299,7 +379,7 @@ export function generateCityMapV2(
     polygons,
     CANVAS_SIZE,
     cityPolygonCount,
-    waterPolygonIds,
+    obstaclePolygonIds,
   );
 
   // PR 2 — walls + gates.
@@ -348,7 +428,7 @@ export function generateCityMapV2(
     footprint.interior,
     CANVAS_SIZE,
     wallConfig,
-    waterPolygonIds,
+    obstaclePolygonIds,
   );
   const { wallPath, gates, wallTowers, innerWallPath, innerGates, middleWallPath, middleGates } = wall;
 
@@ -373,7 +453,7 @@ export function generateCityMapV2(
     wall,
     river,
     CANVAS_SIZE,
-    waterPolygonIds,
+    obstaclePolygonIds,
   );
 
   // PR 4 (open-spaces slice) — civic square + markets + parks. Polygon-based
@@ -393,7 +473,7 @@ export function generateCityMapV2(
     river,
     roads,
     CANVAS_SIZE,
-    waterPolygonIds,
+    obstaclePolygonIds,
   );
 
   // PR 4 (blocks slice) — polygon-graph flood bounded by wall / river / road /
@@ -418,6 +498,7 @@ export function generateCityMapV2(
     CANVAS_SIZE,
     waterPolygonIds,
     cityPolygonCount,
+    mountainPolygonIds,
   );
 
   // PR 4 (landmarks slice) — capital castle/palace + temple-per-religion +
@@ -435,6 +516,7 @@ export function generateCityMapV2(
     blocks,
     openSpaces,
     CANVAS_SIZE,
+    mountainPolygonIds,
   );
 
   // PR 5 (buildings slice) — polygon-interior rejection-sampling packer.
@@ -486,6 +568,7 @@ export function generateCityMapV2(
     cityPolygonCount,
     polygons,
     waterPolygonIds: [...waterPolygonIds].sort((a, b) => a - b),
+    mountainPolygonIds: [...mountainPolygonIds].sort((a, b) => a - b),
     wallPath,
     gates,
     river,

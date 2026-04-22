@@ -95,6 +95,18 @@ const QA_TAG_INK = '#8a8070';
 const WATER_FILL = '#9fc9e8';
 const WATER_EDGE_STROKE = 'rgba(70, 110, 140, 0.35)';
 
+// Mountain polygons — stone-grey fill with darker outline. Drawn early in
+// the layer stack (between the polygon-edge grid and the sprawl layer) so
+// infrastructure and buildings still sit visibly on top for absorbed
+// foothill blocks. Mountain peaks are stippled as dark triangles on the
+// polygon sites to suggest an elevated silhouette from above.
+const MOUNTAIN_FILL = '#b4aea0';
+const MOUNTAIN_EDGE_STROKE = 'rgba(70, 60, 45, 0.5)';
+const MOUNTAIN_PEAK_INK = '#4a3d2a';
+const MOUNTAIN_PEAK_HIGHLIGHT = '#dcd4c4';
+const MOUNTAIN_PEAK_HALF_WIDTH = 6;
+const MOUNTAIN_PEAK_HEIGHT = 9;
+
 // Dock blocks (large+ coastal cities) — wooden plank styling per spec.
 // Filled light brown with darker brown stripes to read as wharves / piers.
 const DOCK_FILL = '#c9a673';        // light brown base (weathered wood)
@@ -223,6 +235,12 @@ export function renderCityMapV2(
   // waterbody with the faint cadastral grid stroked across it.
   drawWater(ctx, data);
 
+  // ── Layer 1.7: mountain polygons ─────────────────────────────────────────
+  // Drawn before the polygon-edge grid so the cadastral grid stays visible
+  // across the mountain range. Infrastructure / buildings / landmarks draw
+  // on top later so absorbed foothill polygons still read as city.
+  drawMountains(ctx, data);
+
   // ── Layer 2: faint Voronoi polygon edges (organic cadastral grid) ───────
   // [Voronoi foundation] — each polygon's vertex ring is stroked at 12% ink.
   ctx.strokeStyle = POLYGON_EDGE_STROKE;
@@ -346,6 +364,57 @@ function drawWater(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
     ctx.fill();
     ctx.stroke();
   }
+}
+
+// [Voronoi-polygon] Fill every mountain polygon with a stone-grey colour
+// and stipple a small triangular peak silhouette on each polygon's site
+// so the range reads as elevated terrain from above. No RNG: peak
+// dimensions are fixed and positions come directly from `polygon.site`,
+// keeping the renderer byte-stable. Peaks include a thin pale highlight
+// stroke on one side to suggest illumination.
+function drawMountains(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.mountainPolygonIds || data.mountainPolygonIds.length === 0) return;
+  ctx.fillStyle = MOUNTAIN_FILL;
+  ctx.strokeStyle = MOUNTAIN_EDGE_STROKE;
+  ctx.lineWidth = 1;
+  ctx.lineJoin = 'round';
+  for (const pid of data.mountainPolygonIds) {
+    const polygon = data.polygons[pid];
+    if (!polygon || polygon.vertices.length < 3) continue;
+    tracePolygonRing(ctx, polygon);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Peak silhouettes — one dark triangle per mountain polygon anchored on
+  // `polygon.site`. Draw all triangles in a single batched path per style
+  // so the canvas ctx state changes stay minimal.
+  ctx.fillStyle = MOUNTAIN_PEAK_INK;
+  ctx.beginPath();
+  for (const pid of data.mountainPolygonIds) {
+    const polygon = data.polygons[pid];
+    if (!polygon) continue;
+    const [cx, cy] = polygon.site;
+    ctx.moveTo(cx, cy - MOUNTAIN_PEAK_HEIGHT);
+    ctx.lineTo(cx + MOUNTAIN_PEAK_HALF_WIDTH, cy + MOUNTAIN_PEAK_HEIGHT * 0.35);
+    ctx.lineTo(cx - MOUNTAIN_PEAK_HALF_WIDTH, cy + MOUNTAIN_PEAK_HEIGHT * 0.35);
+    ctx.closePath();
+  }
+  ctx.fill();
+
+  // Highlight stroke on the left face of each peak to suggest light from
+  // the NW (matches the renderer's global hillshade convention).
+  ctx.strokeStyle = MOUNTAIN_PEAK_HIGHLIGHT;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const pid of data.mountainPolygonIds) {
+    const polygon = data.polygons[pid];
+    if (!polygon) continue;
+    const [cx, cy] = polygon.site;
+    ctx.moveTo(cx, cy - MOUNTAIN_PEAK_HEIGHT);
+    ctx.lineTo(cx - MOUNTAIN_PEAK_HALF_WIDTH, cy + MOUNTAIN_PEAK_HEIGHT * 0.35);
+  }
+  ctx.stroke();
 }
 
 // [Voronoi-polygon] Fill each dock block's polygons with a wooden platform
@@ -916,7 +985,9 @@ function drawRuinOvergrowth(
   // Interior polygon set from block roles — the authoritative "inside the
   // city" partition maintained by `cityMapBlocks.ts`. Using block.role here
   // (rather than `wall.interiorPolygonIds`) keeps the filter consistent
-  // with the same interior/exterior semantics the block layer uses.
+  // with the same interior/exterior semantics the block layer uses. Water
+  // polygons and mountain polygons never land in interior-role blocks, so
+  // this one membership check subsumes the previous per-kind exclusions.
   const interiorIds = new Set<number>();
   for (const block of data.blocks) {
     if (!RUIN_INTERIOR_ROLES.has(block.role)) continue;
