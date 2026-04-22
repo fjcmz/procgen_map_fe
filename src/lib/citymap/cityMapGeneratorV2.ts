@@ -295,6 +295,7 @@ export function generateCityMapV2(
     blocks,
     openSpaces,
     landmarks,
+    roads,
     CANVAS_SIZE,
   );
 

@@ -3,24 +3,27 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// This module generates building footprints by subdividing each eligible block
-// polygon into Voronoi lots and insetting each lot uniformly from its edges.
-//
-// ALGORITHM (per eligible polygon):
+// ALGORITHM (per eligible block polygon):
 //   1. Determine N = number of building lots (role + area formula, 1–6).
 //   2. Rejection-sample N random seed points inside the polygon.
 //   3. Run D3 Delaunay/Voronoi on those seeds, clipped to the polygon bbox.
 //   4. Clip each Voronoi cell to the parent polygon via Sutherland–Hodgman.
-//   5. Inset the clipped lot polygon by BUILDING_INSET_PX (parallel offset).
-//   6. If the result has area >= MIN_FOOTPRINT_AREA, emit it as a CityBuildingV2.
+//   5. Classify each lot edge:
+//        • Lot edge whose midpoint lies on the parent polygon boundary
+//          → BOUNDARY EDGE. Setback = 4px if on a road, 2px otherwise.
+//        • All other lot edges (internal to the polygon, shared between lots)
+//          → INTERNAL EDGE. Setback = 0 — buildings touch along these edges.
+//   6. Apply the per-edge setback via a selective parallel-offset inset:
+//      for each lot vertex, intersect the two adjacent offset lines (at their
+//      respective setback distances). Internal edges are not shifted, so
+//      adjacent buildings abut exactly along their shared lot boundary.
+//   7. If the resulting footprint has area ≥ MIN_FOOTPRINT_AREA, emit it.
 //
-// The inset uses a centroid-directed parallel-offset: for each edge the inward
-// normal is computed (the perpendicular direction toward the polygon centroid),
-// the edge is offset by BUILDING_INSET_PX, and adjacent offset edges are
-// intersected to find the new vertex. This produces straight building walls
-// parallel to the street/lot boundary — the "set-back from the street" read
-// that top-down city maps use. Voronoi lots from convex parents are also convex,
-// so the inset is always valid when BUILDING_INSET_PX < the lot's inradius.
+// SETBACK RATIONALE
+//   Buildings need breathing room from streets/roads/walls (they run along
+//   polygon boundary edges), but buildings within the same block polygon
+//   should be packed tightly — the lot boundary IS the building boundary.
+//   Road edges get a larger setback (4 vs 2 px) to reflect wider pavements.
 //
 // ELIGIBLE POLYGONS — same criteria as before:
 //   • block role in {civic, market, harbor, residential}
@@ -28,22 +31,14 @@
 //   • polygon.isEdge === false (edge polygons belong to sprawl)
 //   • polygon.area >= MIN_PARENT_AREA
 //
-// Seed generation uses a rejection-sampler bounded by the polygon bbox.
-// Sutherland–Hodgman works for any convex clip polygon regardless of winding —
-// the sign of the shoelace sum is detected at runtime so the "inside" test
-// always points toward the interior. D3 Voronoi cells and city polygons are
-// both from the same D3 pipeline and share the same CW-in-screen winding
-// (positive shoelace sum), but the detection makes this robust if that ever
-// changes.
+// RNG sub-stream: `${seed}_city_${cityName}_buildings` — same key so old
+// snapshots re-rendered with the new generator keep a consistent stream.
+// Iteration: block order → polygon.id order → seed roll → solid roll.
 //
-// RNG sub-stream: `${seed}_city_${cityName}_buildings` — same key as before,
-// so old snapshots re-rendered with the new generator keep a consistent stream.
-// Iteration order: block order → polygon.id order → seed roll → solid roll,
-// fully deterministic and seed-stable across re-runs.
-//
-// NO tile lattice. NO `Math.random`. Every geometric helper is file-local so
-// there is no dependency on `cityMapEdgeGraph.ts` — this module does polygon-
-// interior work, not edge-graph traversal.
+// NO tile lattice. NO `Math.random`. This module does NOT import
+// `cityMapEdgeGraph.ts` — edge-key helpers are implemented locally with the
+// same VERTEX_PRECISION = 100 constant used by that module so canonical keys
+// from `roads` match parent polygon edge keys.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Delaunay } from 'd3-delaunay';
@@ -67,10 +62,6 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'residential',
 ]);
 
-// Per-role lot-count formula: N = clamp(min, max, round(base + area / divisor)).
-// Tuned so civic blocks get a few large administrative footprints, market blocks
-// get many small stalls, residential blocks get dense row-house clusters,
-// and harbor blocks get long warehouse rows.
 const LOT_BASE: Record<DistrictRole, number> = {
   civic: 2,
   market: 3,
@@ -104,27 +95,37 @@ const LOT_MAX: Record<DistrictRole, number> = {
   agricultural: 0,
 };
 
-// Inset distance in pixels. Each lot polygon is shrunk inward by this amount
-// on all sides; the gap between adjacent buildings is ~2× this value.
-const BUILDING_INSET_PX = 3;
+// Setback in pixels from polygon boundary edges.
+// Internal lot edges (shared between lots) always get 0 — buildings touch.
+const DEFAULT_SETBACK_PX = 2;  // min space between building edge and polygon boundary
+const ROAD_SETBACK_PX = 4;     // wider pavement setback along road edges
 
-// Minimum area filters.
-const MIN_PARENT_AREA = 100;      // px² — skip polygons too small to subdivide
-const MIN_FOOTPRINT_AREA = 16;    // px² — skip lots whose inset collapses them
+// Tolerance for classifying a lot-edge midpoint as "on the parent polygon boundary".
+const BOUNDARY_TOLERANCE = 0.5; // px
 
-// Fraction of buildings drawn as solid vs. hollow outline.
-const SOLID_PROBABILITY = 0.55;
+// Area filters.
+const MIN_PARENT_AREA = 100;    // px² — skip polygons too small to subdivide
+const MIN_FOOTPRINT_AREA = 12;  // px² — skip lots whose setback collapses them
+
+// All interior buildings are grey-filled with a black outline — solid=true is
+// always emitted. The renderer ignores the `solid` field for buildings and
+// always applies fill + stroke.
+const SOLID_BUILDING = true;
 
 // Max rejection-sampling attempts per seed point.
 const MAX_SEED_ATTEMPTS_MULTIPLIER = 40;
+
+// Must match cityMapEdgeGraph.ts VERTEX_PRECISION so canonical edge keys
+// built here from road-path vertices match those built there.
+const VERTEX_PRECISION = 100;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Generate `buildings: CityBuildingV2[]` for a V2 city map.
  *
- * Each building is a polygon footprint produced by Voronoi-subdividing the
- * parent block polygon into lots and insetting each lot by BUILDING_INSET_PX.
+ * `roads` is used to identify road edges on the parent polygon boundary so
+ * they receive a wider (4 px) setback than other boundary edges (2 px).
  */
 export function generateBuildings(
   seed: string,
@@ -134,6 +135,7 @@ export function generateBuildings(
   blocks: CityBlockV2[],
   openSpaces: CityMapDataV2['openSpaces'],
   landmarks: CityLandmarkV2[],
+  roads: [number, number][][],
   canvasSize: number,
 ): CityBuildingV2[] {
   void env;
@@ -146,6 +148,9 @@ export function generateBuildings(
     for (const id of entry.polygonIds) reservedPolygonIds.add(id);
   }
   for (const lm of landmarks) reservedPolygonIds.add(lm.polygonId);
+
+  // Build road-edge canonical-key set for 4 px setback detection.
+  const roadEdgeKeys = buildRoadEdgeKeys(roads);
 
   const rng = seededPRNG(`${seed}_city_${cityName}_buildings`);
   const out: CityBuildingV2[] = [];
@@ -161,7 +166,7 @@ export function generateBuildings(
       if (polygon.vertices.length < 3) continue;
       if (polygon.area < MIN_PARENT_AREA) continue;
 
-      packBuildingsInPolygon(polygon, block.role, rng, out);
+      packBuildingsInPolygon(polygon, block.role, roadEdgeKeys, rng, out);
     }
   }
 
@@ -173,6 +178,7 @@ export function generateBuildings(
 function packBuildingsInPolygon(
   polygon: CityPolygon,
   role: DistrictRole,
+  roadEdgeKeys: Set<string>,
   rng: () => number,
   out: CityBuildingV2[],
 ): void {
@@ -183,35 +189,165 @@ function packBuildingsInPolygon(
   );
   if (n === 0) return;
 
-  // [Voronoi-polygon] Generate n seed points inside the polygon.
   const seeds = generateSeedsInPolygon(polygon.vertices, n, rng);
   if (seeds.length === 0) return;
 
-  // [Voronoi-polygon] Subdivide the polygon into Voronoi lots and clip each
-  // lot to the parent polygon boundary.
   const lots = seeds.length === 1
     ? [polygon.vertices as [number, number][]]
     : subdivideToLots(polygon, seeds);
 
-  // [Voronoi-polygon] Inset each lot polygon to produce the building footprint.
   for (const lot of lots) {
-    if (polygonArea(lot) < MIN_FOOTPRINT_AREA * 4) continue; // too small to inset
-    const footprint = insetPolygon(lot, BUILDING_INSET_PX);
+    if (polygonArea(lot) < MIN_FOOTPRINT_AREA * 4) continue;
+
+    // [Voronoi-polygon] Classify each lot edge: boundary (set back from polygon
+    // boundary) or internal (shared between lots — no setback, buildings touch).
+    const edgeInsets = computeEdgeInsets(lot, polygon.vertices, roadEdgeKeys);
+
+    const footprint = insetPolygonSelective(lot, edgeInsets);
     if (!footprint || footprint.length < 3) continue;
     if (polygonArea(footprint) < MIN_FOOTPRINT_AREA) continue;
 
     out.push({
       vertices: footprint,
-      solid: rng() < SOLID_PROBABILITY,
+      solid: SOLID_BUILDING,
       polygonId: polygon.id,
     });
   }
 }
 
+// ─── Edge classification ──────────────────────────────────────────────────────
+
+/**
+ * For each edge of `lotVerts`, return the setback distance in pixels:
+ *   • 0  — internal edge (midpoint is strictly inside the parent polygon)
+ *   • 2  — boundary edge on a non-road parent polygon edge
+ *   • 4  — boundary edge that falls on a road edge
+ */
+function computeEdgeInsets(
+  lotVerts: [number, number][],
+  parentVerts: [number, number][],
+  roadEdgeKeys: Set<string>,
+): number[] {
+  const n = lotVerts.length;
+  const insets: number[] = new Array(n).fill(0);
+
+  for (let i = 0; i < n; i++) {
+    const a = lotVerts[i];
+    const b = lotVerts[(i + 1) % n];
+    const midX = (a[0] + b[0]) * 0.5;
+    const midY = (a[1] + b[1]) * 0.5;
+
+    // Check if the edge midpoint lies on the parent polygon boundary.
+    const parentEdgeIdx = findNearestParentEdge([midX, midY], parentVerts, BOUNDARY_TOLERANCE);
+    if (parentEdgeIdx < 0) continue; // internal edge → leave inset at 0
+
+    // Boundary edge — determine setback based on whether it is a road.
+    const pv = parentVerts[parentEdgeIdx];
+    const qv = parentVerts[(parentEdgeIdx + 1) % parentVerts.length];
+    insets[i] = roadEdgeKeys.has(canonicalEdgeKey(pv, qv))
+      ? ROAD_SETBACK_PX
+      : DEFAULT_SETBACK_PX;
+  }
+
+  return insets;
+}
+
+// Returns the index of the nearest parent polygon edge whose distance to `p`
+// is < `tolerance`, or -1 if none qualifies.
+function findNearestParentEdge(
+  p: [number, number],
+  parentVerts: [number, number][],
+  tolerance: number,
+): number {
+  const n = parentVerts.length;
+  for (let i = 0; i < n; i++) {
+    const a = parentVerts[i];
+    const b = parentVerts[(i + 1) % n];
+    if (pointSegmentDistance(p, a, b) < tolerance) return i;
+  }
+  return -1;
+}
+
+// ─── Selective parallel-offset inset ─────────────────────────────────────────
+
+/**
+ * Inset a (convex) polygon by per-edge distances. For each vertex the new
+ * position is the intersection of the two adjacent offset edge-lines.
+ *
+ *   edgeInsets[i] = setback for the edge from verts[i] to verts[(i+1)%n].
+ *
+ * When both adjacent edges have inset=0 the vertex is unchanged.
+ * When only one adjacent edge has a non-zero inset the vertex slides along
+ * the opposite (un-shifted) edge — the building footprint reaches the lot
+ * boundary on the internal side and is set back on the external side.
+ */
+function insetPolygonSelective(
+  verts: [number, number][],
+  edgeInsets: number[],
+): [number, number][] | null {
+  const n = verts.length;
+  if (n < 3) return null;
+
+  // Centroid for inward-normal direction disambiguation.
+  let cx = 0;
+  let cy = 0;
+  for (const [x, y] of verts) { cx += x; cy += y; }
+  cx /= n;
+  cy /= n;
+
+  const result: [number, number][] = [];
+
+  for (let i = 0; i < n; i++) {
+    const prev = verts[(i - 1 + n) % n];
+    const curr = verts[i];
+    const next = verts[(i + 1) % n];
+
+    const prevInset = edgeInsets[(i - 1 + n) % n]; // inset of edge prev→curr
+    const currInset = edgeInsets[i];                // inset of edge curr→next
+
+    // Fast path: both edges internal (inset=0) → vertex unchanged.
+    if (prevInset === 0 && currInset === 0) {
+      result.push([curr[0], curr[1]]);
+      continue;
+    }
+
+    // Inward normal for edge prev→curr.
+    const d1x = curr[0] - prev[0];
+    const d1y = curr[1] - prev[1];
+    const len1 = Math.hypot(d1x, d1y);
+    if (len1 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
+    let n1x = -d1y / len1;
+    let n1y =  d1x / len1;
+    const mid1x = (prev[0] + curr[0]) * 0.5;
+    const mid1y = (prev[1] + curr[1]) * 0.5;
+    if (n1x * (cx - mid1x) + n1y * (cy - mid1y) < 0) { n1x = -n1x; n1y = -n1y; }
+
+    // Inward normal for edge curr→next.
+    const d2x = next[0] - curr[0];
+    const d2y = next[1] - curr[1];
+    const len2 = Math.hypot(d2x, d2y);
+    if (len2 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
+    let n2x = -d2y / len2;
+    let n2y =  d2x / len2;
+    const mid2x = (curr[0] + next[0]) * 0.5;
+    const mid2y = (curr[1] + next[1]) * 0.5;
+    if (n2x * (cx - mid2x) + n2y * (cy - mid2y) < 0) { n2x = -n2x; n2y = -n2y; }
+
+    // Offset the two edge-lines by their respective inset amounts, then intersect.
+    const a1: [number, number] = [prev[0] + n1x * prevInset, prev[1] + n1y * prevInset];
+    const b1: [number, number] = [curr[0] + n1x * prevInset, curr[1] + n1y * prevInset];
+    const a2: [number, number] = [curr[0] + n2x * currInset, curr[1] + n2y * currInset];
+    const b2: [number, number] = [next[0] + n2x * currInset, next[1] + n2y * currInset];
+
+    const p = lineIntersect(a1, b1, a2, b2);
+    result.push(p ?? [(b1[0] + a2[0]) * 0.5, (b1[1] + a2[1]) * 0.5]);
+  }
+
+  return result.length >= 3 ? result : null;
+}
+
 // ─── Seed generation ─────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Rejection-sample `n` random points inside the polygon
-// ring. Bounded by the polygon's axis-aligned bounding box.
 function generateSeedsInPolygon(
   verts: [number, number][],
   n: number,
@@ -242,11 +378,6 @@ function generateSeedsInPolygon(
 
 // ─── Voronoi subdivision + Sutherland–Hodgman clipping ───────────────────────
 
-// [Voronoi-polygon] Build D3 Voronoi on `seeds`, clipped to the polygon bbox,
-// then clip each cell to the parent polygon using Sutherland–Hodgman. The
-// parent polygon is convex (it is itself a Voronoi cell from the city graph),
-// and convex × convex intersection is always convex — so the resulting lots
-// are convex and the inset is always well-defined.
 function subdivideToLots(
   polygon: CityPolygon,
   seeds: [number, number][],
@@ -283,16 +414,14 @@ function subdivideToLots(
   return lots;
 }
 
-// [Voronoi-polygon] Sutherland–Hodgman polygon clipping. Clips `subject`
-// (arbitrary polygon) against `clip` (convex polygon). The winding of `clip`
-// is detected at runtime (positive shoelace sum = CW in screen-space, which is
-// the D3 Voronoi convention). For each clip edge the algorithm tests which side
-// of the edge the "inside" is on, consistent with the detected winding.
+// [Voronoi-polygon] Sutherland–Hodgman polygon clipping.
+// Winding of `clip` is detected at runtime (positive shoelace sum = CW in
+// screen-space, the D3 Voronoi convention). For each clip edge the algorithm
+// uses a cross-product "inside" test consistent with the detected winding.
 function sutherlandHodgmanClip(
   subject: [number, number][],
   clip: [number, number][],
 ): [number, number][] {
-  // Detect clip-polygon winding.
   let clipSum = 0;
   const cn = clip.length;
   for (let i = 0; i < cn; i++) {
@@ -300,8 +429,6 @@ function sutherlandHodgmanClip(
     const [bx, by] = clip[(i + 1) % cn];
     clipSum += ax * by - bx * ay;
   }
-  // Positive shoelace sum → CW in screen coords → inside when cross >= 0.
-  // Negative shoelace sum → CCW in screen coords → inside when cross <= 0.
   const cwClip = clipSum >= 0;
 
   let output: [number, number][] = subject.slice();
@@ -330,79 +457,35 @@ function sutherlandHodgmanClip(
   return output;
 }
 
-// ─── Polygon inset (parallel offset) ─────────────────────────────────────────
+// ─── Road edge key helpers ────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Inset a convex polygon by `dist` pixels on all sides using
-// a parallel-edge offset. For each vertex the two adjacent edges are each
-// shifted inward by `dist` along their inward normal (directed toward the
-// centroid), and the new vertex is the intersection of the two shifted edges.
-// This produces building walls that are exactly parallel to the lot boundary —
-// the "set-back from the street" look — unlike a centroid-blend which gives
-// non-uniform gaps on elongated polygons.
-function insetPolygon(
-  verts: [number, number][],
-  dist: number,
-): [number, number][] | null {
-  const n = verts.length;
-  if (n < 3) return null;
-
-  // Compute centroid for inward-normal direction disambiguation.
-  let cx = 0;
-  let cy = 0;
-  for (const [x, y] of verts) { cx += x; cy += y; }
-  cx /= n;
-  cy /= n;
-
-  const result: [number, number][] = [];
-
-  for (let i = 0; i < n; i++) {
-    const prev = verts[(i - 1 + n) % n];
-    const curr = verts[i];
-    const next = verts[(i + 1) % n];
-
-    // Inward-directed normal for edge prev→curr.
-    const d1x = curr[0] - prev[0];
-    const d1y = curr[1] - prev[1];
-    const len1 = Math.hypot(d1x, d1y);
-    if (len1 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
-    let n1x = -d1y / len1;
-    let n1y =  d1x / len1;
-    const mid1x = (prev[0] + curr[0]) * 0.5;
-    const mid1y = (prev[1] + curr[1]) * 0.5;
-    if (n1x * (cx - mid1x) + n1y * (cy - mid1y) < 0) { n1x = -n1x; n1y = -n1y; }
-
-    // Inward-directed normal for edge curr→next.
-    const d2x = next[0] - curr[0];
-    const d2y = next[1] - curr[1];
-    const len2 = Math.hypot(d2x, d2y);
-    if (len2 < 1e-6) { result.push([curr[0], curr[1]]); continue; }
-    let n2x = -d2y / len2;
-    let n2y =  d2x / len2;
-    const mid2x = (curr[0] + next[0]) * 0.5;
-    const mid2y = (curr[1] + next[1]) * 0.5;
-    if (n2x * (cx - mid2x) + n2y * (cy - mid2y) < 0) { n2x = -n2x; n2y = -n2y; }
-
-    // Offset both edges inward and intersect them.
-    const a1: [number, number] = [prev[0] + n1x * dist, prev[1] + n1y * dist];
-    const b1: [number, number] = [curr[0] + n1x * dist, curr[1] + n1y * dist];
-    const a2: [number, number] = [curr[0] + n2x * dist, curr[1] + n2y * dist];
-    const b2: [number, number] = [next[0] + n2x * dist, next[1] + n2y * dist];
-
-    const p = lineIntersect(a1, b1, a2, b2);
-    if (!p) {
-      // Parallel adjacent edges — use the average of the two offset endpoints.
-      result.push([(b1[0] + a2[0]) * 0.5, (b1[1] + a2[1]) * 0.5]);
-    } else {
-      result.push(p);
-    }
-  }
-
-  return result.length >= 3 ? result : null;
+// Same precision constant as cityMapEdgeGraph.ts so keys computed from the
+// same polygon vertex coordinates collate identically.
+function roundV(x: number): number {
+  return Math.round(x * VERTEX_PRECISION) / VERTEX_PRECISION;
 }
 
-// ─── Local geometry helpers — [Voronoi-polygon] ───────────────────────────────
+function canonicalEdgeKey(
+  a: [number, number],
+  b: [number, number],
+): string {
+  const ka = `${roundV(a[0])},${roundV(a[1])}`;
+  const kb = `${roundV(b[0])},${roundV(b[1])}`;
+  return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+}
 
-// [Voronoi-polygon] Classic ray-cast point-in-polygon on an UNCLOSED ring.
+function buildRoadEdgeKeys(roads: [number, number][][]): Set<string> {
+  const keys = new Set<string>();
+  for (const path of roads) {
+    for (let i = 0; i < path.length - 1; i++) {
+      keys.add(canonicalEdgeKey(path[i], path[i + 1]));
+    }
+  }
+  return keys;
+}
+
+// ─── Local geometry helpers ───────────────────────────────────────────────────
+
 function pointInPolygon(p: [number, number], verts: [number, number][]): boolean {
   const [px, py] = p;
   const n = verts.length;
@@ -418,8 +501,6 @@ function pointInPolygon(p: [number, number], verts: [number, number][]): boolean
   return inside;
 }
 
-// [Voronoi-polygon] Signed 2D cross product of edge a→b with vector a→p.
-// Positive → p is to the left of a→b (in standard math / CCW convention).
 function edgeCross(
   a: [number, number],
   b: [number, number],
@@ -428,8 +509,6 @@ function edgeCross(
   return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
 }
 
-// [Voronoi-polygon] Line–line intersection of segments a→b and c→d, returned
-// as the point on line a→b parameterized by t. Returns null for parallel lines.
 function lineIntersect(
   a: [number, number],
   b: [number, number],
@@ -446,7 +525,21 @@ function lineIntersect(
   return [a[0] + t * dx1, a[1] + t * dy1];
 }
 
-// [Voronoi-polygon] Shoelace absolute area of an unclosed polygon ring.
+function pointSegmentDistance(
+  p: [number, number],
+  a: [number, number],
+  b: [number, number],
+): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p[0] - a[0], p[1] - a[1]);
+  let t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / lenSq;
+  if (t < 0) t = 0;
+  else if (t > 1) t = 1;
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
 function polygonArea(verts: [number, number][]): number {
   let area = 0;
   const n = verts.length;
