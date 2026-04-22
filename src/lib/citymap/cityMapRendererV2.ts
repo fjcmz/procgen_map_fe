@@ -1,12 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // City Map V2 renderer — Voronoi foundation (PR 1) + walls (PR 2) + river /
 // streets / roads / bridges (PR 3) + open spaces + landmarks (PR 4 slices)
+// + buildings (PR 5 slice)
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles. Every geometric
 // primitive this renderer consumes comes from the polygon graph emitted by
 // `cityMapGeneratorV2.ts` and the polygon-edge traversals done by
 // `cityMapWalls.ts` (PR 2) / `cityMapRiver.ts` + `cityMapNetwork.ts` (PR 3) /
-// `cityMapOpenSpaces.ts` + `cityMapLandmarks.ts` (PR 4 slices).
+// `cityMapOpenSpaces.ts` + `cityMapLandmarks.ts` (PR 4 slices) /
+// `cityMapBuildings.ts` (PR 5 slice).
 //
 //   Layer 1  — flat cream base #ece5d3
 //   Layer 2  — faint Voronoi polygon edges (the "organic cadastral grid")
@@ -19,13 +21,17 @@
 //   Layer 9  — open spaces (PR 4 slice): pale fills over polygon RINGS for
 //              squares + markets, greenish fills for parks, plus market
 //              stall dots and park trees scattered inside each polygon
+//   Layer 10 — buildings (PR 5 slice): 4–12 axis-aligned rects per non-
+//              reserved interior polygon, 1 px mortar, mix of solid #2a241c
+//              fills and hollow #2a241c strokes. Packed per polygon inside
+//              the polygon.vertices ring with a 2 px inset from edges so
+//              streets / roads / walls stay visible on polygon boundaries.
 //   Layer 11 — walls + towers + gate doors (PR 2)  [polygon-edge wall path]
 //   Layer 12 — landmarks (PR 4 slice): castle / palace / temple / monument
 //              glyphs centered on `polygon.site`, sized from √polygon.area,
 //              "all ink on white" per spec. CASTLE / PALACE labels below
 //              capital glyphs.
-//   …gap…    — Layers 3, 4, 10, 13 reserved for PR 5 (docks, sprawl,
-//              buildings, labels)
+//   …gap…    — Layers 3, 4, 13 reserved for PR 5 (docks, sprawl, labels)
 //   Layer 14 — top-centered city name + "V2" QA tag
 //
 // LAYER ORDER NOTE — open spaces are drawn BEFORE roads / streets / walls so
@@ -46,6 +52,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type {
+  CityBuildingV2,
   CityEnvironment,
   CityLandmarkV2,
   CityMapDataV2,
@@ -164,11 +171,11 @@ export function renderCityMapV2(
     ctx.stroke();
   }
 
-  // ── Layers 3, 4, 10, 13 reserved for PR 5 ──────────────────────────────
+  // ── Layers 3, 4, 13 reserved for PR 5 (remainder) ──────────────────────
   //   Layer 3  — docks (PR 5, env.waterSide hatching)
   //   Layer 4  — outside-walls sprawl (PR 5)
-  //   Layer 10 — buildings (PR 5)
   //   Layer 13 — district labels (PR 5)
+  //   Layer 10 — buildings (PR 5) — drawn below after bridges and before walls.
   //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
 
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
@@ -200,6 +207,17 @@ export function renderCityMapV2(
   // intersection as a `[a, b]` pair, the renderer turns it into a white
   // rect + rails so the crossing reads above the river stroke.
   drawBridges(ctx, data);
+
+  // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
+  // [Voronoi-polygon] Every building carries a `polygonId` and sits inside
+  // the corresponding polygon's vertex ring (2 px inset from polygon edges
+  // at generation time — see cityMapBuildings.ts). Drawn AFTER streets /
+  // roads / bridges so buildings cover the polygon interior cream base, and
+  // BEFORE walls so wall strokes sit visibly on top of any building that
+  // butts up against the wall boundary. Solid rects use #2a241c fill;
+  // hollow rects use a half-lineWidth-inset #2a241c stroke so the 1 px
+  // mortar gap between neighbours stays crisp.
+  drawBuildings(ctx, data);
 
   // ── Layer 11: walls + towers + gate doors (PR 2) ────────────────────────
   // [Voronoi-polygon] The wall path is a closed polyline of polygon-edge
@@ -467,6 +485,47 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
       ctx.moveTo(padAx + ox, padAy + oy);
       ctx.lineTo(padBx + ox, padBy + oy);
       ctx.stroke();
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 5 (slice) — buildings on Layer 10
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Layer 10 — building ink. Solid rects use fillRect; hollow rects use
+// strokeRect inset by half the lineWidth so the stroke stays inside the
+// rect and the 1 px mortar gap between neighbouring rects reads crisply.
+const BUILDING_INK = '#2a241c';
+const BUILDING_STROKE_WIDTH = 0.75;
+
+// [Voronoi-polygon] Render every entry in `data.buildings`. Each building
+// carries a `polygonId` that indexes into `data.polygons`; the generator
+// (cityMapBuildings.ts) has already clipped each rect to the polygon's
+// vertex ring with a 2 px inset from polygon edges. No RNG at render time —
+// every dimension is baked into the CityBuildingV2 rect, so re-rendering is
+// byte-stable without re-running the generator.
+function drawBuildings(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.buildings.length === 0) return;
+
+  const halfStroke = BUILDING_STROKE_WIDTH * 0.5;
+  ctx.fillStyle = BUILDING_INK;
+  ctx.strokeStyle = BUILDING_INK;
+  ctx.lineWidth = BUILDING_STROKE_WIDTH;
+
+  for (const b of data.buildings as CityBuildingV2[]) {
+    if (b.solid) {
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    } else {
+      // Half-lineWidth inset keeps the stroke inside the rect bounds —
+      // without it, the stroke would bleed out by `BUILDING_STROKE_WIDTH / 2`
+      // and eat into the 1 px mortar gap maintained by the generator.
+      ctx.strokeRect(
+        b.x + halfStroke,
+        b.y + halfStroke,
+        b.w - BUILDING_STROKE_WIDTH,
+        b.h - BUILDING_STROKE_WIDTH,
+      );
     }
   }
 }
