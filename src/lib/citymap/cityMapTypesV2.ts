@@ -18,16 +18,29 @@
 // Reference pattern (world-map Voronoi): src/lib/terrain/voronoi.ts::buildCellGraph.
 // City Voronoi strips the east-west wrapping logic from that helper — cities
 // are bounded, not toroidal.
-//
-// V1 types live in ./cityMapTypes and stay frozen so the V1 generator/renderer
-// keep compiling alongside V2 during the PR 1-5 migration.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { CityEnvironment, DistrictRole } from './cityMapTypes';
+import type { BiomeType } from '../types';
 
-// Re-exported so PR 2–5 files can import from the V2 barrel only.
-// `CityEnvironment` and `DistrictRole` stay shared between V1 and V2.
-export type { CityEnvironment, DistrictRole };
+export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
+
+export type DistrictRole = 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum';
+
+export interface CityEnvironment {
+  biome: BiomeType;
+  isCoastal: boolean;
+  hasRiver: boolean;
+  waterSide: 'north' | 'south' | 'east' | 'west' | null;
+  elevation: number;
+  moisture: number;
+  temperature: number;
+  isCapital: boolean;
+  size: CitySize;
+  wonderCount: number;
+  religionCount: number;
+  isRuin: boolean;
+  neighborBiomes: BiomeType[];
+}
 
 /**
  * A single Voronoi polygon in the city graph.

@@ -27,7 +27,7 @@
 
 import { seededPRNG } from '../terrain/noise';
 import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 import {
   aStarEdgeGraph,
   canonicalEdgeKey,

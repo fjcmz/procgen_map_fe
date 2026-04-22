@@ -17,12 +17,14 @@
 
 import { Delaunay } from 'd3-delaunay';
 import { seededPRNG } from '../terrain/noise';
+import type { Cell, City, MapData } from '../types';
+import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
   CityEnvironment,
   CityMapDataV2,
   CityPolygon,
+  CitySize,
 } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
 import { generateWallsAndGates } from './cityMapWalls';
 import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
@@ -32,6 +34,70 @@ import { generateBlocks } from './cityMapBlocks';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
+
+// ── Environment derivation ──
+
+export function deriveCityEnvironment(
+  city: City,
+  cells: Cell[],
+  mapData: MapData,
+  citySizesAtYear?: Uint8Array,
+  selectedYear?: number,
+  wonderCellIndices?: number[],
+  religionCellIndices?: number[],
+): CityEnvironment {
+  const cell = cells[city.cellIndex];
+  const neighborCells = cell.neighbors.map(i => cells[i]);
+
+  // Determine water side
+  let waterSide: 'north' | 'south' | 'east' | 'west' | null = null;
+  if (cell.isCoast || neighborCells.some(n => n.isWater)) {
+    let wx = 0, wy = 0, wcount = 0;
+    for (const n of neighborCells) {
+      if (n.isWater) {
+        wx += n.x - cell.x;
+        wy += n.y - cell.y;
+        wcount++;
+      }
+    }
+    if (wcount > 0) {
+      wx /= wcount;
+      wy /= wcount;
+      if (Math.abs(wx) > Math.abs(wy)) {
+        waterSide = wx > 0 ? 'east' : 'west';
+      } else {
+        waterSide = wy > 0 ? 'south' : 'north';
+      }
+    }
+  }
+
+  // Resolve dynamic size
+  let size: CitySize = city.size;
+  if (citySizesAtYear) {
+    const cityIdx = mapData.cities.indexOf(city);
+    if (cityIdx >= 0 && citySizesAtYear[cityIdx] != null) {
+      size = INDEX_TO_CITY_SIZE[citySizesAtYear[cityIdx]] ?? city.size;
+    }
+  }
+
+  const isRuin = city.isRuin && (selectedYear == null || city.ruinYear <= selectedYear);
+
+  return {
+    biome: cell.biome,
+    isCoastal: cell.isCoast || neighborCells.some(n => n.isWater),
+    hasRiver: cell.riverFlow > 0,
+    waterSide,
+    elevation: cell.elevation,
+    moisture: cell.moisture,
+    temperature: cell.temperature,
+    isCapital: city.isCapital,
+    size,
+    wonderCount: wonderCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
+    religionCount: religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
+    isRuin,
+    neighborBiomes: neighborCells.map(n => n.biome),
+  };
+}
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.

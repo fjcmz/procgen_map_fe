@@ -56,7 +56,7 @@ import type {
   CityPolygon,
   DistrictRole,
 } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypes';
+import type { CitySize } from './cityMapTypesV2';
 import { buildEdgeOwnership, canonicalEdgeKey, type Point } from './cityMapEdgeGraph';
 import type { WallGenerationResult } from './cityMapWalls';
 import type { RiverGenerationResult } from './cityMapRiver';
