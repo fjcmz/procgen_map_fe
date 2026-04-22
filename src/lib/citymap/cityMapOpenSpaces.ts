@@ -133,9 +133,11 @@ export function generateOpenSpaces(
     }
   }
 
+  const hasWalls = wall.wallPath.length > 0;
   const eligible = new Set<number>();
   for (const p of polygons) {
     if (p.isEdge) continue;
+    if (hasWalls && !wall.interiorPolygonIds.has(p.id)) continue;
     if (touchesBlockedEdge(p, blockedEdgeKeys)) continue;
     eligible.add(p.id);
   }

@@ -80,6 +80,8 @@ export interface WallGenerationResult {
   wallPath: Point[];
   /** Up to 4 gates — one per cardinal direction, skipping `env.waterSide`. */
   gates: { edge: Edge; dir: 'N' | 'S' | 'E' | 'W' }[];
+  /** Set of polygon ids that lie inside the wall footprint. Empty when wallPath is empty. */
+  interiorPolygonIds: Set<number>;
 }
 
 /**
@@ -103,15 +105,15 @@ export function generateWallsAndGates(
   const samplers = createNoiseSamplers(`${seed}_city_${cityName}_walls`);
 
   const interior = selectInteriorPolygons(polygons, env, canvasSize, samplers);
-  if (interior.size < 3) return { wallPath: [], gates: [] };
+  if (interior.size < 3) return { wallPath: [], gates: [], interiorPolygonIds: new Set() };
 
   const edgeOwnership = buildEdgeOwnership(polygons);
   const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
   const wallPath = chainWallPath(boundaryEdges);
-  if (wallPath.length < 4) return { wallPath: [], gates: [] };
+  if (wallPath.length < 4) return { wallPath: [], gates: [], interiorPolygonIds: new Set() };
 
   const gates = pickGates(wallPath, env.waterSide, canvasSize);
-  return { wallPath, gates };
+  return { wallPath, gates, interiorPolygonIds: interior };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
