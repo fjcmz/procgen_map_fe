@@ -442,7 +442,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     const isRuinNow = city.isRuin && city.ruinYear <= selectedYear;
     const sizeLabel = isRuinNow ? 'ruin' : SIZE_LABELS[resolveCitySize(city)];
     const capitalMark = isRuinNow ? '• ' : isCapitalHere ? '★ ' : '• ';
-    const canShowMap = !isRuinNow && !!mapData && !!seed;
+    const canShowMap = !!mapData && !!seed;
     const flags = isRuinNow ? null : getCityFlags(city);
     return (
       <div
