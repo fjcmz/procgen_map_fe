@@ -9,7 +9,14 @@ export type {
   CitySize,
   DistrictRole,
 } from './cityMapTypesV2';
-export { deriveCityEnvironment, generateCityMapV2, POLYGON_COUNTS } from './cityMapGeneratorV2';
+export {
+  deriveCityEnvironment,
+  generateCityMapV2,
+  POLYGON_COUNTS,
+  CANVAS_POLYGON_COUNT,
+} from './cityMapGeneratorV2';
+export { selectCityFootprint } from './cityMapShape';
+export type { CityShapeType, CityFootprintResult } from './cityMapShape';
 export { renderCityMapV2 } from './cityMapRendererV2';
 // PR 4 (slice) — open spaces (squares + markets + parks). Polygon-keyed
 // output flows into `CityMapDataV2.openSpaces`.

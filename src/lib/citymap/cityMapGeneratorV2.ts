@@ -26,6 +26,7 @@ import type {
   CitySize,
 } from './cityMapTypesV2';
 import { generateWallsAndGates } from './cityMapWalls';
+import { selectCityFootprint } from './cityMapShape';
 import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
@@ -99,8 +100,24 @@ export function deriveCityEnvironment(
   };
 }
 
-// Single source of truth for V2 polygon counts per city-size tier. Exported so
-// PR 2-5 tests and helpers reference the same table rather than redefining it.
+// Every city renders on a fixed-size polygon canvas regardless of city
+// tier. The CITY itself (the polygons inside the walls) is allocated as a
+// subset of these via `cityMapShape.ts::selectCityFootprint`, with the
+// per-tier subset count coming from `POLYGON_COUNTS` below. The rest of
+// the canvas (~500–1350 polygons) hosts outside-walls sprawl,
+// agricultural/slum blocks, gate-exiting roads, and any other extramural
+// detail.
+export const CANVAS_POLYGON_COUNT = 1500;
+
+// Single source of truth for the V2 CITY polygon counts per size tier.
+// These now describe the in-wall city footprint (what
+// `cityMapShape.ts::selectCityFootprint` allocates out of the
+// `CANVAS_POLYGON_COUNT` total), not the canvas polygon count.
+//
+// Previously the wall coverage was a percentage roll over the canvas
+// (`COVERAGE_MIN..MAX` lerp in `cityMapWalls.ts`); that percentage logic
+// has been removed entirely. Allocation is now an absolute count from
+// this table, grown organically from the canvas center outward.
 export const POLYGON_COUNTS: Record<CitySize, number> = {
   small: 150,
   medium: 250,
@@ -230,34 +247,54 @@ export function generateCityMapV2(
   env: CityEnvironment,
 ): CityMapDataV2 {
   // Lock the top-level seeded-PRNG invariant: every V2 consumer downstream
-  // must derive its RNG from this base stream. PR 2-5 will add per-feature
-  // suffixes (e.g. `_walls`, `_river`).
+  // must derive its RNG from this base stream. PR 2-5 add per-feature
+  // suffixes (e.g. `_voronoi`, `_shape`, `_river`, `_buildings`).
   seededPRNG(`${seed}_city_${cityName}`);
 
-  const polygonCount = POLYGON_COUNTS[env.size];
+  // Always build the same canvas size in polygons regardless of city tier
+  // (refactor: city size now controls the IN-WALL footprint, not the
+  // canvas, so every map has identical extramural acreage to host sprawl).
   const polygons = buildCityPolygonGraph(
     `${seed}_city_${cityName}_voronoi`,
-    polygonCount,
+    CANVAS_POLYGON_COUNT,
     CANVAS_SIZE,
   );
 
-  // Contract guard — cheap, catches d3 / clipping surprises before PR 2-5
-  // downstream assumes `polygons.length === POLYGON_COUNTS[env.size]`.
-  if (polygons.length !== polygonCount) {
+  // Contract guard — cheap, catches d3 / clipping surprises before
+  // downstream assumes `polygons.length === CANVAS_POLYGON_COUNT`.
+  if (polygons.length !== CANVAS_POLYGON_COUNT) {
     throw new Error(
-      `City V2 polygon count mismatch: expected ${polygonCount}, got ${polygons.length}`,
+      `City V2 canvas polygon count mismatch: expected ${CANVAS_POLYGON_COUNT}, got ${polygons.length}`,
     );
   }
 
+  // City footprint allocation. Picks an organic shape (50% spheroid /
+  // 30% rectangle / 15% half-sphere / 5% triangle) and allocates exactly
+  // `POLYGON_COUNTS[env.size]` polygons from the canvas, growing outward
+  // from the canvas center. The wall traces this set; downstream features
+  // query `wall.interiorPolygonIds` for "inside the city?" tests. See
+  // `cityMapShape.ts` for the score-and-pick algorithm and the rationale
+  // for dropping the old percentage-based coverage roll.
+  const cityPolygonCount = POLYGON_COUNTS[env.size];
+  const footprint = selectCityFootprint(
+    seed,
+    cityName,
+    env,
+    polygons,
+    CANVAS_SIZE,
+    cityPolygonCount,
+  );
+
   // PR 2 — walls + gates. Polygon-based wall footprint + cardinal gates.
-  // See cityMapWalls.ts for the Voronoi-polygon algorithm (score non-edge
-  // polygons, BFS-prune, hole-fill, walk boundary polygon edges, pick
-  // cardinal gates skipping env.waterSide).
+  // The interior set is now PRE-COMPUTED by `selectCityFootprint`; walls
+  // just walk the boundary polygon edges and pick gates skipping
+  // `env.waterSide`.
   const wall = generateWallsAndGates(
     seed,
     cityName,
     env,
     polygons,
+    footprint.interior,
     CANVAS_SIZE,
   );
   const { wallPath, gates } = wall;
@@ -387,7 +424,8 @@ export function generateCityMapV2(
 
   return {
     canvasSize: CANVAS_SIZE,
-    polygonCount,
+    polygonCount: polygons.length,
+    cityPolygonCount,
     polygons,
     wallPath,
     gates,
