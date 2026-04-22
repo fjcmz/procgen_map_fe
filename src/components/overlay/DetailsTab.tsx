@@ -9,7 +9,6 @@ import { formatPopulation, formatYear } from '../Timeline';
 import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
-import { CityMapPopup } from '../CityMapPopup';
 import { CityMapPopupV2 } from '../CityMapPopupV2';
 import { deriveCityEnvironment } from '../../lib/citymap/cityMapGenerator';
 
@@ -452,7 +451,6 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
   const [resourcesOpen, setResourcesOpen] = useState(false);
-  const [showCityMap, setShowCityMap] = useState(false);
   const [showCityMapV2, setShowCityMapV2] = useState(false);
   const empire = country ? findEmpireForCountry(empireSnap, country.id) : undefined;
 
@@ -550,16 +548,9 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
             {city && cityEnvironment && (
               <button
                 style={styles.cityMapBtn}
-                onClick={() => setShowCityMap(true)}
+                onClick={() => setShowCityMapV2(true)}
                 title="View City Map"
               >Map</button>
-            )}
-            {city && cityEnvironment && (
-              <button
-                style={styles.cityMapBtn}
-                onClick={() => setShowCityMapV2(true)}
-                title="View City Map V2"
-              >MapV2</button>
             )}
             {onNavigate && (
               <button
@@ -644,15 +635,6 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
         )}
       </div>
 
-      {city && cityEnvironment && (
-        <CityMapPopup
-          isOpen={showCityMap}
-          onClose={() => setShowCityMap(false)}
-          cityName={city.name}
-          environment={cityEnvironment}
-          seed={seed}
-        />
-      )}
       {city && cityEnvironment && (
         <CityMapPopupV2
           isOpen={showCityMapV2}
