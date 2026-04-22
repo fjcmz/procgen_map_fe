@@ -31,6 +31,7 @@ import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks } from './cityMapBlocks';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
+import { generateSprawl } from './cityMapSprawl';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -297,6 +298,26 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
+  // PR 5 (sprawl slice) — outside-walls sparse fringe rects. Consumes the
+  // slum / agricultural blocks (all `isEdge`-containing clusters per
+  // `cityMapBlocks.ts::isExteriorBlock`) that `generateBuildings` deliberately
+  // skips. Same polygon-interior rejection-sampling recipe as buildings, but
+  // smaller counts, smaller rects, and scaled by `env.size` per spec line 23
+  // ("the bigger the city the more such sparse buildings"). Dedicated RNG
+  // sub-stream `_sprawl` keeps it decoupled from `_buildings` and from future
+  // PR 5 sub-streams (`_docks`, `_labels`). Rendered on Layer 4 (distinct
+  // from Layer 10 interior buildings) per the spec's layer map at line 76.
+  const sprawlBuildings = generateSprawl(
+    seed,
+    cityName,
+    env,
+    polygons,
+    blocks,
+    openSpaces,
+    landmarks,
+    CANVAS_SIZE,
+  );
+
   return {
     canvasSize: CANVAS_SIZE,
     polygonCount,
@@ -310,8 +331,10 @@ export function generateCityMapV2(
     blocks,
     openSpaces,
     buildings,
+    sprawlBuildings,
     landmarks,
-    // TODO PR 5 (remainder): rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
+    // TODO PR 5 (remainder): dock hatching + rotated district labels
+    // ("BLUEGATE", "GLASS DOCKS", …).
     districtLabels: [],
   };
 }

@@ -119,6 +119,13 @@ export interface CityMapDataV2 {
   openSpaces: { kind: 'square' | 'market' | 'park'; polygonIds: number[] }[];
   // TODO PR 5: axis-aligned top-down building rects (dense per polygon).
   buildings: CityBuildingV2[];
+  // PR 5 (sprawl slice): sparse rects on isEdge polygons in slum/agricultural
+  // blocks — the "outside-walls fringe" from spec line 73. Kept separate from
+  // `buildings` so the renderer can draw them on Layer 4 (the reserved sprawl
+  // slot) distinct from Layer 10 interior packing, matching the spec's
+  // "Renderer layers 3, 4, 10, 13 wired in" (line 76). Same CityBuildingV2
+  // shape — only the owning polygon's role + isEdge differ.
+  sprawlBuildings: CityBuildingV2[];
   // TODO PR 4: castle / palace / temple / monument placements.
   landmarks: CityLandmarkV2[];
   // TODO PR 5: rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
