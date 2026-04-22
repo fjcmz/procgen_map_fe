@@ -297,7 +297,7 @@ export function generateCityMapV2(
     footprint.interior,
     CANVAS_SIZE,
   );
-  const { wallPath, gates } = wall;
+  const { wallPath, gates, wallTowers, innerWallPath, innerGates } = wall;
 
   // PR 3 — shared polygon-edge graph consumed by river + network A*.
   // Built once per city so rivers, roads, and streets share precomputed
@@ -311,7 +311,7 @@ export function generateCityMapV2(
   // PR 3 — roads (gate→center A*), space-filling streets, and bridges
   // (road∩river by canonical edge key). Receives the river result so
   // road cost can nudge around crossings and bridge detection is trivial.
-  const { roads, streets, bridges } = generateNetwork(
+  const { roads, streets, bridges, exitRoads } = generateNetwork(
     seed,
     cityName,
     env,
@@ -420,6 +420,7 @@ export function generateCityMapV2(
     openSpaces,
     landmarks,
     CANVAS_SIZE,
+    wallPath,
   );
 
   return {
@@ -438,6 +439,10 @@ export function generateCityMapV2(
     buildings,
     sprawlBuildings,
     landmarks,
+    wallTowers,
+    innerWallPath,
+    innerGates,
+    exitRoads,
     // TODO PR 5 (remainder): dock hatching + rotated district labels
     // ("BLUEGATE", "GLASS DOCKS", …).
     districtLabels: [],

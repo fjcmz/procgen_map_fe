@@ -78,35 +78,41 @@ const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
 const CITY_NAME_INK = '#2a241c';
 const QA_TAG_INK = '#8a8070';
 
-// Layer 11 — wall styling (PR 2). All wall geometry is polygon-edge based;
-// see cityMapWalls.ts for the generator. Walls render as a single continuous
-// thick black polyline — no gate gaps, no tower studs, no door dashes.
-const WALL_INK = '#000000';
+// Layer 11 — wall styling (PR 2).
+const WALL_INK = '#2a241c';
 const WALL_WIDTH = 4;
+// Inner wall is thinner / slightly lighter so it reads as secondary.
+const INNER_WALL_INK = '#4a3c2c';
+const INNER_WALL_WIDTH = 2.5;
+// Tower dots along walls (filled circles at vertex positions).
+const TOWER_RADIUS = 4;    // outer wall towers
+const INNER_TOWER_RADIUS = 3;  // inner wall towers
 
-// Layer 5 — river styling (PR 3). All river geometry is polygon-edge based;
-// see cityMapRiver.ts for the generator. Rendered as a single continuous
-// light-blue stroke (no outline pass).
+// Exit roads — dashed lines from gates to canvas boundary.
+const EXIT_ROAD_INK = '#888070';
+const EXIT_ROAD_WIDTH = 2;
+const EXIT_ROAD_DASH: number[] = [6, 5];
+
+// Layer 5 — river styling (PR 3).
 const RIVER_CHANNEL_INK = '#a8d4f0';
 const RIVER_CHANNEL_WIDTH = 8;
 
-// Layer 6 — street styling (PR 3). Thin paths along polygon edges.
+// Layer 6 — street styling (PR 3).
 const STREET_INK = '#b0b0b0';
 const STREET_WIDTH = 1.5;
 
-// Layer 7 — road styling (PR 3). Bold paths along polygon edges.
+// Layer 7 — road styling (PR 3).
 const ROAD_INK = '#444444';
 const ROAD_WIDTH = 4;
 
-// Layer 8 — bridge styling (PR 3). A white rect perpendicular to each
-// road-∩-river edge (overwriting the river underneath), plus two dark
-// dashes parallel to the edge to read as rails / handrails.
-const BRIDGE_FILL = '#ffffff';
+// Layer 8 — bridge styling (PR 3, redesigned).
+// Bridge is now drawn PERPENDICULAR to the river edge (crossing the channel),
+// at 1/4 the scale of the original to read as a compact crossing.
+const BRIDGE_FILL = '#d4c9a8';    // warm stone colour
 const BRIDGE_RAIL_INK = '#2a241c';
-const BRIDGE_PAD_PX = 6;          // extends the white rect past each endpoint
-const BRIDGE_HALF_WIDTH = 6;      // half-width of the rect perpendicular to the edge
-const BRIDGE_RAIL_OFFSET = 3;     // perpendicular offset of each rail from the edge centerline
-const BRIDGE_RAIL_WIDTH = 1.5;
+const BRIDGE_CROSS_HALF = 6;      // half-length of bridge perpendicular to river (crossing span)
+const BRIDGE_ROAD_HALF = 2;       // half-width of bridge along river direction (road footprint)
+const BRIDGE_RAIL_WIDTH = 1.2;
 
 // Layer 9 — open-space styling (PR 4 slice). Each open space kind has a
 // distinct palette: civic squares (purple-white), markets (yellow-orange),
@@ -192,70 +198,44 @@ export function renderCityMapV2(
   drawBlockBackgrounds(ctx, data);
 
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
-  // [Voronoi-polygon] Sparse rects on slum / agricultural isEdge polygons.
-  // Drawn early (after the polygon-edge grid and before every infrastructure
-  // layer) so any future gate-exiting road (spec line 24: "roads going from
-  // the gates to the outer limits of the map") will sit visibly on top of
-  // any sprawl rect it happens to cross. In this slice roads stay inside
-  // the wall, so the stacking is effectively moot — but the ordering keeps
-  // the visual contract stable against that future addition.
   drawSprawl(ctx, data);
 
+  // ── Exit roads — dashed lines from gates to canvas boundary ─────────────
+  // Drawn on top of sprawl so the exit road visibly crosses any hut it runs over.
+  drawExitRoads(ctx, data);
+
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
-  // [Voronoi-polygon] Each entry references polygons by id; the renderer
-  // fills the union of those polygons' vertex rings (UNCLOSED, per the
-  // CityPolygon contract). Drawn BEFORE river / streets / roads / walls so
-  // those infrastructure layers visibly overlap the pale plaza fills.
   drawOpenSpaces(ctx, data, seed, cityName);
 
   // ── Layer 6: streets (PR 3) ────────────────────────────────────────────
-  // [Voronoi-polygon] Each street path is a sequence of polygon vertices
-  // threaded through adjacency by `cityMapNetwork.ts`. Streets stay below
-  // the buildings / landmarks / wall-road-river stack so the dominant
-  // infrastructure ink reads on top.
   drawPathList(ctx, data.streets, STREET_INK, STREET_WIDTH);
 
   // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
-  // [Voronoi-polygon] Every building carries a `polygonId` and sits inside
-  // the corresponding polygon's vertex ring (2 px inset from polygon edges
-  // at generation time — see cityMapBuildings.ts). Drawn AFTER streets so
-  // buildings cover the street ink that would otherwise bleed under their
-  // footprints, and BEFORE the wall / road / river stack so all three
-  // dominant features sit visibly on top of every building they cross.
   drawBuildings(ctx, data);
 
   // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
-  // [Voronoi-polygon] Each landmark references one `polygon.id`; we center
-  // the glyph on `polygon.site` and size it from `√polygon.area`. Drawn
-  // before walls / roads / river so those infrastructure layers cover any
-  // landmark glyph they cross. See cityMapLandmarks.ts for the polygon-
-  // graph placement.
   drawLandmarks(ctx, data);
 
-  // ── Layer 11: walls (PR 2) ─────────────────────────────────────────────
-  // [Voronoi-polygon] Continuous thick black polyline along the polygon-
-  // edge wall path. Drawn after every other feature so the city's defensive
-  // perimeter remains the strongest read on the map.
+  // ── Inner wall (metropolis+) — drawn before outer wall so outer sits on top ──
+  drawInnerWalls(ctx, data);
+
+  // ── Layer 11: outer walls (PR 2) ──────────────────────────────────────
   drawWalls(ctx, data);
 
-  // ── Layer 7: roads (PR 3) ──────────────────────────────────────────────
-  // [Voronoi-polygon] Road paths come from gate→center A* over the polygon
-  // edge graph; see cityMapNetwork.ts. Drawn on top of the walls so road
-  // crossings (e.g. through gates) read as continuous thoroughfares.
-  drawPathList(ctx, data.roads, ROAD_INK, ROAD_WIDTH);
+  // ── Tower dots — drawn on top of wall lines ─────────────────────────────
+  drawWallTowers(ctx, data);
+
+  // ── Layer 7: roads (PR 3) — bridge-aware ─────────────────────────────
+  // Roads are drawn bending through the bridge midpoint instead of along the
+  // river edge, so they visually approach the bridge perpendicularly.
+  drawRoadsWithBridgeRedirect(ctx, data);
 
   // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
-  // [Voronoi-polygon] Single continuous light-blue stroke along the
-  // polygon-edge river path. Drawn AFTER walls and roads so the water
-  // surface reads on top of any dry feature it crosses; bridges (next
-  // layer) re-mask the river at road-river intersections.
   drawRiver(ctx, data);
 
-  // ── Layer 8: bridges (PR 3) ────────────────────────────────────────────
-  // [Voronoi-polygon] Each bridge is a polygon edge that belongs to both
-  // a road path and the river edge set — `cityMapNetwork.ts` emits the
-  // intersection as a `[a, b]` pair, the renderer turns it into a white
-  // rect + rails so the crossing reads above the river stroke.
+  // ── Layer 8: bridges (PR 3) — perpendicular crossing ─────────────────
+  // Each bridge is now a small rect PERPENDICULAR to the river edge, drawn
+  // at the edge midpoint so it reads as a proper crossing of the channel.
   drawBridges(ctx, data);
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
@@ -294,21 +274,74 @@ function drawBlockBackgrounds(ctx: CanvasRenderingContext2D, data: CityMapDataV2
   }
 }
 
-// [Voronoi-polygon] Draw the wall layer as a single continuous thick black
-// polyline along the polygon-edge wall path produced by
-// `cityMapWalls.ts::generateWallsAndGates`. Every segment in `data.wallPath`
-// is a polygon edge; the path is closed (first === last). Gate gaps, tower
-// studs, and door dashes were dropped intentionally so the wall reads as
-// one strong unbroken silhouette on top of every other feature.
-function drawWalls(
-  ctx: CanvasRenderingContext2D,
-  data: CityMapDataV2,
-): void {
-  const path = data.wallPath;
-  if (path.length < 2) return;
+// [Voronoi-polygon] Draw the outer wall as a thick closed polyline.
+function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  strokePolyline(ctx, data.wallPath, WALL_INK, WALL_WIDTH);
+}
 
-  ctx.strokeStyle = WALL_INK;
-  ctx.lineWidth = WALL_WIDTH;
+// [Voronoi-polygon] Draw the inner wall (metropolis+ only) thinner / lighter.
+function drawInnerWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.innerWallPath || data.innerWallPath.length < 2) return;
+  strokePolyline(ctx, data.innerWallPath, INNER_WALL_INK, INNER_WALL_WIDTH);
+}
+
+// [Voronoi-polygon] Draw tower dots at every computed tower position on
+// the outer wall, then smaller dots on the inner wall towers (derived from
+// every 3rd vertex of the inner path at render time — no stored data needed).
+function drawWallTowers(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  // Outer wall towers.
+  if (data.wallTowers && data.wallTowers.length > 0) {
+    ctx.fillStyle = WALL_INK;
+    for (const [tx, ty] of data.wallTowers) {
+      ctx.beginPath();
+      ctx.arc(tx, ty, TOWER_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Inner wall towers — derive from every 3rd vertex of innerWallPath.
+  if (data.innerWallPath && data.innerWallPath.length > 2) {
+    ctx.fillStyle = INNER_WALL_INK;
+    const n = data.innerWallPath.length - 1; // skip closing dup
+    for (let i = 0; i < n; i += 3) {
+      const [tx, ty] = data.innerWallPath[i];
+      ctx.beginPath();
+      ctx.arc(tx, ty, INNER_TOWER_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// [Voronoi-polygon] Draw exit roads as dashed lines from each gate outward
+// to the canvas boundary, representing roads to off-map destinations.
+function drawExitRoads(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.exitRoads || data.exitRoads.length === 0) return;
+  ctx.strokeStyle = EXIT_ROAD_INK;
+  ctx.lineWidth = EXIT_ROAD_WIDTH;
+  ctx.lineCap = 'round';
+  ctx.setLineDash(EXIT_ROAD_DASH);
+  ctx.beginPath();
+  for (const road of data.exitRoads) {
+    if (road.length < 2) continue;
+    ctx.moveTo(road[0][0], road[0][1]);
+    for (let i = 1; i < road.length; i++) {
+      ctx.lineTo(road[i][0], road[i][1]);
+    }
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// Shared helper — stroke a polyline with the given style.
+function strokePolyline(
+  ctx: CanvasRenderingContext2D,
+  path: [number, number][],
+  ink: string,
+  width: number,
+): void {
+  if (path.length < 2) return;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = width;
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
   ctx.beginPath();
@@ -344,9 +377,7 @@ function drawRiver(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   ctx.stroke();
 }
 
-// [Voronoi-polygon] Stroke a list of paths where each path is a sequence of
-// polygon vertices (pixel coords) emitted by `cityMapNetwork.ts`. Used for
-// both streets (thin) and roads (bold) — only the stroke style differs.
+// [Voronoi-polygon] Stroke a list of paths. Used for streets (thin).
 function drawPathList(
   ctx: CanvasRenderingContext2D,
   paths: [number, number][][],
@@ -369,11 +400,78 @@ function drawPathList(
   ctx.stroke();
 }
 
-// [Voronoi-polygon] For each bridge edge (a road edge whose canonical key
-// also appears in the river edge set), paint a white rect centered on the
-// edge midpoint, perpendicular to the edge, plus two short dark rails
-// parallel to the edge. This reads as a bridge platform + handrails and
-// masks the river stroke at the crossing so the road visibly passes over.
+// [Voronoi-polygon] Draw roads with a visual redirect through every bridge
+// midpoint. When the path contains an edge [A→B] that is a bridge, the road
+// is drawn as: ...prev → M → next... (where M is the bridge midpoint) instead
+// of ...prev → A → B → next..., so the approach visually bends toward the
+// bridge crossing rather than running along the river channel.
+function drawRoadsWithBridgeRedirect(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+): void {
+  if (data.roads.length === 0) return;
+
+  // Build a set of bridge edge canonical keys for O(1) lookup.
+  // We need `canonicalEdgeKey` — inline the rounding logic here so we don't
+  // import from cityMapEdgeGraph (renderer is import-free from generators).
+  const VPRECISION = 1000;
+  const roundV = (v: number) => Math.round(v * VPRECISION) / VPRECISION;
+  const vkey = (p: [number, number]) => `${roundV(p[0])},${roundV(p[1])}`;
+  const edgeKey = (a: [number, number], b: [number, number]) => {
+    const ka = vkey(a);
+    const kb = vkey(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+
+  // Map bridge edge key → midpoint (for redirect).
+  const bridgeMidpoints = new Map<string, [number, number]>();
+  for (const [a, b] of data.bridges) {
+    const k = edgeKey(a as [number, number], b as [number, number]);
+    bridgeMidpoints.set(k, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+  }
+
+  ctx.strokeStyle = ROAD_INK;
+  ctx.lineWidth = ROAD_WIDTH;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  for (const road of data.roads) {
+    if (road.length < 2) continue;
+    // Build a redirected point sequence: replace each bridge segment A→B
+    // with just the midpoint M (which becomes the road's path through the bridge).
+    const redirected: [number, number][] = [];
+    redirected.push(road[0] as [number, number]);
+    for (let i = 0; i < road.length - 1; i++) {
+      const a = road[i] as [number, number];
+      const b = road[i + 1] as [number, number];
+      const k = edgeKey(a, b);
+      const mid = bridgeMidpoints.get(k);
+      if (mid) {
+        // Replace the A→B segment with just M; next iteration starts from B
+        // but we don't re-add A (already added) nor B (will be added below).
+        redirected.push(mid);
+        // Don't push B — it will be pushed on the next iteration's "current" point.
+        // We need to push B explicitly if it's the last segment.
+        if (i === road.length - 2) redirected.push(b);
+      } else {
+        redirected.push(b);
+      }
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(redirected[0][0], redirected[0][1]);
+    for (let i = 1; i < redirected.length; i++) {
+      ctx.lineTo(redirected[i][0], redirected[i][1]);
+    }
+    ctx.stroke();
+  }
+}
+
+// [Voronoi-polygon] Draw bridges as small rectangles PERPENDICULAR to the
+// river edge — the bridge crosses the channel, not floats on top of it.
+// The rect's long axis is perpendicular to the river edge (the crossing span),
+// and its short axis is parallel to the river edge (the road footprint width).
+// Two dark rails run along the long axis to suggest handrails.
 function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.bridges.length === 0) return;
 
@@ -382,25 +480,33 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
     const dy = b[1] - a[1];
     const len = Math.hypot(dx, dy);
     if (len === 0) continue;
+    // Unit vector along the river edge (A→B direction).
     const ux = dx / len;
     const uy = dy / len;
-    // Perpendicular to the edge, y-down: (uy, -ux).
-    const nx = uy;
-    const ny = -ux;
+    // Perpendicular to the edge = crossing direction (the bridge span).
+    // For a CW wall in y-down coords: perp = (uy, -ux). We want the crossing
+    // direction regardless of orientation, so use the absolute perp.
+    const px = uy;
+    const py = -ux;
 
-    // White platform rect: extend `BRIDGE_PAD_PX` past each endpoint so
-    // the rails visibly overlap the road, and take `BRIDGE_HALF_WIDTH`
-    // either side of the edge perpendicular.
-    const padAx = a[0] - ux * BRIDGE_PAD_PX;
-    const padAy = a[1] - uy * BRIDGE_PAD_PX;
-    const padBx = b[0] + ux * BRIDGE_PAD_PX;
-    const padBy = b[1] + uy * BRIDGE_PAD_PX;
+    // Bridge midpoint (center of the crossing).
+    const mx = (a[0] + b[0]) / 2;
+    const my = (a[1] + b[1]) / 2;
+
+    // Bridge rect corners:
+    //   - ±BRIDGE_CROSS_HALF along the perpendicular (crossing span)
+    //   - ±BRIDGE_ROAD_HALF along the river direction (road width at bridge)
     const corners: [number, number][] = [
-      [padAx + nx * BRIDGE_HALF_WIDTH, padAy + ny * BRIDGE_HALF_WIDTH],
-      [padBx + nx * BRIDGE_HALF_WIDTH, padBy + ny * BRIDGE_HALF_WIDTH],
-      [padBx - nx * BRIDGE_HALF_WIDTH, padBy - ny * BRIDGE_HALF_WIDTH],
-      [padAx - nx * BRIDGE_HALF_WIDTH, padAy - ny * BRIDGE_HALF_WIDTH],
+      [mx + px * BRIDGE_CROSS_HALF + ux * BRIDGE_ROAD_HALF,
+       my + py * BRIDGE_CROSS_HALF + uy * BRIDGE_ROAD_HALF],
+      [mx + px * BRIDGE_CROSS_HALF - ux * BRIDGE_ROAD_HALF,
+       my + py * BRIDGE_CROSS_HALF - uy * BRIDGE_ROAD_HALF],
+      [mx - px * BRIDGE_CROSS_HALF - ux * BRIDGE_ROAD_HALF,
+       my - py * BRIDGE_CROSS_HALF - uy * BRIDGE_ROAD_HALF],
+      [mx - px * BRIDGE_CROSS_HALF + ux * BRIDGE_ROAD_HALF,
+       my - py * BRIDGE_CROSS_HALF + uy * BRIDGE_ROAD_HALF],
     ];
+
     ctx.fillStyle = BRIDGE_FILL;
     ctx.beginPath();
     ctx.moveTo(corners[0][0], corners[0][1]);
@@ -410,16 +516,17 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
     ctx.closePath();
     ctx.fill();
 
-    // Two rails parallel to the edge.
+    // Two rails along the crossing direction (perpendicular to river).
     ctx.strokeStyle = BRIDGE_RAIL_INK;
     ctx.lineWidth = BRIDGE_RAIL_WIDTH;
     ctx.lineCap = 'round';
-    for (const sign of [-1, 1]) {
-      const ox = nx * BRIDGE_RAIL_OFFSET * sign;
-      const oy = ny * BRIDGE_RAIL_OFFSET * sign;
+    for (const sign of [-1, 1] as const) {
+      // Rail offset: parallel to the river edge (±BRIDGE_ROAD_HALF)
+      const ox = ux * BRIDGE_ROAD_HALF * sign;
+      const oy = uy * BRIDGE_ROAD_HALF * sign;
       ctx.beginPath();
-      ctx.moveTo(padAx + ox, padAy + oy);
-      ctx.lineTo(padBx + ox, padBy + oy);
+      ctx.moveTo(mx + px * BRIDGE_CROSS_HALF + ox, my + py * BRIDGE_CROSS_HALF + oy);
+      ctx.lineTo(mx - px * BRIDGE_CROSS_HALF + ox, my - py * BRIDGE_CROSS_HALF + oy);
       ctx.stroke();
     }
   }
