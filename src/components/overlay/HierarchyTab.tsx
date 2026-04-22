@@ -22,6 +22,31 @@ interface HierarchyTabProps {
 
 const ALL_CITY_SIZES: City['size'][] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
 
+/** Per-city feature flags surfaced as small icons next to the city name. */
+interface CityFeatureFlags {
+  hasCoast: boolean;
+  hasRiver: boolean;
+  hasResource: boolean;
+  hasReligion: boolean;
+  hasWonder: boolean;
+}
+
+const FEATURE_ICONS = {
+  coast:    '⚓',
+  river:    '〰️',
+  resource: '⛏️',
+  religion: '☦️',
+  wonder:   '🏛️',
+} as const;
+
+const FEATURE_LABELS = {
+  coast:    'On the coast',
+  river:    'On a river',
+  resource: 'Controls resource cells',
+  religion: 'Active religion',
+  wonder:   'Standing wonder',
+} as const;
+
 /** Unicode icon and tooltip label per city size, conveying scale progression. */
 const SIZE_ICONS: Record<City['size'], string> = {
   small:       '·',  // ·  middle dot
@@ -161,6 +186,57 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     () => getEmpiresAtYear(historyData, selectedYear),
     [historyData, selectedYear],
   );
+
+  /** Cell indices of cities with a standing wonder at the selected year. */
+  const wonderCitySet = useMemo(() => {
+    const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+    for (let y = floored; y >= 0; y -= 20) {
+      const snap = historyData.wonderSnapshots?.[y];
+      if (snap) return new Set(snap.map(w => w.cellIndex));
+    }
+    return new Set<number>();
+  }, [historyData, selectedYear]);
+
+  /** Cell indices of cities with an active religion at the selected year. */
+  const religionCitySet = useMemo(() => {
+    const floored = Math.max(0, Math.floor(selectedYear / 20) * 20);
+    for (let y = floored; y >= 0; y -= 20) {
+      const snap = historyData.religionSnapshots?.[y];
+      if (snap) return new Set(snap);
+    }
+    return new Set<number>();
+  }, [historyData, selectedYear]);
+
+  /** Cell indices that host a resource anywhere on the map. */
+  const resourceCellSet = useMemo(() => {
+    const set = new Set<number>();
+    if (!mapData?.regions) return set;
+    for (const region of mapData.regions) {
+      if (!region.resources) continue;
+      for (const r of region.resources) set.add(r.cellIndex);
+    }
+    return set;
+  }, [mapData]);
+
+  const getCityFlags = useCallback((city: City): CityFeatureFlags => {
+    const cell = mapData?.cells?.[city.cellIndex];
+    let hasResource = false;
+    if (city.ownedCells && resourceCellSet.size > 0) {
+      for (const oc of city.ownedCells) {
+        if (oc.yearAdded <= selectedYear && resourceCellSet.has(oc.cellIndex)) {
+          hasResource = true;
+          break;
+        }
+      }
+    }
+    return {
+      hasCoast: !!cell?.isCoast,
+      hasRiver: !!cell && cell.riverFlow > 0,
+      hasResource,
+      hasReligion: religionCitySet.has(city.cellIndex),
+      hasWonder: wonderCitySet.has(city.cellIndex),
+    };
+  }, [mapData, resourceCellSet, religionCitySet, wonderCitySet, selectedYear]);
 
   const snapKey = selectedYear;
 
@@ -367,6 +443,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     const sizeLabel = isRuinNow ? 'ruin' : SIZE_LABELS[resolveCitySize(city)];
     const capitalMark = isRuinNow ? '• ' : isCapitalHere ? '★ ' : '• ';
     const canShowMap = !isRuinNow && !!mapData && !!seed;
+    const flags = isRuinNow ? null : getCityFlags(city);
     return (
       <div
         key={city.cellIndex}
@@ -391,6 +468,15 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
         <span style={styles.citySize}>
           {!isRuinNow && isCapitalHere ? 'capital, ' : ''}{sizeLabel}
         </span>
+        {flags && (
+          <span style={styles.cityIcons} aria-label="city features">
+            {flags.hasCoast && <span style={styles.cityIcon} title={FEATURE_LABELS.coast}>{FEATURE_ICONS.coast}</span>}
+            {flags.hasRiver && <span style={styles.cityIcon} title={FEATURE_LABELS.river}>{FEATURE_ICONS.river}</span>}
+            {flags.hasResource && <span style={styles.cityIcon} title={FEATURE_LABELS.resource}>{FEATURE_ICONS.resource}</span>}
+            {flags.hasReligion && <span style={styles.cityIcon} title={FEATURE_LABELS.religion}>{FEATURE_ICONS.religion}</span>}
+            {flags.hasWonder && <span style={styles.cityIcon} title={FEATURE_LABELS.wonder}>{FEATURE_ICONS.wonder}</span>}
+          </span>
+        )}
         {canShowMap && (
           <button
             style={styles.cityMapBtn}
@@ -773,6 +859,19 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     color: '#8a6a30',
     fontStyle: 'italic',
+  },
+  cityIcons: {
+    flexShrink: 0,
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 2,
+    marginLeft: 2,
+    lineHeight: 1,
+  },
+  cityIcon: {
+    fontSize: 10,
+    lineHeight: 1,
+    filter: 'saturate(0.8)',
   },
   nameLink: {
     background: 'none',
