@@ -69,13 +69,15 @@ type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
 // larger exterior clusters become `agricultural`. Ported from V1's
 // `slumThreshold = Math.max(6, Math.round(gridW / 4))` then scaled down
 // because Voronoi polygons are coarser than tiles — megalopolis has ~60–80
-// edge polygons total, not ~180.
+// edge polygons total, not ~180. Thresholds scale up with exterior polygon
+// count: halving POLYGON_COUNTS doubles exterior area for large tiers, so
+// slum clusters are numerically larger for the same visual footprint.
 const SLUM_SIZE_THRESHOLD: Record<CitySize, number> = {
   small: 2,
   medium: 3,
-  large: 4,
-  metropolis: 5,
-  megalopolis: 6,
+  large: 5,
+  metropolis: 6,
+  megalopolis: 12,
 };
 
 // Harbor-detection band — a centroid within this fraction of the canvas

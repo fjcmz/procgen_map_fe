@@ -61,30 +61,30 @@ import type { RiverGenerationResult } from './cityMapRiver';
 // Translate the spec's block-anchored language ("1 market per market block",
 // "1–3 parks scaling with size") into raw polygon counts. The count tables
 // are tuned so total open-space coverage hovers near the spec's "~10% of
-// area" target on cities with 150 / 250 / 350 / 500 / 1000 polygons (since
+// area" target on cities with 75 / 125 / 175 / 250 / 500 polygons (since
 // Lloyd-relaxed polygons have roughly uniform area).
 const MARKET_COUNT: Record<CitySize, number> = {
-  small: 2,
-  medium: 4,
-  large: 5,
-  metropolis: 8,
-  megalopolis: 16,
+  small: 1,
+  medium: 2,
+  large: 3,
+  metropolis: 4,
+  megalopolis: 8,
 };
 const PARK_COUNT: Record<CitySize, number> = {
   small: 1,
   medium: 1,
-  large: 2,
-  metropolis: 2,
-  megalopolis: 3,
+  large: 1,
+  metropolis: 1,
+  megalopolis: 2,
 };
 // Each park BFS-grows from a seed polygon up to this size cap. Larger cities
 // get bigger parks so the visual proportion stays sensible.
 const PARK_MAX_POLYGONS: Record<CitySize, number> = {
   small: 1,
-  medium: 2,
-  large: 2,
-  metropolis: 3,
-  megalopolis: 3,
+  medium: 1,
+  large: 1,
+  metropolis: 2,
+  megalopolis: 2,
 };
 
 export type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
