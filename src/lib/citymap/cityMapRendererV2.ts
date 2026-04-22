@@ -1,12 +1,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // City Map V2 renderer — Voronoi foundation (PR 1) + walls (PR 2) + river /
-// streets / roads / bridges (PR 3) + open spaces (PR 4 slice)
+// streets / roads / bridges (PR 3) + open spaces + landmarks (PR 4 slices)
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles. Every geometric
 // primitive this renderer consumes comes from the polygon graph emitted by
 // `cityMapGeneratorV2.ts` and the polygon-edge traversals done by
 // `cityMapWalls.ts` (PR 2) / `cityMapRiver.ts` + `cityMapNetwork.ts` (PR 3) /
-// `cityMapOpenSpaces.ts` (PR 4 — open spaces slice).
+// `cityMapOpenSpaces.ts` + `cityMapLandmarks.ts` (PR 4 slices).
 //
 //   Layer 1  — flat cream base #ece5d3
 //   Layer 2  — faint Voronoi polygon edges (the "organic cadastral grid")
@@ -20,8 +20,12 @@
 //              squares + markets, greenish fills for parks, plus market
 //              stall dots and park trees scattered inside each polygon
 //   Layer 11 — walls + towers + gate doors (PR 2)  [polygon-edge wall path]
-//   …gap…    — Layers 3, 4, 10, 12, 13 reserved for PR 4 (remainder) + PR 5
-//              (docks, sprawl, blocks, buildings, landmarks, labels)
+//   Layer 12 — landmarks (PR 4 slice): castle / palace / temple / monument
+//              glyphs centered on `polygon.site`, sized from √polygon.area,
+//              "all ink on white" per spec. CASTLE / PALACE labels below
+//              capital glyphs.
+//   …gap…    — Layers 3, 4, 10, 13 reserved for PR 5 (docks, sprawl,
+//              buildings, labels)
 //   Layer 14 — top-centered city name + "V2" QA tag
 //
 // LAYER ORDER NOTE — open spaces are drawn BEFORE roads / streets / walls so
@@ -41,7 +45,12 @@
 //      data model. The polygons ARE the cadastral grid in V2.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { CityEnvironment, CityMapDataV2, CityPolygon } from './cityMapTypesV2';
+import type {
+  CityEnvironment,
+  CityLandmarkV2,
+  CityMapDataV2,
+  CityPolygon,
+} from './cityMapTypesV2';
 import { seededPRNG } from '../terrain/noise';
 
 const BASE_FILL = '#ece5d3';
@@ -107,6 +116,23 @@ const PARK_TREE_RADIUS = 3;
 const PARK_TREES_PER_POLYGON_MIN = 4;
 const PARK_TREES_PER_POLYGON_MAX = 10;
 
+// Layer 12 — landmark styling (PR 4 slice). Glyphs are sized from polygon
+// geometry (NOT from a V1 tileSize — V2 has no tile concept). Each glyph is
+// drawn as a small rectangular plaque ("all ink on white" per spec line 67),
+// centered on `polygon.site` and scaled by `√polygon.area`. Clamp keeps the
+// glyph readable on 150-polygon small cities and prevents megalopolis-tier
+// large polygons from blowing up the silhouette. Palette mirrors V1
+// `cityMapRenderer.ts:14` so the visual reading stays continuous.
+const LANDMARK_FILL = '#f5f0e8';
+const LANDMARK_INK = '#2a241c';
+const LANDMARK_SIZE_MIN = 20;
+const LANDMARK_SIZE_MAX = 36;
+const LANDMARK_SIZE_COEFF = 0.7; // multiplies √polygon.area before clamping
+const LANDMARK_LABEL_TYPES: ReadonlySet<CityLandmarkV2['type']> = new Set<CityLandmarkV2['type']>([
+  'castle',
+  'palace',
+]);
+
 export function renderCityMapV2(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
@@ -138,12 +164,12 @@ export function renderCityMapV2(
     ctx.stroke();
   }
 
-  // ── Layers 3, 4, 10, 12, 13 reserved for PR 4 (remainder) + PR 5 ───────
+  // ── Layers 3, 4, 10, 13 reserved for PR 5 ──────────────────────────────
   //   Layer 3  — docks (PR 5, env.waterSide hatching)
   //   Layer 4  — outside-walls sprawl (PR 5)
   //   Layer 10 — buildings (PR 5)
-  //   Layer 12 — landmarks: castle / palace / temple / monument (PR 4 next)
   //   Layer 13 — district labels (PR 5)
+  //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
 
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
   // [Voronoi-polygon] Each entry references polygons by id; the renderer
@@ -179,6 +205,13 @@ export function renderCityMapV2(
   // [Voronoi-polygon] The wall path is a closed polyline of polygon-edge
   // endpoints (pixel coords). See cityMapWalls.ts for the generator.
   drawWallsAndGates(ctx, data);
+
+  // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
+  // [Voronoi-polygon] Each landmark references one `polygon.id`; we center
+  // the glyph on `polygon.site` and size it from `√polygon.area`. Drawn on
+  // top of walls so capital castle/palace silhouettes read cleanly over the
+  // wall stud ink. See cityMapLandmarks.ts for the polygon-graph placement.
+  drawLandmarks(ctx, data);
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
   ctx.fillStyle = CITY_NAME_INK;
@@ -582,4 +615,213 @@ function scatterInsidePolygon(
 
 function randIntInclusive(rng: () => number, lo: number, hi: number): number {
   return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 4 (slice) — landmarks (castle / palace / temple / monument) on Layer 12
+// ─────────────────────────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Render every entry in `data.landmarks`. Each entry's
+// `polygonId` indexes into `data.polygons`; we center the glyph on
+// `polygon.site` and size it from `√polygon.area` (clamped to a legibility
+// window — V2 has NO tileSize concept). All glyphs are "ink on white" per
+// spec line 67: a pale plaque rect + dark silhouette details. Labels for
+// CASTLE / PALACE mirror V1 `cityMapRenderer.ts:398-409` so major capital
+// landmarks remain readable at a glance.
+//
+// No RNG — every dimension derives from `polygon.area` + `polygon.site`
+// so re-rendering the same city is byte-stable without needing a dedicated
+// render-side seed stream.
+function drawLandmarks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.landmarks.length === 0) return;
+
+  for (const lm of data.landmarks) {
+    const polygon = data.polygons[lm.polygonId];
+    if (!polygon) continue;
+    const size = landmarkGlyphSize(polygon);
+    const [cx, cy] = polygon.site;
+    switch (lm.type) {
+      case 'castle':   drawCastleGlyph(ctx, cx, cy, size); break;
+      case 'palace':   drawPalaceGlyph(ctx, cx, cy, size); break;
+      case 'temple':   drawTempleGlyph(ctx, cx, cy, size); break;
+      case 'monument': drawMonumentGlyph(ctx, cx, cy, size); break;
+    }
+  }
+
+  // Labels below castle / palace (mirrors V1 label pass) — centered on the
+  // polygon site, placed just below the glyph bounding box.
+  ctx.fillStyle = LANDMARK_INK;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  for (const lm of data.landmarks) {
+    if (!LANDMARK_LABEL_TYPES.has(lm.type)) continue;
+    const polygon = data.polygons[lm.polygonId];
+    if (!polygon) continue;
+    const size = landmarkGlyphSize(polygon);
+    const [cx, cy] = polygon.site;
+    const fontPx = Math.max(8, Math.round(size * 0.35));
+    ctx.font = `bold ${fontPx}px Georgia, 'Times New Roman', serif`;
+    ctx.fillText(lm.type.toUpperCase(), cx, cy + size / 2 + 1);
+  }
+}
+
+// [Voronoi-polygon] Derive the glyph bounding-box side length from polygon
+// area. `√area` gives a characteristic polygon "radius"; the 0.7 coefficient
+// fits the glyph inside the polygon even for elongated cells. Clamped to
+// `[20, 36]` px so small-tier cities (150 polygons ⇒ larger average area)
+// and megalopolis-tier cities (1000 polygons ⇒ smaller average area) both
+// produce legible silhouettes.
+function landmarkGlyphSize(polygon: CityPolygon): number {
+  const raw = Math.sqrt(polygon.area) * LANDMARK_SIZE_COEFF;
+  return Math.max(LANDMARK_SIZE_MIN, Math.min(LANDMARK_SIZE_MAX, raw));
+}
+
+// Ports of V1 glyphs at `cityMapRenderer.ts:412-554`. Signatures switched
+// from (ctx, px, py, tileSize) — a top-left tile anchor — to
+// (ctx, cx, cy, size) — a polygon-site center. Visual shape unchanged: each
+// glyph still inscribes itself in an `size × size` bounding box centered
+// on (cx, cy). No tile math inside the helpers; they operate purely on
+// their size parameter.
+
+function drawCastleGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  const inset = size * 0.12;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = LANDMARK_INK;
+  ctx.lineWidth = Math.max(1, size * 0.06);
+  ctx.strokeRect(x, y, w, h);
+
+  // Crenellated top — alternating notches (V1 parity: 5 notches).
+  const notches = 5;
+  const notchW = w / (notches * 2 - 1);
+  ctx.fillStyle = LANDMARK_INK;
+  for (let i = 0; i < notches; i++) {
+    const nx = x + i * 2 * notchW;
+    ctx.fillRect(nx, y - notchW * 0.6, notchW, notchW * 0.6);
+  }
+
+  // Tower circles at the 4 corners.
+  const r = Math.max(2, size * 0.1);
+  ctx.fillStyle = LANDMARK_FILL;
+  for (const [tx, ty] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+    ctx.beginPath();
+    ctx.arc(tx, ty, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Central door.
+  const doorW = w * 0.2;
+  const doorH = h * 0.4;
+  ctx.fillStyle = LANDMARK_INK;
+  ctx.fillRect(x + w / 2 - doorW / 2, y + h - doorH, doorW, doorH);
+}
+
+function drawPalaceGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  const inset = size * 0.08;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = LANDMARK_INK;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.strokeRect(x, y, w, h);
+
+  // Inner courtyard.
+  const cInset = Math.max(2, size * 0.22);
+  ctx.strokeRect(x + cInset, y + cInset, w - cInset * 2, h - cInset * 2);
+
+  // Corner wings (solid squares).
+  const sq = Math.max(2, size * 0.14);
+  ctx.fillStyle = LANDMARK_INK;
+  for (const [wx, wy] of [[x, y], [x + w - sq, y], [x, y + h - sq], [x + w - sq, y + h - sq]]) {
+    ctx.fillRect(wx, wy, sq, sq);
+  }
+}
+
+function drawTempleGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  const inset = size * 0.15;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = LANDMARK_FILL;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = LANDMARK_INK;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.strokeRect(x, y, w, h);
+
+  // Dome (half circle at top) + cross (V1 parity).
+  const mx = x + w / 2;
+  const domeR = Math.min(w, h) * 0.22;
+  ctx.fillStyle = LANDMARK_INK;
+  ctx.beginPath();
+  ctx.arc(mx, y + h * 0.45, domeR, Math.PI, 0, false);
+  ctx.fill();
+
+  // Cross centered in the lower half.
+  const crossY = y + h * 0.55;
+  const crossH = h * 0.3;
+  const crossW = w * 0.18;
+  const armW = crossH * 0.3;
+  ctx.fillRect(mx - crossW / 2, crossY + armW, crossW, armW);
+  ctx.fillRect(mx - armW / 2, crossY, armW, crossH);
+}
+
+function drawMonumentGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
+  const topY = cy - size / 2 + size * 0.18;
+  const baseY = cy - size / 2 + size * 0.85;
+  const halfW = size * 0.12;
+
+  // Obelisk: tapered rectangle with a pointed cap.
+  ctx.fillStyle = LANDMARK_INK;
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW * 0.55, topY);
+  ctx.lineTo(cx + halfW * 0.55, topY);
+  ctx.lineTo(cx + halfW, baseY);
+  ctx.lineTo(cx - halfW, baseY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Cap triangle.
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW * 0.55, topY);
+  ctx.lineTo(cx, topY - size * 0.08);
+  ctx.lineTo(cx + halfW * 0.55, topY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Base step.
+  const stepW = size * 0.42;
+  const stepH = size * 0.07;
+  ctx.fillRect(cx - stepW / 2, baseY, stepW, stepH);
 }

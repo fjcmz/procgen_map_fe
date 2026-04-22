@@ -29,6 +29,7 @@ import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks } from './cityMapBlocks';
+import { generateLandmarks } from './cityMapLandmarks';
 
 // Single source of truth for V2 polygon counts per city-size tier. Exported so
 // PR 2-5 tests and helpers reference the same table rather than redefining it.
@@ -257,6 +258,23 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
+  // PR 4 (landmarks slice) — capital castle/palace + temple-per-religion +
+  // monument-per-wonder. Every landmark anchors to one `polygon.id`, sourced
+  // from civic / market blocks with a shared `used` set enforcing de-dup
+  // (spec line 66). Three ordered passes fan off dedicated RNG sub-streams
+  // (`_landmarks_capitals` / `_landmarks_temples` / `_landmarks_monuments`)
+  // so future landmark kinds can be inserted without shifting existing
+  // seeds. See `cityMapLandmarks.ts` for the full polygon-graph algorithm.
+  const landmarks = generateLandmarks(
+    seed,
+    cityName,
+    env,
+    polygons,
+    blocks,
+    openSpaces,
+    CANVAS_SIZE,
+  );
+
   return {
     canvasSize: CANVAS_SIZE,
     polygonCount,
@@ -270,8 +288,8 @@ export function generateCityMapV2(
     blocks,
     openSpaces,
     buildings: [],
-    // TODO PR 4 (remainder): castle / palace / temple / monument placements.
-    landmarks: [],
+    landmarks,
+    // TODO PR 5: rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
     districtLabels: [],
   };
 }
