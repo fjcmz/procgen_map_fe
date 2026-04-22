@@ -509,78 +509,60 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
 // PR 5 (slice) — buildings on Layer 10
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Layer 10 — building ink. Solid rects use fillRect; hollow rects use
-// strokeRect inset by half the lineWidth so the stroke stays inside the
-// rect and the 1 px mortar gap between neighbouring rects reads crisply.
+// Layer 10 — building ink. Solid footprints use fill; hollow footprints use
+// stroke. Buildings are now polygon paths (Voronoi lot insets) rather than
+// axis-aligned rects — each `CityBuildingV2.vertices` holds the inset polygon
+// ring produced by `cityMapBuildings.ts`.
 const BUILDING_INK = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
-// Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c as interior
-// buildings for visual continuity (a thatched hut and a civic block both
-// read as "building"), but with a slightly thinner hollow stroke so sprawl
-// reads visibly airier than the dense interior block packing. The ink is
-// shared with Layer 10 intentionally — per spec line 73, sprawl is just
-// "sparse scattered building rects", not a distinct material.
+// Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
+// interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
 const SPRAWL_STROKE_WIDTH = 0.6;
 
 // [Voronoi-polygon] Render every entry in `data.buildings`. Each building
-// carries a `polygonId` that indexes into `data.polygons`; the generator
-// (cityMapBuildings.ts) has already clipped each rect to the polygon's
-// vertex ring with a 2 px inset from polygon edges. No RNG at render time —
-// every dimension is baked into the CityBuildingV2 rect, so re-rendering is
-// byte-stable without re-running the generator.
+// carries a `vertices` polygon ring (inset from the Voronoi lot boundary by
+// BUILDING_INSET_PX at generation time) and is drawn as a filled or outlined
+// polygon path. No RNG at render time — vertices are baked in at generation.
 function drawBuildings(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.buildings.length === 0) return;
 
-  const halfStroke = BUILDING_STROKE_WIDTH * 0.5;
   ctx.fillStyle = BUILDING_INK;
   ctx.strokeStyle = BUILDING_INK;
   ctx.lineWidth = BUILDING_STROKE_WIDTH;
+  ctx.lineJoin = 'round';
 
   for (const b of data.buildings as CityBuildingV2[]) {
+    if (b.vertices.length < 3) continue;
+    traceClosedRing(ctx, b.vertices);
     if (b.solid) {
-      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.fill();
     } else {
-      // Half-lineWidth inset keeps the stroke inside the rect bounds —
-      // without it, the stroke would bleed out by `BUILDING_STROKE_WIDTH / 2`
-      // and eat into the 1 px mortar gap maintained by the generator.
-      ctx.strokeRect(
-        b.x + halfStroke,
-        b.y + halfStroke,
-        b.w - BUILDING_STROKE_WIDTH,
-        b.h - BUILDING_STROKE_WIDTH,
-      );
+      ctx.stroke();
     }
   }
 }
 
 // [Voronoi-polygon] Render every entry in `data.sprawlBuildings`. Each sprawl
-// rect carries a `polygonId` that indexes into `data.polygons`; the generator
-// (cityMapSprawl.ts) has already clipped each rect to the polygon's vertex
-// ring with a 2 px inset from polygon edges. Same rect-drawing logic as
-// `drawBuildings` — only the stroke width differs (thinner, so sprawl reads
-// airier). No RNG at render time — every dimension is baked into the
-// CityBuildingV2 at generation time, so re-rendering is byte-stable without
-// re-running the generator.
+// building carries a `vertices` polygon ring produced by shrinking the parent
+// polygon toward its centroid (see `cityMapSprawl.ts`). Same polygon-path draw
+// logic as `drawBuildings` — only ink / stroke width differ.
 function drawSprawl(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.sprawlBuildings.length === 0) return;
 
-  const halfStroke = SPRAWL_STROKE_WIDTH * 0.5;
   ctx.fillStyle = SPRAWL_INK;
   ctx.strokeStyle = SPRAWL_INK;
   ctx.lineWidth = SPRAWL_STROKE_WIDTH;
+  ctx.lineJoin = 'round';
 
   for (const b of data.sprawlBuildings as CityBuildingV2[]) {
+    if (b.vertices.length < 3) continue;
+    traceClosedRing(ctx, b.vertices);
     if (b.solid) {
-      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.fill();
     } else {
-      ctx.strokeRect(
-        b.x + halfStroke,
-        b.y + halfStroke,
-        b.w - SPRAWL_STROKE_WIDTH,
-        b.h - SPRAWL_STROKE_WIDTH,
-      );
+      ctx.stroke();
     }
   }
 }
@@ -694,6 +676,18 @@ function fillOpenSpaceKind(
       ctx.stroke();
     }
   }
+}
+
+// [Voronoi-polygon] Trace a raw vertex array as a closed ring. Used for
+// building / sprawl footprints whose vertices come directly from the
+// generator (not wrapped in a CityPolygon).
+function traceClosedRing(ctx: CanvasRenderingContext2D, verts: [number, number][]): void {
+  ctx.beginPath();
+  ctx.moveTo(verts[0][0], verts[0][1]);
+  for (let i = 1; i < verts.length; i++) {
+    ctx.lineTo(verts[i][0], verts[i][1]);
+  }
+  ctx.closePath();
 }
 
 // [Voronoi-polygon] Trace `polygon.vertices` as a closed ring on the
