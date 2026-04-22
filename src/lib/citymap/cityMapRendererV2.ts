@@ -1,7 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // City Map V2 renderer — Voronoi foundation (PR 1) + walls (PR 2) + river /
 // streets / roads / bridges (PR 3) + open spaces + landmarks (PR 4 slices)
-// + buildings + outside-walls sprawl (PR 5 slices)
+// + buildings + outside-walls sprawl (PR 5 slices) + ruin overlay
+// ─────────────────────────────────────────────────────────────────────────────
+// RUIN OVERLAY — when `env.isRuin` is true, the renderer switches several
+// layers into a "decayed" mode: roads/streets are drawn per-segment with a
+// random fraction dropped (patchy, missing edges), a fraction of interior
+// buildings and sprawl rects are skipped entirely ("collapsed"), and a final
+// overgrowth pass fills a fraction of non-water polygons with a semi-
+// transparent green reclaim colour and stipples green moss dots on the
+// remaining buildings. The ruin overlay is render-only — the generator and
+// its RNG streams are untouched, so non-ruin cities are byte-identical to
+// pre-overlay output. All ruin randomness flows through a dedicated seeded
+// stream `${seed}_city_${cityName}_ruin_render` (seed-stable per city).
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles. Every geometric
 // primitive this renderer consumes comes from the polygon graph emitted by
@@ -196,6 +207,13 @@ export function renderCityMapV2(
 ): void {
   const size = data.canvasSize;
 
+  // Ruin overlay: when active, per-layer rolls come from this dedicated
+  // stream so ruin output is seed-stable per city and cannot perturb any
+  // other RNG stream used by the non-ruin renderer.
+  const ruinRng: (() => number) | null = env.isRuin
+    ? seededPRNG(`${seed}_city_${cityName}_ruin_render`)
+    : null;
+
   // ── Layer 1: flat cream base ────────────────────────────────────────────
   ctx.fillStyle = BASE_FILL;
   ctx.fillRect(0, 0, size, size);
@@ -241,16 +259,20 @@ export function renderCityMapV2(
   drawBlockBackgrounds(ctx, data, env);
 
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
-  drawSprawl(ctx, data);
+  drawSprawl(ctx, data, ruinRng);
 
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
   drawOpenSpaces(ctx, data, seed, cityName);
 
   // ── Layer 6: streets (PR 3) ────────────────────────────────────────────
-  drawPathList(ctx, data.streets, STREET_INK, STREET_WIDTH);
+  if (ruinRng) {
+    drawPatchyPathList(ctx, data.streets, STREET_INK, STREET_WIDTH, ruinRng, RUIN_STREET_DROP_PROB);
+  } else {
+    drawPathList(ctx, data.streets, STREET_INK, STREET_WIDTH);
+  }
 
   // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
-  drawBuildings(ctx, data, seed, cityName);
+  drawBuildings(ctx, data, seed, cityName, ruinRng);
 
   // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
   drawLandmarks(ctx, data);
@@ -270,8 +292,12 @@ export function renderCityMapV2(
   // river edge, so they visually approach the bridge perpendicularly.
   // Exit roads share the same style and are drawn in the same pass so they
   // read as a continuous road network from boundary through gate to center.
-  drawRoadsWithBridgeRedirect(ctx, data);
-  drawExitRoads(ctx, data);
+  drawRoadsWithBridgeRedirect(ctx, data, ruinRng);
+  if (ruinRng) {
+    drawPatchyPathList(ctx, data.exitRoads, ROAD_INK, ROAD_WIDTH, ruinRng, RUIN_EXIT_ROAD_DROP_PROB);
+  } else {
+    drawExitRoads(ctx, data);
+  }
 
   // ── Layer 5: river (PR 3) ──────────────────────────────────────────────
   drawRiver(ctx, data);
@@ -280,6 +306,14 @@ export function renderCityMapV2(
   // Each bridge is now a small rect PERPENDICULAR to the river edge, drawn
   // at the edge midpoint so it reads as a proper crossing of the channel.
   drawBridges(ctx, data);
+
+  // ── Ruin overlay pass — semi-transparent overgrowth polygons + moss on
+  //     remaining buildings. Drawn late (after all infrastructure) so the
+  //     moss/green reclaim reads on top of everything. Alpha on the polygon
+  //     fill keeps the underlying layers visible through the green.
+  if (ruinRng) {
+    drawRuinOvergrowth(ctx, data, ruinRng);
+  }
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
   ctx.fillStyle = CITY_NAME_INK;
@@ -536,14 +570,50 @@ function drawPathList(
   ctx.stroke();
 }
 
+// [Voronoi-polygon] Ruin-mode variant of `drawPathList` — iterates each
+// consecutive vertex pair as an independent segment and skips a fraction
+// (`dropProb` coin flip per segment). Butt line cap so gaps read as gaps;
+// a round cap would bleed into short gaps and mask them. Kept segments are
+// batched into a single beginPath/stroke for performance.
+function drawPatchyPathList(
+  ctx: CanvasRenderingContext2D,
+  paths: [number, number][][],
+  ink: string,
+  width: number,
+  rng: () => number,
+  dropProb: number,
+): void {
+  if (paths.length === 0) return;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (rng() < dropProb) continue;
+      ctx.moveTo(path[i][0], path[i][1]);
+      ctx.lineTo(path[i + 1][0], path[i + 1][1]);
+    }
+  }
+  ctx.stroke();
+}
+
 // [Voronoi-polygon] Draw roads with a visual redirect through every bridge
 // midpoint. When the path contains an edge [A→B] that is a bridge, the road
 // is drawn as: ...prev → M → next... (where M is the bridge midpoint) instead
 // of ...prev → A → B → next..., so the approach visually bends toward the
 // bridge crossing rather than running along the river channel.
+//
+// When `ruinRng` is non-null, each segment of the redirected path rolls an
+// independent drop probability — missing segments render as gaps, producing
+// the "patchy roads" look required for ruin cities. Butt line cap keeps the
+// gaps visible (a round cap would bleed into and mask short gaps).
 function drawRoadsWithBridgeRedirect(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
+  ruinRng: (() => number) | null = null,
 ): void {
   if (data.roads.length === 0) return;
 
@@ -568,7 +638,7 @@ function drawRoadsWithBridgeRedirect(
 
   ctx.strokeStyle = ROAD_INK;
   ctx.lineWidth = ROAD_WIDTH;
-  ctx.lineCap = 'round';
+  ctx.lineCap = ruinRng ? 'butt' : 'round';
   ctx.lineJoin = 'round';
 
   for (const road of data.roads) {
@@ -594,12 +664,23 @@ function drawRoadsWithBridgeRedirect(
       }
     }
 
-    ctx.beginPath();
-    ctx.moveTo(redirected[0][0], redirected[0][1]);
-    for (let i = 1; i < redirected.length; i++) {
-      ctx.lineTo(redirected[i][0], redirected[i][1]);
+    if (ruinRng) {
+      // Patchy: draw each segment independently and skip some.
+      ctx.beginPath();
+      for (let i = 0; i < redirected.length - 1; i++) {
+        if (ruinRng() < RUIN_ROAD_DROP_PROB) continue;
+        ctx.moveTo(redirected[i][0], redirected[i][1]);
+        ctx.lineTo(redirected[i + 1][0], redirected[i + 1][1]);
+      }
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(redirected[0][0], redirected[0][1]);
+      for (let i = 1; i < redirected.length; i++) {
+        ctx.lineTo(redirected[i][0], redirected[i][1]);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
   }
 }
 
@@ -684,16 +765,52 @@ const BUILDING_STROKE_WIDTH = 0.75;
 const SPRAWL_INK = '#2a241c';
 const SPRAWL_STROKE_WIDTH = 0.6;
 
+// ── Ruin overlay constants ──────────────────────────────────────────────────
+// Probabilities for the render-only decay mode. Each segment / building /
+// polygon gets an independent coin flip through the `_ruin_render` stream.
+const RUIN_ROAD_DROP_PROB = 0.40;      // per road segment, drop (gap)
+const RUIN_STREET_DROP_PROB = 0.55;    // streets are smaller roads — more ruined
+const RUIN_EXIT_ROAD_DROP_PROB = 0.35;
+const RUIN_BUILDING_COLLAPSE_PROB = 0.40;  // per building, don't draw at all
+const RUIN_SPRAWL_COLLAPSE_PROB = 0.50;
+const RUIN_OVERGROWTH_POLY_PROB = 0.30;    // per non-water polygon, fill green
+const RUIN_OVERGROWTH_BLDG_PROB = 0.45;    // per standing building, add moss
+const RUIN_OVERGROWTH_MOSS_DOT_MIN = 1;    // dots per mossy building
+const RUIN_OVERGROWTH_MOSS_DOT_MAX = 3;
+
+// Colors. Overgrowth fill is semi-transparent so the underlying base/streets
+// bleed through — reads as "reclaimed ground" rather than a solid layer.
+const RUIN_OVERGROWTH_FILL = 'rgba(70, 115, 40, 0.38)';
+const RUIN_OVERGROWTH_EDGE = 'rgba(40, 80, 20, 0.45)';
+const RUIN_MOSS_FILL = '#3d6a1c';
+const RUIN_MOSS_EDGE = 'rgba(20, 50, 5, 0.7)';
+const RUIN_MOSS_RADIUS = 1.8;
+
+// Standing buildings in a ruin city get a darker, cooler ink to read as
+// weathered / soot-stained stone. Replaces the three-grey fill cycle.
+const RUIN_BUILDING_FILL = '#9a948a';
+const RUIN_BUILDING_OUTLINE = '#20180f';
+const RUIN_SPRAWL_INK = '#201810';
+
 // [Voronoi-polygon] Render every entry in `data.buildings`. Each building
 // carries a `vertices` polygon ring (inset from the Voronoi lot boundary by
 // BUILDING_INSET_PX at generation time) and is drawn as a filled or outlined
 // polygon path. Fill colour is one of three neutral light greys chosen per
 // building via a render-side seeded RNG (`_buildings_render` sub-stream).
+//
+// When `ruinRng` is non-null, each building rolls an independent collapse
+// probability: skipped buildings are not drawn at all (they become rubble
+// ground — the ruin overgrowth pass may later place moss there). Remaining
+// buildings render with a darker weathered fill + stronger outline so the
+// ruin city reads as clearly decayed. The `fillRng` color-cycle stream is
+// still advanced for every building regardless of collapse status so the
+// color choice for the standing-only subset stays seed-stable.
 function drawBuildings(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
   seed: string,
   cityName: string,
+  ruinRng: (() => number) | null = null,
 ): void {
   if (data.buildings.length === 0) return;
 
@@ -703,10 +820,15 @@ function drawBuildings(
 
   for (const b of data.buildings as CityBuildingV2[]) {
     if (b.vertices.length < 3) continue;
+    // Advance the non-ruin fill stream even when collapsing so the stream
+    // position matches non-ruin runs up to any survivor.
+    const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
+    if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
+
     traceClosedRing(ctx, b.vertices);
-    ctx.fillStyle = BUILDING_FILLS[Math.floor(fillRng() * BUILDING_FILLS.length)];
+    ctx.fillStyle = ruinRng ? RUIN_BUILDING_FILL : BUILDING_FILLS[fillIdx];
     ctx.fill();
-    ctx.strokeStyle = BUILDING_OUTLINE;
+    ctx.strokeStyle = ruinRng ? RUIN_BUILDING_OUTLINE : BUILDING_OUTLINE;
     ctx.stroke();
   }
 }
@@ -715,16 +837,26 @@ function drawBuildings(
 // building carries a `vertices` polygon ring produced by shrinking the parent
 // polygon toward its centroid (see `cityMapSprawl.ts`). Same polygon-path draw
 // logic as `drawBuildings` — only ink / stroke width differ.
-function drawSprawl(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+//
+// When `ruinRng` is non-null, each sprawl building rolls an independent
+// collapse probability (higher than interior buildings — outside-walls
+// structures are typically wooden / wattle and would decay faster).
+function drawSprawl(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  ruinRng: (() => number) | null = null,
+): void {
   if (data.sprawlBuildings.length === 0) return;
 
-  ctx.fillStyle = SPRAWL_INK;
-  ctx.strokeStyle = SPRAWL_INK;
+  const ink = ruinRng ? RUIN_SPRAWL_INK : SPRAWL_INK;
+  ctx.fillStyle = ink;
+  ctx.strokeStyle = ink;
   ctx.lineWidth = SPRAWL_STROKE_WIDTH;
   ctx.lineJoin = 'round';
 
   for (const b of data.sprawlBuildings as CityBuildingV2[]) {
     if (b.vertices.length < 3) continue;
+    if (ruinRng && ruinRng() < RUIN_SPRAWL_COLLAPSE_PROB) continue;
     traceClosedRing(ctx, b.vertices);
     if (b.solid) {
       ctx.fill();
@@ -732,6 +864,67 @@ function drawSprawl(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
       ctx.stroke();
     }
   }
+}
+
+// [Voronoi-polygon] Ruin overgrowth post-pass. Two sub-passes:
+//   1. Per non-water polygon, flip a coin — on hit, fill the polygon's ring
+//      with a semi-transparent forest green (alpha 0.38) so underlying
+//      streets / buildings / walls bleed through as faded outlines. Reads as
+//      "nature reclaiming the district". A thin matching edge stroke gives
+//      the overgrowth a visible perimeter without solidifying the fill.
+//   2. Per building (interior + sprawl), flip a coin — on hit, stipple 1–3
+//      small filled green dots at random vertices of the building ring to
+//      suggest moss / vines on the remaining walls.
+//
+// Runs late (after every infrastructure + building layer) so the reclaim
+// pass sits on top of all the decayed structure. Drawn before the city
+// name label so the name stays readable.
+function drawRuinOvergrowth(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  rng: () => number,
+): void {
+  // Build O(1) water-polygon lookup. `waterPolygonIds` is a sorted number[].
+  const waterIds = new Set<number>(data.waterPolygonIds);
+
+  // Pass 1 — polygon overgrowth fills.
+  ctx.fillStyle = RUIN_OVERGROWTH_FILL;
+  ctx.strokeStyle = RUIN_OVERGROWTH_EDGE;
+  ctx.lineWidth = 0.75;
+  ctx.lineJoin = 'round';
+  for (const polygon of data.polygons) {
+    if (waterIds.has(polygon.id)) continue;
+    if (polygon.vertices.length < 3) continue;
+    if (rng() >= RUIN_OVERGROWTH_POLY_PROB) continue;
+    tracePolygonRing(ctx, polygon);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Pass 2 — moss dots on interior buildings + sprawl buildings. Each
+  // building rolls a coin; on hit, scatter a few dots at randomly chosen
+  // vertices of the building ring (vertices sit near walls, which is where
+  // moss reads naturally). Use the same ruin RNG so the whole overgrowth
+  // layer is seed-stable.
+  ctx.fillStyle = RUIN_MOSS_FILL;
+  ctx.strokeStyle = RUIN_MOSS_EDGE;
+  ctx.lineWidth = 0.5;
+  const stippleBuilding = (verts: [number, number][]) => {
+    if (verts.length < 3) return;
+    if (rng() >= RUIN_OVERGROWTH_BLDG_PROB) return;
+    const dots = RUIN_OVERGROWTH_MOSS_DOT_MIN +
+      Math.floor(rng() * (RUIN_OVERGROWTH_MOSS_DOT_MAX - RUIN_OVERGROWTH_MOSS_DOT_MIN + 1));
+    for (let i = 0; i < dots; i++) {
+      const vi = Math.floor(rng() * verts.length);
+      const [vx, vy] = verts[vi];
+      ctx.beginPath();
+      ctx.arc(vx, vy, RUIN_MOSS_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+  };
+  for (const b of data.buildings) stippleBuilding(b.vertices);
+  for (const b of data.sprawlBuildings) stippleBuilding(b.vertices);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
