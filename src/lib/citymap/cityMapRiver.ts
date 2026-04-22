@@ -86,10 +86,24 @@ export function generateRiver(
   polygons: CityPolygon[],
   graph: PolygonEdgeGraph,
   canvasSize: number,
+  waterPolygonIds: Set<number> = new Set(),
 ): RiverGenerationResult | null {
   if (!env.hasRiver) return null;
 
   const rng = seededPRNG(`${seed}_city_${cityName}_river`);
+
+  // ── Water-only edges ──────────────────────────────────────────────────
+  // [Voronoi-polygon] An edge is "water-only" when every polygon that owns
+  // it is a water polygon. The river must never traverse these — it stops
+  // at the shoreline (a water↔land polygon boundary), not inside open water.
+  const waterOnlyEdgeKeys = new Set<string>();
+  if (waterPolygonIds.size > 0) {
+    for (const [eKey, rec] of graph.edges) {
+      if (rec.polyIds.every(id => waterPolygonIds.has(id))) {
+        waterOnlyEdgeKeys.add(eKey);
+      }
+    }
+  }
 
   // ── Boundary buckets ──────────────────────────────────────────────────
   // [Voronoi-polygon] A river endpoint must sit on a canvas side that
@@ -117,6 +131,35 @@ export function generateRiver(
       if (vy >= canvasSize - SIDE_EPSILON_PX) buckets.south.push(key);
       if (vx <= SIDE_EPSILON_PX) buckets.west.push(key);
       if (vx >= canvasSize - SIDE_EPSILON_PX) buckets.east.push(key);
+    }
+  }
+
+  // ── Shoreline endpoint override ───────────────────────────────────────
+  // [Voronoi-polygon] For coastal cities the water-side endpoint bucket
+  // is replaced with shoreline vertices — vertices shared by a water
+  // polygon and a land polygon. This ensures the river ends exactly at
+  // the water's edge rather than routing through open-water polygon
+  // interiors to reach the canvas boundary.
+  if (waterPolygonIds.size > 0 && env.waterSide) {
+    const shorelineKeys: string[] = [];
+    const shorelineSeen = new Set<string>();
+    for (const [, rec] of graph.edges) {
+      if (
+        rec.polyIds.length === 2 &&
+        rec.polyIds.some(id => waterPolygonIds.has(id)) &&
+        rec.polyIds.some(id => !waterPolygonIds.has(id))
+      ) {
+        for (const pt of [rec.a, rec.b]) {
+          const k = vertexKey(pt);
+          if (!shorelineSeen.has(k)) {
+            shorelineSeen.add(k);
+            shorelineKeys.push(k);
+          }
+        }
+      }
+    }
+    if (shorelineKeys.length > 0) {
+      buckets[env.waterSide] = shorelineKeys;
     }
   }
 
@@ -182,8 +225,11 @@ export function generateRiver(
   const mainCost = (
     _currKey: string,
     _currPoint: Point,
-    nb: { edgeLen: number },
-  ) => nb.edgeLen + rng() * meanderWeight;
+    nb: { edgeLen: number; edgeKey: string },
+  ) => {
+    if (waterOnlyEdgeKeys.has(nb.edgeKey)) return Infinity;
+    return nb.edgeLen + rng() * meanderWeight;
+  };
   const mainKeys = aStarEdgeGraph(graph, startKey, endKey, mainCost);
   if (!mainKeys || mainKeys.length < 2) return null;
 
@@ -242,8 +288,9 @@ export function generateRiver(
       const branchCost = (
         _currKey: string,
         _currPoint: Point,
-        nb: { point: Point; edgeLen: number },
+        nb: { point: Point; edgeLen: number; edgeKey: string },
       ) => {
+        if (waterOnlyEdgeKeys.has(nb.edgeKey)) return Infinity;
         let minD2 = Infinity;
         for (const sp of stretchPoints) {
           const dx = nb.point[0] - sp[0];
