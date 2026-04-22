@@ -3,47 +3,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// This module walks polygon-edge boundaries around a PRE-COMPUTED interior
-// polygon set and picks gates from polygon edges — NEVER tile edges / tile
-// corners. The spec text ("tile count", "tile corners") is legacy language
-// from before PR 1 pivoted to polygons.
-//
-// Footprint selection used to live here as `selectInteriorPolygons` —
-// scoring every non-edge polygon by radial distance + FBM noise and taking
-// a coverage fraction lerp(0.50..0.85) over the size tier. That percentage-
-// based allocation has been removed. The interior set is now produced
-// upstream by `cityMapShape.ts::selectCityFootprint`, which picks an
-// organic shape (spheroid / rectangle / half-sphere / triangle) and
-// allocates an absolute count from `POLYGON_COUNTS[env.size]` out of the
-// fixed 1500-polygon canvas. Walls just trace whatever footprint they're
-// handed.
-//
 // Inputs:
 //   - `CityPolygon[]` (PR 1 output) — supplies `.vertices` (unclosed ring)
 //     and `.neighbors` (Delaunay adjacency).
 //   - `interior: Set<number>` — the pre-computed city footprint from
 //     `cityMapShape.ts`. Walls trace the boundary of this set.
 //   - `env.waterSide` — gate-direction skip (don't open a gate toward water).
+//   - `env.size` — controls gate count (small/medium/large: up to 4;
+//     metropolis: 5–6; megalopolis: 6–8) and whether an inner wall is built.
 //
-// Outputs: `{ wallPath, gates, interiorPolygonIds }` — drop straight into
-// `CityMapDataV2`'s PR 1 `// TODO PR 2:` slots, plus the interior set is
-// echoed back so downstream callers (open-spaces, blocks, sprawl) can
-// query "is this polygon inside the walls?" without re-reading the shape
-// module.
+// Outputs: `WallGenerationResult` — wallPath, gates, interiorPolygonIds,
+//   wallTowers, innerWallPath, innerGates.
 //
-// Reference algorithm shape: `src/lib/citymap/cityMapGenerator.ts` lines
-// 237-358 (V1, tile-based). We mirror the *stages* (collect boundary
-// edges → deterministic edge chain → cardinal-aligned gate pick) but run
-// them on the polygon graph. Do NOT copy V1's tile data structures.
-//
-// PR 3 note: the polygon-edge helpers (`roundV`, `vertexKey`,
-// `canonicalEdgeKey`, `EdgeRecord`, `buildEdgeOwnership`) used to live
-// here. They were lifted into `cityMapEdgeGraph.ts` when rivers / roads /
-// streets appeared as additional callers. This file now imports them
-// and keeps only the wall-specific stages.
+// Polygon-edge helpers (`roundV`, `vertexKey`, `canonicalEdgeKey`, etc.) live
+// in `cityMapEdgeGraph.ts` — do NOT re-declare them here.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
+import { seededPRNG } from '../terrain/noise';
+import type { CityEnvironment, CityPolygon, CitySize } from './cityMapTypesV2';
 import {
   buildEdgeOwnership,
   canonicalEdgeKey,
@@ -51,39 +28,48 @@ import {
   type EdgeRecord,
 } from './cityMapEdgeGraph';
 
-// Cardinal gate alignment threshold. `dot(outward_normal, cardinal) >=
-// this` qualifies an edge as gate-facing. 0.99 matches V1's threshold.
-const GATE_ALIGNMENT_THRESHOLD = 0.99;
-// Weight used when scoring candidate gate edges: projection along the
-// cardinal axis dominates perpendicular distance from center.
-const GATE_PROJ_WEIGHT = 100;
-
 type Point = [number, number];
 type Edge = [Point, Point];
+type GateDir = 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW';
+
+// How many edges to skip between towers along the wall path.
+const TOWER_EDGE_INTERVAL = 3;
+// Dot-product threshold below which a wall bend is "sharp" enough to force a tower.
+const TOWER_SHARP_DOT = 0.3;
+
+// Gate counts per city size tier.
+// metropolis: 5-6, megalopolis: 6-8
+const GATE_COUNT_MIN: Record<CitySize, number> = {
+  small: 2, medium: 3, large: 4, metropolis: 5, megalopolis: 6,
+};
+const GATE_COUNT_MAX: Record<CitySize, number> = {
+  small: 4, medium: 4, large: 4, metropolis: 6, megalopolis: 8,
+};
+
+// Inner wall only for metropolis+.
+const INNER_WALL_SIZES: ReadonlySet<CitySize> = new Set<CitySize>(['metropolis', 'megalopolis']);
+// Fraction of interior polygon count used for inner wall (central core).
+const INNER_WALL_FRACTION = 0.42;
+// Minimum gates on the inner wall.
+const INNER_WALL_MIN_GATES = 3;
 
 export interface WallGenerationResult {
   /** Closed polyline along polygon edges (first === last). Empty on degenerate input. */
   wallPath: Point[];
-  /** Up to 4 gates — one per cardinal direction, skipping `env.waterSide`. */
-  gates: { edge: Edge; dir: 'N' | 'S' | 'E' | 'W' }[];
-  /** Set of polygon ids that lie inside the wall footprint. Empty when wallPath is empty. */
+  /** Gates distributed around the wall (up to 8 for metropolis+). */
+  gates: { edge: Edge; dir: GateDir }[];
+  /** Set of polygon ids that lie inside the wall footprint. */
   interiorPolygonIds: Set<number>;
+  /** Outer wall tower positions (thick dots on wall vertices). */
+  wallTowers: Point[];
+  /** Inner wall path for metropolis+ (empty for smaller cities). */
+  innerWallPath: Point[];
+  /** Inner wall gates (≥3 for metropolis+, empty for smaller cities). */
+  innerGates: { edge: Edge; dir: GateDir }[];
 }
 
 /**
  * Generate the wall footprint + gate list for a V2 city.
- *
- * Operates entirely on the Voronoi polygon graph — no tiles, ever. The
- * footprint (`interior`) is computed upstream by
- * `cityMapShape.ts::selectCityFootprint`; this function just traces its
- * boundary into a closed polyline and picks cardinal gates.
- *
- * Returns `{ wallPath: [], gates: [], interiorPolygonIds: new Set() }` on
- * every degenerate case (footprint too small, failed chain) so the caller
- * can always spread the result without special-casing. The `seed` /
- * `cityName` parameters are kept in the signature for future use (e.g.
- * decorative wall variations on a per-city RNG sub-stream) but are unused
- * today now that the FBM-driven coverage roll has moved upstream.
  */
 export function generateWallsAndGates(
   seed: string,
@@ -93,36 +79,101 @@ export function generateWallsAndGates(
   interior: Set<number>,
   canvasSize: number,
 ): WallGenerationResult {
-  void seed;
-  void cityName;
+  const empty: WallGenerationResult = {
+    wallPath: [], gates: [], interiorPolygonIds: new Set(),
+    wallTowers: [], innerWallPath: [], innerGates: [],
+  };
+  if (interior.size < 3) return empty;
 
-  if (interior.size < 3) return { wallPath: [], gates: [], interiorPolygonIds: new Set() };
+  const rng = seededPRNG(`${seed}_city_${cityName}_walls_gates`);
 
   const edgeOwnership = buildEdgeOwnership(polygons);
   const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership);
   const wallPath = chainWallPath(boundaryEdges);
-  if (wallPath.length < 4) return { wallPath: [], gates: [], interiorPolygonIds: new Set() };
+  if (wallPath.length < 4) return empty;
 
-  const gates = pickGates(wallPath, env.waterSide, canvasSize);
-  return { wallPath, gates, interiorPolygonIds: interior };
+  // Determine gate count for this city size.
+  const gateMin = GATE_COUNT_MIN[env.size];
+  const gateMax = GATE_COUNT_MAX[env.size];
+  const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
+
+  const gates = pickGatesAngular(wallPath, env.waterSide, canvasSize, gateCount, rng);
+  const wallTowers = computeTowerPositions(wallPath);
+
+  // Inner wall for metropolis+.
+  let innerWallPath: Point[] = [];
+  let innerGates: { edge: Edge; dir: GateDir }[] = [];
+
+  if (INNER_WALL_SIZES.has(env.size)) {
+    const innerInterior = selectInnerInterior(polygons, interior, canvasSize);
+    if (innerInterior.size >= 3) {
+      const innerBoundaryEdges = collectWallBoundaryEdges(polygons, innerInterior, edgeOwnership);
+      const innerPath = chainWallPath(innerBoundaryEdges);
+      if (innerPath.length >= 4) {
+        innerWallPath = innerPath;
+        const innerGateCount = Math.max(INNER_WALL_MIN_GATES, GATE_COUNT_MIN[env.size]);
+        innerGates = pickGatesAngular(innerPath, env.waterSide, canvasSize, innerGateCount, rng);
+      }
+    }
+  }
+
+  return { wallPath, gates, interiorPolygonIds: interior, wallTowers, innerWallPath, innerGates };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 1 — polygon-edge ownership map
-// ─────────────────────────────────────────────────────────────────────────────
-// `buildEdgeOwnership`, `roundV`, `vertexKey`, `canonicalEdgeKey`, and the
-// `EdgeRecord` shape live in `cityMapEdgeGraph.ts` — lifted out of this file
-// in PR 3 when rivers/roads/streets became additional callers. The pre-lift
-// helpers were here in PR 2. Do NOT duplicate them again.
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 2 — collect wall boundary edges
+// Inner wall interior selection
 // ─────────────────────────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] An edge is on the wall iff exactly one of its owning
-// polygons is in `interior`. We emit the edge in the polygon's own vertex
-// walk order; the chain step below re-orders into a deterministic CW loop,
-// so we don't need to flip orientations here.
+// [Voronoi-polygon] Score interior polygons by radial distance from canvas
+// center and keep the closest INNER_WALL_FRACTION of them. BFS-prune to
+// connected component containing the most-central polygon.
+function selectInnerInterior(
+  polygons: CityPolygon[],
+  outerInterior: Set<number>,
+  canvasSize: number,
+): Set<number> {
+  const cx = canvasSize / 2;
+  const cy = canvasSize / 2;
+
+  // Score interior polygons by squared distance from canvas center.
+  type Scored = { id: number; d2: number };
+  const scored: Scored[] = [];
+  for (const id of outerInterior) {
+    const p = polygons[id];
+    if (!p) continue;
+    const dx = p.site[0] - cx;
+    const dy = p.site[1] - cy;
+    scored.push({ id, d2: dx * dx + dy * dy });
+  }
+  scored.sort((a, b) => a.d2 - b.d2 || a.id - b.id);
+
+  const targetCount = Math.max(3, Math.round(scored.length * INNER_WALL_FRACTION));
+  const initial = new Set<number>();
+  for (let i = 0; i < Math.min(targetCount, scored.length); i++) {
+    initial.add(scored[i].id);
+  }
+
+  // BFS-prune to connected component from most-central polygon.
+  const seedId = scored[0]?.id;
+  if (seedId == null) return new Set();
+  const inner = new Set<number>([seedId]);
+  const queue: number[] = [seedId];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const nb of polygons[id].neighbors) {
+      if (initial.has(nb) && !inner.has(nb)) {
+        inner.add(nb);
+        queue.push(nb);
+      }
+    }
+  }
+  return inner;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wall boundary edge collection
+// ─────────────────────────────────────────────────────────────────────────────
+
 function collectWallBoundaryEdges(
   polygons: CityPolygon[],
   interior: Set<number>,
@@ -136,9 +187,6 @@ function collectWallBoundaryEdges(
     }
     if (insideCount !== 1) continue;
 
-    // Figure out which owner is the interior one, and emit the edge in
-    // that polygon's local walk direction. This gives `chainWallPath`
-    // a consistent half-edge orientation to stitch from.
     let interiorId = -1;
     for (const id of rec.polyIds) {
       if (interior.has(id)) { interiorId = id; break; }
@@ -157,20 +205,15 @@ function collectWallBoundaryEdges(
         break;
       }
     }
-    // Fallback (shouldn't trigger — owner must contain the edge by construction).
     if (!emitted) edges.push([[rec.a[0], rec.a[1]], [rec.b[0], rec.b[1]]]);
   }
   return edges;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 3 — chain edges into a closed wall polyline
+// Wall path chaining
 // ─────────────────────────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Adjacency walk keyed by canonicalized vertex strings
-// (polygon corners in pixel coords, NOT tile corners). Mirrors V1's
-// `chainWallPath` (cityMapGenerator.ts:237-293) but operates on the
-// polygon-edge graph.
 function chainWallPath(edges: Edge[]): Point[] {
   if (edges.length === 0) return [];
 
@@ -181,7 +224,6 @@ function chainWallPath(edges: Edge[]): Point[] {
     adj.get(k)!.push([b[0], b[1]]);
   }
 
-  // Deterministic start — smallest (y, x) across all outgoing-edge origins.
   let start: Point = edges[0][0];
   for (const [a] of edges) {
     if (a[1] < start[1] || (a[1] === start[1] && a[0] < start[0])) {
@@ -201,10 +243,6 @@ function chainWallPath(edges: Edge[]): Point[] {
 
     let chosenIdx = 0;
     if (outs.length > 1 && prev) {
-      // At forks, prefer straight (dot) then CW turn (cross, y-down). Same
-      // scoring used by V1; because polygon edges are not unit-length, we
-      // normalize both the incoming and candidate outgoing vectors so the
-      // score compares like with like.
       const inDx = current[0] - prev[0];
       const inDy = current[1] - prev[1];
       const inLen = Math.hypot(inDx, inDy) || 1;
@@ -235,46 +273,49 @@ function chainWallPath(edges: Edge[]): Point[] {
     if (vertexKey(current) === vertexKey(start)) break;
   }
 
-  // Require a closed polyline. Degenerate inputs (e.g. disconnected
-  // boundary fragments) return empty so the renderer draws nothing.
   if (path.length < 4) return [];
   if (vertexKey(path[0]) !== vertexKey(path[path.length - 1])) return [];
   return path;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4 — gate selection
+// Angular-sector gate selection (supports 2–8 gates)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Same cardinal-alignment scoring V1 uses, but the edge
-// endpoints come from polygon corners rather than tile corners. Polygon
-// edges are not unit-length, so the outward normal is normalized before
-// the dot-product threshold. Each cardinal direction contributes at most
-// one gate; `env.waterSide` (if set) skips the matching direction entirely.
-function pickGates(
+// [Voronoi-polygon] Divide 360° into `gateCount` equal angular sectors centred
+// on the canvas centre. For each sector, pick the wall edge whose outward normal
+// best aligns to the sector's centre angle. Skip sectors facing `waterSide`.
+// The `rng` is used to add a small random offset to sector start angles so the
+// distribution is less grid-rigid. Uses angular closeness rather than a strict
+// threshold so any reasonable wall topology produces the requested gate count.
+function pickGatesAngular(
   wallPath: Point[],
   waterSide: CityEnvironment['waterSide'],
   canvasSize: number,
-): { edge: Edge; dir: 'N' | 'S' | 'E' | 'W' }[] {
+  gateCount: number,
+  rng: () => number,
+): { edge: Edge; dir: GateDir }[] {
   if (wallPath.length < 2) return [];
 
-  const dirs: Array<{
-    dir: 'N' | 'S' | 'E' | 'W';
-    normal: [number, number];
-    waterKey: 'north' | 'south' | 'east' | 'west';
-  }> = [
-    { dir: 'N', normal: [0, -1], waterKey: 'north' },
-    { dir: 'S', normal: [0, 1],  waterKey: 'south' },
-    { dir: 'E', normal: [1, 0],  waterKey: 'east'  },
-    { dir: 'W', normal: [-1, 0], waterKey: 'west'  },
-  ];
+  const center: Point = [canvasSize / 2, canvasSize / 2];
+  // Small random rotation of the sector grid so gates don't always land exactly
+  // on cardinal axes. Bounded to ±half a sector so sectors never overlap.
+  const sectorSize = (Math.PI * 2) / gateCount;
+  const rotOffset = (rng() - 0.5) * sectorSize * 0.3;
 
-  const center = canvasSize / 2;
-  const gates: { edge: Edge; dir: 'N' | 'S' | 'E' | 'W' }[] = [];
-  const used = new Set<string>();
+  // Water-side angle to skip (if set).
+  const waterAngle = waterSide ? waterSideAngle(waterSide) : null;
 
-  for (const d of dirs) {
-    if (waterSide === d.waterKey) continue;
+  const gates: { edge: Edge; dir: GateDir }[] = [];
+  const usedEdgeKeys = new Set<string>();
+
+  for (let s = 0; s < gateCount; s++) {
+    const targetAngle = s * sectorSize + rotOffset;
+    // Outward direction for this sector: from center toward outside.
+    const tDir: Point = [Math.cos(targetAngle), Math.sin(targetAngle)];
+
+    // Skip if this sector faces water.
+    if (waterAngle !== null && Math.abs(angleDiff(targetAngle, waterAngle)) < sectorSize * 0.6) continue;
 
     let bestEdge: Edge | null = null;
     let bestScore = -Infinity;
@@ -286,34 +327,121 @@ function pickGates(
       const dy = b[1] - a[1];
       const len = Math.hypot(dx, dy);
       if (len === 0) continue;
-      // Outward normal for a CW polygon traversed in y-down coords: (dy, -dx).
-      // V2 wall paths are CW by construction of `chainWallPath` (deterministic
-      // start + straight/CW scoring).
+      // Outward normal for CW traversal in y-down coords.
       const nx = dy / len;
       const ny = -dx / len;
-      const dot = nx * d.normal[0] + ny * d.normal[1];
-      if (dot < GATE_ALIGNMENT_THRESHOLD) continue;
+      // How well does this edge's outward normal align with the sector direction?
+      const dot = nx * tDir[0] + ny * tDir[1];
 
+      const key = canonicalEdgeKey(a, b);
+      if (usedEdgeKeys.has(key)) continue;
+
+      // Score: alignment dot + small penalty for deviation from sector midpoint,
+      // minus perpendicular distance from center so the gate sits near the
+      // sector's radial midline.
       const midx = (a[0] + b[0]) / 2;
       const midy = (a[1] + b[1]) / 2;
-      const proj = midx * d.normal[0] + midy * d.normal[1];
-      const perpDist = d.normal[0] !== 0 ? Math.abs(midy - center) : Math.abs(midx - center);
-      const score = proj * GATE_PROJ_WEIGHT - perpDist;
+      const edgeAngle = Math.atan2(ny, nx);
+      const angularCloseness = Math.cos(angleDiff(edgeAngle, targetAngle));
+      const perpDist = Math.abs((midx - center[0]) * tDir[1] - (midy - center[1]) * tDir[0]);
+      const score = dot * 3 + angularCloseness - perpDist / 100;
 
-      const k = canonicalEdgeKey(a, b);
-      if (used.has(k)) continue;
-
-      if (score > bestScore) {
+      if (dot > 0.1 && score > bestScore) {
         bestScore = score;
         bestEdge = [[a[0], a[1]], [b[0], b[1]]];
       }
     }
 
     if (bestEdge) {
-      gates.push({ edge: bestEdge, dir: d.dir });
-      used.add(canonicalEdgeKey(bestEdge[0], bestEdge[1]));
+      usedEdgeKeys.add(canonicalEdgeKey(bestEdge[0], bestEdge[1]));
+      gates.push({ edge: bestEdge, dir: angleToDir(targetAngle) });
     }
   }
 
   return gates;
+}
+
+function waterSideAngle(waterSide: NonNullable<CityEnvironment['waterSide']>): number {
+  switch (waterSide) {
+    case 'north': return -Math.PI / 2;
+    case 'south': return Math.PI / 2;
+    case 'east':  return 0;
+    case 'west':  return Math.PI;
+  }
+}
+
+// Signed smallest angle difference in [-π, π].
+function angleDiff(a: number, b: number): number {
+  let d = ((a - b) + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+  return d;
+}
+
+function angleToDir(angle: number): GateDir {
+  // Normalize to [0, 2π)
+  const a = ((angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+  const deg = (a * 180) / Math.PI;
+  // 8 sectors of 45° each, starting from 0° = East
+  // Map to compass dirs (y-down, 0°=E, 90°=S, 180°=W, 270°=N)
+  if (deg < 22.5 || deg >= 337.5) return 'E';
+  if (deg < 67.5)  return 'SE';
+  if (deg < 112.5) return 'S';
+  if (deg < 157.5) return 'SW';
+  if (deg < 202.5) return 'W';
+  if (deg < 247.5) return 'NW';
+  if (deg < 292.5) return 'N';
+  return 'NE';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tower position computation
+// ─────────────────────────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Walk the wall path and emit tower positions:
+//   1. Every TOWER_EDGE_INTERVAL edges (the "every ~3 edges" rule).
+//   2. Any vertex where the wall makes a sharp bend (dot < TOWER_SHARP_DOT).
+// The first vertex is always a tower (anchor). The closing repeated vertex
+// is never a duplicate tower (skip it if it's the same as the start).
+function computeTowerPositions(wallPath: Point[]): Point[] {
+  const towers: Point[] = [];
+  if (wallPath.length < 2) return towers;
+
+  const n = wallPath.length - 1; // exclude closing duplicate
+  const towerSet = new Set<string>();
+
+  const addTower = (pt: Point) => {
+    const k = vertexKey(pt);
+    if (towerSet.has(k)) return;
+    towerSet.add(k);
+    towers.push([pt[0], pt[1]]);
+  };
+
+  // First vertex always gets a tower.
+  addTower(wallPath[0]);
+
+  for (let i = 1; i < n; i++) {
+    // Every TOWER_EDGE_INTERVAL edges.
+    if (i % TOWER_EDGE_INTERVAL === 0) {
+      addTower(wallPath[i]);
+      continue;
+    }
+
+    // Sharp bend check.
+    if (i > 0 && i < n - 1) {
+      const prev = wallPath[i - 1];
+      const curr = wallPath[i];
+      const next = wallPath[i + 1];
+      const ax = curr[0] - prev[0];
+      const ay = curr[1] - prev[1];
+      const bx = next[0] - curr[0];
+      const by = next[1] - curr[1];
+      const aLen = Math.hypot(ax, ay) || 1;
+      const bLen = Math.hypot(bx, by) || 1;
+      const dot = (ax * bx + ay * by) / (aLen * bLen);
+      if (dot < TOWER_SHARP_DOT) {
+        addTower(wallPath[i]);
+      }
+    }
+  }
+
+  return towers;
 }

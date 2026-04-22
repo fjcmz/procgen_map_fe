@@ -96,11 +96,19 @@ const SPRAWL_SOLID_PROBABILITY = 0.45;
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+// Sizes where sprawl density increases near the outer wall.
+const WALL_PROXIMITY_SIZES: ReadonlySet<CitySize> = new Set<CitySize>(['metropolis', 'megalopolis']);
+// Near the wall the probability bonus peaks at this multiplier above the base.
+const WALL_PROXIMITY_BONUS = 0.8;
+
 /**
  * Generate `sprawlBuildings: CityBuildingV2[]` for a V2 city map.
  *
  * Each building is a small polygon footprint produced by shrinking the parent
  * polygon toward its centroid and capping its radius.
+ *
+ * For metropolis+ cities, density increases closer to the outer wall
+ * (representing the crowding that forms just outside city gates).
  */
 export function generateSprawl(
   seed: string,
@@ -111,6 +119,7 @@ export function generateSprawl(
   openSpaces: CityMapDataV2['openSpaces'],
   landmarks: CityLandmarkV2[],
   canvasSize: number,
+  wallPath?: [number, number][],
 ): CityBuildingV2[] {
   void canvasSize;
 
@@ -124,6 +133,28 @@ export function generateSprawl(
 
   const rng = seededPRNG(`${seed}_city_${cityName}_sprawl`);
   const tierScale = SPRAWL_TIER_SCALE[env.size];
+  const useWallProximity = WALL_PROXIMITY_SIZES.has(env.size) && wallPath && wallPath.length > 1;
+
+  // Precompute wall vertex list for proximity queries (skip closing duplicate).
+  const wallVerts: [number, number][] = useWallProximity && wallPath
+    ? wallPath.slice(0, -1)
+    : [];
+
+  // Compute max sprawl distance from wall among all sprawl polygon sites,
+  // so we can normalize proximity to [0, 1].
+  let maxWallDist = 1;
+  if (useWallProximity && wallVerts.length > 0) {
+    for (const block of blocks) {
+      if (!SPRAWL_ROLES.has(block.role)) continue;
+      for (const polygonId of block.polygonIds) {
+        const polygon = polygons[polygonId];
+        if (!polygon) continue;
+        const d = minDistToWall(polygon.site, wallVerts);
+        if (d > maxWallDist) maxWallDist = d;
+      }
+    }
+  }
+
   const out: CityBuildingV2[] = [];
 
   for (const block of blocks) {
@@ -136,11 +167,31 @@ export function generateSprawl(
       if (!polygon) continue;
       if (polygon.vertices.length < 3) continue;
 
-      placeSprawlBuilding(polygon, role, tierScale, rng, out);
+      // Proximity multiplier: 1.0 far from wall, (1 + WALL_PROXIMITY_BONUS) near wall.
+      let proximityScale = 1.0;
+      if (useWallProximity && wallVerts.length > 0) {
+        const d = minDistToWall(polygon.site, wallVerts);
+        const normalized = Math.min(1, d / maxWallDist); // 0 = at wall, 1 = farthest
+        proximityScale = 1.0 + WALL_PROXIMITY_BONUS * (1 - normalized);
+      }
+
+      placeSprawlBuilding(polygon, role, tierScale * proximityScale, rng, out);
     }
   }
 
   return out;
+}
+
+// [Voronoi-polygon] Minimum Euclidean distance from a point to any wall vertex.
+// Linear scan — wall path has at most ~200 vertices, well within budget.
+function minDistToWall(site: [number, number], wallVerts: [number, number][]): number {
+  let minD2 = Infinity;
+  const [sx, sy] = site;
+  for (const [wx, wy] of wallVerts) {
+    const d2 = (sx - wx) * (sx - wx) + (sy - wy) * (sy - wy);
+    if (d2 < minD2) minD2 = d2;
+  }
+  return Math.sqrt(minD2);
 }
 
 // ─── Per-polygon placement ────────────────────────────────────────────────────

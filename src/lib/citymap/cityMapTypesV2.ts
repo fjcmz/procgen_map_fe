@@ -128,8 +128,8 @@ export interface CityMapDataV2 {
 
   // TODO PR 2: closed polyline walking the wall boundary along polygon edges.
   wallPath: [number, number][];
-  // TODO PR 2: one gate per cardinal direction, placed on wall edges.
-  gates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' }[];
+  // TODO PR 2: gates placed on wall edges (4 for small/medium/large, 5–8 for metropolis+).
+  gates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
   // TODO PR 3: river routed along polygon edges; `islandPolygonIds` lists
   // polygons encircled by river edges.
   river: { edges: [[number, number], [number, number]][]; islandPolygonIds: number[] } | null;
@@ -157,4 +157,13 @@ export interface CityMapDataV2 {
   landmarks: CityLandmarkV2[];
   // TODO PR 5: rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
   districtLabels: { text: string; cx: number; cy: number; angle: number }[];
+
+  /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */
+  wallTowers: [number, number][];
+  /** Inner wall path for metropolis+ cities (empty for smaller cities). Closed polyline like wallPath. */
+  innerWallPath: [number, number][];
+  /** Inner wall gates (≥3 for metropolis+, empty for smaller cities). */
+  innerGates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
+  /** Roads extending outward from each outer gate to the canvas boundary (one per gate). */
+  exitRoads: [number, number][][];
 }

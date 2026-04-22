@@ -69,6 +69,8 @@ export interface NetworkGenerationResult {
   streets: Point[][];
   /** Road edges that overlap river edges — rendered as bridges. */
   bridges: [Point, Point][];
+  /** Straight exit lines from each gate outward to the canvas boundary. */
+  exitRoads: Point[][];
 }
 
 /**
@@ -92,7 +94,7 @@ export function generateNetwork(
   void env; // Reserved — PR 4+ may want to branch on env.size / env.waterSide here.
 
   if (wall.gates.length === 0 || polygons.length < 4) {
-    return { roads: [], streets: [], bridges: [] };
+    return { roads: [], streets: [], bridges: [], exitRoads: [] };
   }
 
   // Precompute the river-edge key set so road cost + bridge detection are
@@ -112,7 +114,7 @@ export function generateNetwork(
 
   // Target for every road: polygon vertex closest to canvas center.
   const centerTargetKey = nearestVertexKey(graph, [canvasSize / 2, canvasSize / 2]);
-  if (!centerTargetKey) return { roads: [], streets: [], bridges: [] };
+  if (!centerTargetKey) return { roads: [], streets: [], bridges: [], exitRoads: [] };
 
   // ── Roads ─────────────────────────────────────────────────────────────
   const roadRng = seededPRNG(`${seed}_city_${cityName}_roads`);
@@ -323,5 +325,39 @@ export function generateNetwork(
     }
   }
 
-  return { roads, streets, bridges };
+  // ── Exit roads ────────────────────────────────────────────────────────
+  // [Voronoi-polygon] For each gate, compute a straight segment from the gate
+  // midpoint outward (in the outward-normal direction) to the canvas boundary.
+  // These represent connections to off-map cities and are rendered as dashed
+  // lines on top of the outside-walls sprawl.
+  const exitRoads: Point[][] = [];
+  for (const gate of wall.gates) {
+    const [ga, gb] = gate.edge;
+    const mx = (ga[0] + gb[0]) / 2;
+    const my = (ga[1] + gb[1]) / 2;
+
+    // Outward normal (CW wall, y-down): perpendicular to edge direction.
+    const dx = gb[0] - ga[0];
+    const dy = gb[1] - ga[1];
+    const len = Math.hypot(dx, dy) || 1;
+    // Outward normal for CW polygon (y-down): (dy/len, -dx/len)
+    const nx = dy / len;
+    const ny = -dx / len;
+
+    // Ray-cast outward until we hit a canvas boundary.
+    // Parameter t such that [mx + nx*t, my + ny*t] first crosses 0 or canvasSize.
+    let tBest = Infinity;
+    if (nx > 0)  tBest = Math.min(tBest, (canvasSize - mx) / nx);
+    if (nx < 0)  tBest = Math.min(tBest, -mx / nx);
+    if (ny > 0)  tBest = Math.min(tBest, (canvasSize - my) / ny);
+    if (ny < 0)  tBest = Math.min(tBest, -my / ny);
+
+    if (!isFinite(tBest) || tBest <= 0) continue;
+
+    const ex = mx + nx * tBest;
+    const ey = my + ny * tBest;
+    exitRoads.push([[mx, my], [ex, ey]]);
+  }
+
+  return { roads, streets, bridges, exitRoads };
 }
