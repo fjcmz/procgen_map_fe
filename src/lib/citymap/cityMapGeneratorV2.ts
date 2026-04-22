@@ -120,11 +120,11 @@ export const CANVAS_POLYGON_COUNT = 1500;
 // has been removed entirely. Allocation is now an absolute count from
 // this table, grown organically from the canvas center outward.
 export const POLYGON_COUNTS: Record<CitySize, number> = {
-  small: 75,
-  medium: 125,
-  large: 175,
-  metropolis: 250,
-  megalopolis: 500,
+  small: 150,
+  medium: 250,
+  large: 350,
+  metropolis: 500,
+  megalopolis: 1000,
 };
 
 const CANVAS_SIZE = 720;
