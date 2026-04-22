@@ -5,7 +5,7 @@
 //
 // The river traces polygon edges — never tile lattices. Entry and exit
 // vertices come from polygons whose `isEdge` flag is set (i.e. polygons
-// that touch the 720 bbox). The main channel is an A* over the polygon
+// that touch the 1000 bbox). The main channel is an A* over the polygon
 // edge graph produced by `cityMapEdgeGraph.ts::buildPolygonEdgeGraph`.
 // Large+ cities get a bifurcation that forks around a middle-third
 // stretch of the main channel; when it rejoins, the fork enclosed by

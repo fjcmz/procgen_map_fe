@@ -21,14 +21,14 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const internalSize = 720;
+    const internalSize = 1000;
 
     // Scale display size to fit viewport: subtract chrome (header ~40px + footer ~28px + padding ~48px = ~116px)
     const availableW = window.innerWidth - 48;  // 24px margin each side
     const availableH = window.innerHeight - 116;
     const displaySize = Math.max(200, Math.min(internalSize, availableW, availableH));
 
-    // Keep backing buffer at full 720×720 for quality; only shrink the CSS display size
+    // Keep backing buffer at full 1000×1000 for quality; only shrink the CSS display size
     canvas.width = internalSize * dpr;
     canvas.height = internalSize * dpr;
     canvas.style.width = `${displaySize}px`;

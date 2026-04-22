@@ -181,7 +181,7 @@ export const POLYGON_COUNTS: Record<CitySize, number> = {
   megalopolis: 1000,
 };
 
-const CANVAS_SIZE = 720;
+const CANVAS_SIZE = 1000;
 const LLOYD_ROUNDS = 2;
 
 // [Voronoi foundation] — builds the city's polygon graph from N seeded points.

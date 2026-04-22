@@ -3,14 +3,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// Each `CityPolygon` wraps a single D3-Delaunay Voronoi cell inside the 720×720
+// Each `CityPolygon` wraps a single D3-Delaunay Voronoi cell inside the 1000×1000
 // city canvas. The four primitives PR 2–5 will consume are:
 //
 //   polygon.vertices  — the polygon ring (unclosed), used for wall tracing,
 //                       river edge-walks, street edges, and building packing.
 //   polygon.neighbors — adjacency over the polygon graph, used for block
 //                       flood-fill, road A*, river routing.
-//   polygon.isEdge    — polygon touches the 720×720 bounding box; PR 2 wall
+//   polygon.isEdge    — polygon touches the 1000×1000 bounding box; PR 2 wall
 //                       footprint starts from the non-edge interior.
 //   polygon.area      — shoelace area, used by PR 4 landmark placement and
 //                       PR 5 district-label sizing.
@@ -113,7 +113,7 @@ export interface CityLandmarkV2 {
  * `null` for `river`) and will be filled in by the PR marked on each field.
  */
 export interface CityMapDataV2 {
-  /** Always 720 (px). */
+  /** Always 1000 (px). */
   canvasSize: number;
   /**
    * Total polygons in the canvas. Always equals `polygons.length` and is
