@@ -107,8 +107,22 @@ export interface CityLandmarkV2 {
 export interface CityMapDataV2 {
   /** Always 720 (px). */
   canvasSize: number;
-  /** Must equal `polygons.length`; derived from city size via `POLYGON_COUNTS`. */
+  /**
+   * Total polygons in the canvas. Always equals `polygons.length` and is
+   * fixed at `CANVAS_POLYGON_COUNT` (1500) regardless of city tier — the
+   * canvas is a constant-size Voronoi graph; tier only changes the city
+   * footprint allocation (see `cityPolygonCount`).
+   */
   polygonCount: number;
+  /**
+   * Target count of polygons allocated to the in-wall city footprint for
+   * this city's tier — always equals `POLYGON_COUNTS[env.size]` from
+   * `cityMapGeneratorV2.ts`. The actual interior set may end up slightly
+   * smaller after BFS-prune / hole-fill (see `cityMapShape.ts`); the
+   * authoritative interior is `wall.interiorPolygonIds` which is echoed
+   * into the renderer / blocks / openSpaces consumers.
+   */
+  cityPolygonCount: number;
   /** Voronoi polygon foundation — the primary data contract for PR 2-5. */
   polygons: CityPolygon[];
 

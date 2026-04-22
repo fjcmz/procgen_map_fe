@@ -3,28 +3,38 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// This module scores CityPolygon candidates, walks polygon-edge boundaries,
-// and picks gates from polygon edges — NEVER tile edges / tile corners. The
-// spec text ("tile count", "tile corners") is legacy language from before
-// PR 1 pivoted to polygons; every primitive here operates on the polygon
-// graph produced by `buildCityPolygonGraph` in `cityMapGeneratorV2.ts`.
+// This module walks polygon-edge boundaries around a PRE-COMPUTED interior
+// polygon set and picks gates from polygon edges — NEVER tile edges / tile
+// corners. The spec text ("tile count", "tile corners") is legacy language
+// from before PR 1 pivoted to polygons.
+//
+// Footprint selection used to live here as `selectInteriorPolygons` —
+// scoring every non-edge polygon by radial distance + FBM noise and taking
+// a coverage fraction lerp(0.50..0.85) over the size tier. That percentage-
+// based allocation has been removed. The interior set is now produced
+// upstream by `cityMapShape.ts::selectCityFootprint`, which picks an
+// organic shape (spheroid / rectangle / half-sphere / triangle) and
+// allocates an absolute count from `POLYGON_COUNTS[env.size]` out of the
+// fixed 1500-polygon canvas. Walls just trace whatever footprint they're
+// handed.
 //
 // Inputs:
-//   - `CityPolygon[]` (PR 1 output) — supplies `.site`, `.vertices` (unclosed
-//     ring), `.neighbors` (Delaunay adjacency), `.isEdge` (touches canvas
-//     bbox).
-//   - `env.size` (coverage ramp) and `env.waterSide` (gate-direction skip).
-//   - `seededPRNG`-derived noise samplers (`createNoiseSamplers` + `fbm`)
-//     from terrain/noise.ts — the same helpers the world map uses.
+//   - `CityPolygon[]` (PR 1 output) — supplies `.vertices` (unclosed ring)
+//     and `.neighbors` (Delaunay adjacency).
+//   - `interior: Set<number>` — the pre-computed city footprint from
+//     `cityMapShape.ts`. Walls trace the boundary of this set.
+//   - `env.waterSide` — gate-direction skip (don't open a gate toward water).
 //
-// Outputs: `{ wallPath, gates }` — drop straight into `CityMapDataV2`'s
-// PR 1 `// TODO PR 2:` slots (`cityMapTypesV2.ts` lines 103-106).
+// Outputs: `{ wallPath, gates, interiorPolygonIds }` — drop straight into
+// `CityMapDataV2`'s PR 1 `// TODO PR 2:` slots, plus the interior set is
+// echoed back so downstream callers (open-spaces, blocks, sprawl) can
+// query "is this polygon inside the walls?" without re-reading the shape
+// module.
 //
 // Reference algorithm shape: `src/lib/citymap/cityMapGenerator.ts` lines
-// 109-358 (V1, tile-based). We mirror the *stages* (score → sort → cut →
-// connect-prune → hole-fill → deterministic edge chain → cardinal-aligned
-// gate pick) but run them on the polygon graph. Do NOT copy V1's tile
-// data structures.
+// 237-358 (V1, tile-based). We mirror the *stages* (collect boundary
+// edges → deterministic edge chain → cardinal-aligned gate pick) but run
+// them on the polygon graph. Do NOT copy V1's tile data structures.
 //
 // PR 3 note: the polygon-edge helpers (`roundV`, `vertexKey`,
 // `canonicalEdgeKey`, `EdgeRecord`, `buildEdgeOwnership`) used to live
@@ -34,36 +44,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
-import type { CitySize } from './cityMapTypesV2';
-import { createNoiseSamplers, fbm } from '../terrain/noise';
 import {
   buildEdgeOwnership,
   canonicalEdgeKey,
   vertexKey,
   type EdgeRecord,
 } from './cityMapEdgeGraph';
-
-// Mirrors V1's file-local SIZE_TIER (cityMapGenerator.ts:37). Duplicated
-// rather than imported so V1 can be retired in PR 5 without a reverse dep.
-const SIZE_TIER: Record<CitySize, number> = {
-  small: 0,
-  medium: 0.25,
-  large: 0.5,
-  metropolis: 0.75,
-  megalopolis: 1,
-};
-
-// Fraction of non-edge polygons that fall inside the walls. Lerp(0.50..0.85)
-// over the size tier — same bounds as the V1 tile coverage, applied to the
-// polygon candidate set instead of a tile grid.
-const COVERAGE_MIN = 0.5;
-const COVERAGE_MAX = 0.85;
-
-// FBM perturbation applied to each polygon's radial-distance score. The
-// input scale produces ~5-8 noise cycles across the 720 px canvas (matches
-// V1's visual roughness of `x * 0.18` over a ~30-wide tile grid).
-const FBM_SCALE = 0.01;
-const FBM_AMPLITUDE = 0.6;
 
 // Cardinal gate alignment threshold. `dot(outward_normal, cardinal) >=
 // this` qualifies an edge as gate-facing. 0.99 matches V1's threshold.
@@ -87,24 +73,29 @@ export interface WallGenerationResult {
 /**
  * Generate the wall footprint + gate list for a V2 city.
  *
- * Operates entirely on the Voronoi polygon graph — no tiles, ever. RNG
- * stream: `${seed}_city_${cityName}_walls` (matches V1 convention and
- * CLAUDE.md's stream-naming rule).
+ * Operates entirely on the Voronoi polygon graph — no tiles, ever. The
+ * footprint (`interior`) is computed upstream by
+ * `cityMapShape.ts::selectCityFootprint`; this function just traces its
+ * boundary into a closed polyline and picks cardinal gates.
  *
- * Returns `{ wallPath: [], gates: [] }` on every degenerate case (too
- * few candidates, empty interior component, failed chain) so the caller
- * can always spread the result without special-casing.
+ * Returns `{ wallPath: [], gates: [], interiorPolygonIds: new Set() }` on
+ * every degenerate case (footprint too small, failed chain) so the caller
+ * can always spread the result without special-casing. The `seed` /
+ * `cityName` parameters are kept in the signature for future use (e.g.
+ * decorative wall variations on a per-city RNG sub-stream) but are unused
+ * today now that the FBM-driven coverage roll has moved upstream.
  */
 export function generateWallsAndGates(
   seed: string,
   cityName: string,
   env: CityEnvironment,
   polygons: CityPolygon[],
+  interior: Set<number>,
   canvasSize: number,
 ): WallGenerationResult {
-  const samplers = createNoiseSamplers(`${seed}_city_${cityName}_walls`);
+  void seed;
+  void cityName;
 
-  const interior = selectInteriorPolygons(polygons, env, canvasSize, samplers);
   if (interior.size < 3) return { wallPath: [], gates: [], interiorPolygonIds: new Set() };
 
   const edgeOwnership = buildEdgeOwnership(polygons);
@@ -117,114 +108,7 @@ export function generateWallsAndGates(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 1 — polygon selection (wall footprint)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// [Voronoi-polygon] Score every non-edge polygon by `radial distance from
-// canvas center + FBM perturbation sampled at the polygon's site`. Lower
-// score = more central / more likely to fall inside the walls. No tile
-// grid — scoring is per `CityPolygon`, FBM samples `polygon.site` (pixel
-// coords, not tile indices). Then BFS-prune to the single connected
-// component over `polygon.neighbors` and hole-fill from the isEdge frontier.
-function selectInteriorPolygons(
-  polygons: CityPolygon[],
-  env: CityEnvironment,
-  canvasSize: number,
-  samplers: ReturnType<typeof createNoiseSamplers>,
-): Set<number> {
-  const cx = canvasSize / 2;
-  const cy = canvasSize / 2;
-  const maxR = canvasSize / 2;
-
-  // Only non-edge polygons are walled candidates: the wall must sit inside
-  // the canvas, so `isEdge` polygons (touching the 720 bbox) stay outside.
-  type Scored = { id: number; score: number };
-  const scored: Scored[] = [];
-  for (const p of polygons) {
-    if (p.isEdge) continue;
-    const [sx, sy] = p.site;
-    const dx = sx - cx;
-    const dy = sy - cy;
-    const r = Math.sqrt(dx * dx + dy * dy) / maxR;
-    const noise = fbm(samplers.elevation, sx * FBM_SCALE, sy * FBM_SCALE, 4);
-    const perturb = (noise - 0.5) * FBM_AMPLITUDE;
-    scored.push({ id: p.id, score: r + perturb });
-  }
-  if (scored.length === 0) return new Set();
-
-  // Deterministic order: score ascending, then id ascending as tie-breaker.
-  scored.sort((a, b) => (a.score - b.score) || (a.id - b.id));
-
-  const tier = SIZE_TIER[env.size];
-  const coverage = COVERAGE_MIN + (COVERAGE_MAX - COVERAGE_MIN) * tier;
-  const targetCount = Math.max(1, Math.round(coverage * scored.length));
-
-  const initial = new Set<number>();
-  for (let i = 0; i < targetCount && i < scored.length; i++) {
-    initial.add(scored[i].id);
-  }
-
-  // BFS-prune: keep the connected component containing the most-central
-  // interior polygon. Traversal is restricted to polygon.neighbors that
-  // are also in `initial` — the polygon graph plays the role V1's 4-way
-  // tile lattice played.
-  let seedId = -1;
-  let bestDist = Infinity;
-  for (const id of initial) {
-    const [sx, sy] = polygons[id].site;
-    const d = Math.hypot(sx - cx, sy - cy);
-    if (d < bestDist) {
-      bestDist = d;
-      seedId = id;
-    }
-  }
-  if (seedId === -1) return new Set();
-
-  const interior = new Set<number>();
-  const queue: number[] = [seedId];
-  interior.add(seedId);
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    for (const nb of polygons[id].neighbors) {
-      if (initial.has(nb) && !interior.has(nb)) {
-        interior.add(nb);
-        queue.push(nb);
-      }
-    }
-  }
-
-  // Hole-fill: flood from the `isEdge` frontier inward over non-interior
-  // polygons. Anything the flood can't reach AND isn't already interior
-  // must be a hole enclosed by interior — flip it to interior. Mirrors
-  // V1's exterior-flood strategy (cityMapGenerator.ts:183-215), but the
-  // "boundary" is the polygon.isEdge set instead of the tile border row.
-  const exterior = new Set<number>();
-  const exQueue: number[] = [];
-  for (const p of polygons) {
-    if (p.isEdge && !interior.has(p.id)) {
-      exterior.add(p.id);
-      exQueue.push(p.id);
-    }
-  }
-  while (exQueue.length > 0) {
-    const id = exQueue.shift()!;
-    for (const nb of polygons[id].neighbors) {
-      if (interior.has(nb) || exterior.has(nb)) continue;
-      exterior.add(nb);
-      exQueue.push(nb);
-    }
-  }
-  for (const p of polygons) {
-    if (!interior.has(p.id) && !exterior.has(p.id)) {
-      interior.add(p.id);
-    }
-  }
-
-  return interior;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Step 2 — polygon-edge ownership map
+// Step 1 — polygon-edge ownership map
 // ─────────────────────────────────────────────────────────────────────────────
 // `buildEdgeOwnership`, `roundV`, `vertexKey`, `canonicalEdgeKey`, and the
 // `EdgeRecord` shape live in `cityMapEdgeGraph.ts` — lifted out of this file
@@ -232,7 +116,7 @@ function selectInteriorPolygons(
 // helpers were here in PR 2. Do NOT duplicate them again.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 3 — collect wall boundary edges
+// Step 2 — collect wall boundary edges
 // ─────────────────────────────────────────────────────────────────────────────
 
 // [Voronoi-polygon] An edge is on the wall iff exactly one of its owning
@@ -280,7 +164,7 @@ function collectWallBoundaryEdges(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4 — chain edges into a closed wall polyline
+// Step 3 — chain edges into a closed wall polyline
 // ─────────────────────────────────────────────────────────────────────────────
 
 // [Voronoi-polygon] Adjacency walk keyed by canonicalized vertex strings
@@ -359,7 +243,7 @@ function chainWallPath(edges: Edge[]): Point[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 5 — gate selection
+// Step 4 — gate selection
 // ─────────────────────────────────────────────────────────────────────────────
 
 // [Voronoi-polygon] Same cardinal-alignment scoring V1 uses, but the edge
