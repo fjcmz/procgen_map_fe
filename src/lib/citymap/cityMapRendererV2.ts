@@ -1,17 +1,24 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // City Map V2 renderer — Voronoi foundation (PR 1) + walls (PR 2) + river /
 // streets / roads / bridges (PR 3) + open spaces + landmarks (PR 4 slices)
-// + buildings (PR 5 slice)
+// + buildings + outside-walls sprawl (PR 5 slices)
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles. Every geometric
 // primitive this renderer consumes comes from the polygon graph emitted by
 // `cityMapGeneratorV2.ts` and the polygon-edge traversals done by
 // `cityMapWalls.ts` (PR 2) / `cityMapRiver.ts` + `cityMapNetwork.ts` (PR 3) /
 // `cityMapOpenSpaces.ts` + `cityMapLandmarks.ts` (PR 4 slices) /
-// `cityMapBuildings.ts` (PR 5 slice).
+// `cityMapBuildings.ts` + `cityMapSprawl.ts` (PR 5 slices).
 //
 //   Layer 1  — flat cream base #ece5d3
 //   Layer 2  — faint Voronoi polygon edges (the "organic cadastral grid")
+//   Layer 4  — outside-walls sprawl (PR 5 slice): sparse axis-aligned rects
+//              on slum / agricultural isEdge polygons. Same #2a241c ink as
+//              interior buildings but thinner hollow strokes and lower
+//              density per spec line 73 ("sparse scattered building rects
+//              in fringe tiles"). Drawn BEFORE roads / river / streets so
+//              infrastructure ink visibly sits on top if a road ever exits
+//              the wall into the fringe.
 //   Layer 5  — river channel stroke #6d665a with darker outline (PR 3)
 //              [polygon-edge river path]
 //   Layer 6  — streets 2 px #b8ad92 (PR 3) [polygon-edge street paths]
@@ -31,7 +38,7 @@
 //              glyphs centered on `polygon.site`, sized from √polygon.area,
 //              "all ink on white" per spec. CASTLE / PALACE labels below
 //              capital glyphs.
-//   …gap…    — Layers 3, 4, 13 reserved for PR 5 (docks, sprawl, labels)
+//   …gap…    — Layers 3, 13 reserved for PR 5 (docks, district labels)
 //   Layer 14 — top-centered city name + "V2" QA tag
 //
 // LAYER ORDER NOTE — open spaces are drawn BEFORE roads / streets / walls so
@@ -171,12 +178,21 @@ export function renderCityMapV2(
     ctx.stroke();
   }
 
-  // ── Layers 3, 4, 13 reserved for PR 5 (remainder) ──────────────────────
+  // ── Layers 3, 13 reserved for PR 5 (remainder) ─────────────────────────
   //   Layer 3  — docks (PR 5, env.waterSide hatching)
-  //   Layer 4  — outside-walls sprawl (PR 5)
   //   Layer 13 — district labels (PR 5)
   //   Layer 10 — buildings (PR 5) — drawn below after bridges and before walls.
   //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
+
+  // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
+  // [Voronoi-polygon] Sparse rects on slum / agricultural isEdge polygons.
+  // Drawn early (after the polygon-edge grid and before every infrastructure
+  // layer) so any future gate-exiting road (spec line 24: "roads going from
+  // the gates to the outer limits of the map") will sit visibly on top of
+  // any sprawl rect it happens to cross. In this slice roads stay inside
+  // the wall, so the stacking is effectively moot — but the ordering keeps
+  // the visual contract stable against that future addition.
+  drawSprawl(ctx, data);
 
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
   // [Voronoi-polygon] Each entry references polygons by id; the renderer
@@ -499,6 +515,15 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
 const BUILDING_INK = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
+// Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c as interior
+// buildings for visual continuity (a thatched hut and a civic block both
+// read as "building"), but with a slightly thinner hollow stroke so sprawl
+// reads visibly airier than the dense interior block packing. The ink is
+// shared with Layer 10 intentionally — per spec line 73, sprawl is just
+// "sparse scattered building rects", not a distinct material.
+const SPRAWL_INK = '#2a241c';
+const SPRAWL_STROKE_WIDTH = 0.6;
+
 // [Voronoi-polygon] Render every entry in `data.buildings`. Each building
 // carries a `polygonId` that indexes into `data.polygons`; the generator
 // (cityMapBuildings.ts) has already clipped each rect to the polygon's
@@ -525,6 +550,36 @@ function drawBuildings(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void
         b.y + halfStroke,
         b.w - BUILDING_STROKE_WIDTH,
         b.h - BUILDING_STROKE_WIDTH,
+      );
+    }
+  }
+}
+
+// [Voronoi-polygon] Render every entry in `data.sprawlBuildings`. Each sprawl
+// rect carries a `polygonId` that indexes into `data.polygons`; the generator
+// (cityMapSprawl.ts) has already clipped each rect to the polygon's vertex
+// ring with a 2 px inset from polygon edges. Same rect-drawing logic as
+// `drawBuildings` — only the stroke width differs (thinner, so sprawl reads
+// airier). No RNG at render time — every dimension is baked into the
+// CityBuildingV2 at generation time, so re-rendering is byte-stable without
+// re-running the generator.
+function drawSprawl(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.sprawlBuildings.length === 0) return;
+
+  const halfStroke = SPRAWL_STROKE_WIDTH * 0.5;
+  ctx.fillStyle = SPRAWL_INK;
+  ctx.strokeStyle = SPRAWL_INK;
+  ctx.lineWidth = SPRAWL_STROKE_WIDTH;
+
+  for (const b of data.sprawlBuildings as CityBuildingV2[]) {
+    if (b.solid) {
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    } else {
+      ctx.strokeRect(
+        b.x + halfStroke,
+        b.y + halfStroke,
+        b.w - SPRAWL_STROKE_WIDTH,
+        b.h - SPRAWL_STROKE_WIDTH,
       );
     }
   }
