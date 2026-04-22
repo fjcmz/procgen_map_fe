@@ -359,7 +359,7 @@ export function generateCityMapV2(
 
   // PR 3 — river along polygon edges. Returns null when !env.hasRiver or
   // when the boundary vertex search fails; the renderer no-ops on null.
-  const river = generateRiver(seed, cityName, env, polygons, edgeGraph, CANVAS_SIZE);
+  const river = generateRiver(seed, cityName, env, polygons, edgeGraph, CANVAS_SIZE, waterPolygonIds);
 
   // PR 3 — roads (gate→center A*), space-filling streets, and bridges
   // (road∩river by canonical edge key). Receives the river result so
