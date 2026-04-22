@@ -513,7 +513,8 @@ function drawBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
 // stroke. Buildings are now polygon paths (Voronoi lot insets) rather than
 // axis-aligned rects — each `CityBuildingV2.vertices` holds the inset polygon
 // ring produced by `cityMapBuildings.ts`.
-const BUILDING_INK = '#2a241c';
+const BUILDING_FILL = '#b5ae9f';
+const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
@@ -528,19 +529,16 @@ const SPRAWL_STROKE_WIDTH = 0.6;
 function drawBuildings(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.buildings.length === 0) return;
 
-  ctx.fillStyle = BUILDING_INK;
-  ctx.strokeStyle = BUILDING_INK;
   ctx.lineWidth = BUILDING_STROKE_WIDTH;
   ctx.lineJoin = 'round';
 
   for (const b of data.buildings as CityBuildingV2[]) {
     if (b.vertices.length < 3) continue;
     traceClosedRing(ctx, b.vertices);
-    if (b.solid) {
-      ctx.fill();
-    } else {
-      ctx.stroke();
-    }
+    ctx.fillStyle = BUILDING_FILL;
+    ctx.fill();
+    ctx.strokeStyle = BUILDING_OUTLINE;
+    ctx.stroke();
   }
 }
 
