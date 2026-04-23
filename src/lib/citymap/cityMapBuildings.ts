@@ -66,6 +66,11 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'textile',
   'potters',
   'mill',
+  // Scholarship / faith / health — interior districts only.
+  // necropolis and plague_ward are exterior and appear as bare coloured fills.
+  'temple_quarter',
+  'academia',
+  'archive_quarter',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -82,6 +87,13 @@ const LOT_BASE: Record<DistrictRole, number> = {
   textile: 1,
   potters: 2,
   mill:    1,
+  // SFH interior: moderate civic-like density for religious/scholarly buildings.
+  // necropolis and plague_ward are exterior (not in PACKING_ROLES) — values unused.
+  temple_quarter:  2,
+  academia:        2,
+  archive_quarter: 2,
+  necropolis:      0,
+  plague_ward:     0,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -97,6 +109,12 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   textile: 800,
   potters: 600,
   mill:    900,
+  // SFH interior: civic-scale spacing for larger, notable structures.
+  temple_quarter:  600,
+  academia:        700,
+  archive_quarter: 700,
+  necropolis:      1,
+  plague_ward:     1,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -111,6 +129,11 @@ const LOT_MIN: Record<DistrictRole, number> = {
   textile: 1,
   potters: 1,
   mill:    1,
+  temple_quarter:  1,
+  academia:        1,
+  archive_quarter: 1,
+  necropolis:      0,
+  plague_ward:     0,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -125,6 +148,11 @@ const LOT_MAX: Record<DistrictRole, number> = {
   textile: 3,
   potters: 3,
   mill:    2,
+  temple_quarter:  4,
+  academia:        4,
+  archive_quarter: 3,
+  necropolis:      0,
+  plague_ward:     0,
 };
 
 // Setback in pixels from polygon boundary edges.

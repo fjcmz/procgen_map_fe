@@ -494,8 +494,18 @@ function drawBlockBackgrounds(
   if (data.blocks.length === 0) return;
   const biomeFill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
   for (const block of data.blocks) {
+    const sfhFill = SFH_BG_FILL[block.role];
     const craftFill = CRAFT_BG_FILL[block.role];
-    if (craftFill) {
+    if (sfhFill) {
+      // Scholarship / faith / health district — light reddish/pink/violet fill.
+      ctx.fillStyle = sfhFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (craftFill) {
       // Craft & industry district — distinctive industrial background.
       ctx.fillStyle = craftFill;
       for (const pid of block.polygonIds) {
@@ -874,6 +884,31 @@ const CRAFT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
   mill:    '#202018',
 };
 
+// ── Scholarship / Faith / Health district colours ───────────────────────────
+// Light reddish, pink, and violet palette — distinct from the warm earthy
+// craft palette. necropolis and plague_ward are exterior-only (not in
+// PACKING_ROLES), so they appear only as block background fills with no
+// building packing on top.
+const SFH_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  temple_quarter:  '#d4b4d8', // soft lavender   — faith
+  necropolis:      '#c4b8d0', // muted grey-violet — solemn burial ground
+  academia:        '#bcc0e4', // periwinkle        — scholarly
+  plague_ward:     '#e8b8bc', // rose pink         — medical / quarantine
+  archive_quarter: '#d4b4d4', // dusty rose-violet — archival
+};
+// Per-role building fill palettes for interior SFH districts.
+const SFH_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  temple_quarter:  ['#d0acd4', '#c09cc4', '#b08cb4'],
+  academia:        ['#b8bce0', '#a8acd0', '#989cc0'],
+  archive_quarter: ['#d0acd0', '#c09cc0', '#b08cb0'],
+};
+// Per-role building outline ink (darker / role-tinted).
+const SFH_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  temple_quarter:  '#280838',
+  academia:        '#080830',
+  archive_quarter: '#250825',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -945,10 +980,10 @@ function drawBuildings(
     const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
-    // Resolve per-role colors for craft & industry buildings.
+    // Resolve per-role colors — craft & industry first, then SFH districts.
     const role = polygonRole.get(b.polygonId);
-    const craftFills = role ? CRAFT_BUILDING_FILLS[role] : undefined;
-    const craftInk   = role ? CRAFT_BUILDING_INK[role]   : undefined;
+    const craftFills = role ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role]) : undefined;
+    const craftInk   = role ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role])   : undefined;
 
     traceClosedRing(ctx, b.vertices);
     if (ruinRng) {
