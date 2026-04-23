@@ -685,36 +685,41 @@ function generateBlockName(
 }
 
 // ─── Craft & Industry Quarter assignment ────────────────────────────────────
-// Post-pass over the block list that re-labels a subset of `residential`
-// blocks as craft / industry districts. Called from `generateCityMapV2` right
-// after `generateBlocks` so landmarks / buildings / sprawl all see the
-// updated roles.
+// Post-pass over the block list that extracts individual polygons from
+// `residential` blocks and re-wraps each as a new 1-polygon craft / industry
+// block. A single craft assignment is always exactly one polygon. Adjacent
+// assignments of the same type will naturally read as one contiguous quarter,
+// but the block list always represents them as separate 1-polygon entries.
 //
-// Placement invariants:
-//   • All craft blocks are drawn from the outskirt-ordered residential pool
-//     (farthest from canvas centre first — real medieval cities pushed noisy /
-//     smelly trades to the edge).
-//   • River-requiring types (tannery, textile, mill) prefer blocks that have
-//     at least one polygon sharing a canonical edge with the river strand.
-//     When no river-adjacent block is available they fall back to any
-//     residential block so count is never under-filled.
-//   • Block names are picked deterministically by index — no extra RNG calls.
-//   • RNG stream: `${seed}_city_${cityName}_craft` — independent of the
-//     existing `_blocks_names` stream so adding craft roles doesn't perturb
-//     existing block names.
+// Algorithm:
+//   1. Walk all residential block polygons (excluding isEdge ones that belong
+//      to sprawl territory). Compute each polygon's outskirt score.
+//   2. Sort candidates outskirt-first (farthest from canvas centre first).
+//   3. For each craft slot, pick one polygon (river-adjacent preferred for
+//      river-requiring types), remove it from its residential block, and
+//      push a new CityBlockV2 { polygonIds: [pid], role, name } to the array.
+//
+// Invariants:
+//   • Block partition preserved — stolen polygons move from residential block
+//     to new craft block; every polygon still appears in exactly one block.
+//   • Residential blocks that lose all their polygons become empty (harmless
+//     for downstream consumers that iterate polygonIds).
+//   • No extra RNG after count + shuffle — names are deterministic by index.
+//   • RNG stream: `${seed}_city_${cityName}_craft` — independent of
+//     `_blocks_names` so adding craft roles doesn't shift existing names.
 
 type CraftRole = 'forge' | 'tannery' | 'textile' | 'potters' | 'mill';
 
 const CRAFT_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:      [1, 3],
-  medium:     [2, 5],
-  large:      [3, 7],
-  metropolis: [5, 10],
+  small:       [1, 3],
+  medium:      [2, 5],
+  large:       [3, 7],
+  metropolis:  [5, 10],
   megalopolis: [8, 16],
 };
 
-// Medieval-flavour names for each craft role.  Picked by
-// `blockIndex % names.length` — no RNG needed.
+// Medieval-flavour names per craft role. Picked deterministically by
+// `(craftBlockCount % names.length)` — no RNG consumed for naming.
 const CRAFT_NAMES: Record<CraftRole, string[]> = {
   forge:   ['SMITHS QUARTER', 'FORGE ROW', 'IRONMONGERS LANE', 'ARMORERS CLOSE', 'FOUNDRY YARD'],
   tannery: ['TANNERS ROW', 'HIDE MARKET', 'LEATHER CLOSE', 'FELLMONGERS YARD', 'BARK YARD'],
@@ -729,9 +734,10 @@ const RIVER_REQUIRING: ReadonlySet<CraftRole> = new Set<CraftRole>([
 ]);
 
 /**
- * Re-classify a seeded subset of `residential` blocks as craft / industry
- * districts. Mutates `block.role` and `block.name` in-place; the block
- * partition (polygon membership) is never changed.
+ * Extract individual polygons from `residential` blocks and re-wrap each as
+ * a new 1-polygon craft / industry block. Mutates the `blocks` array in-place
+ * (shrinks affected residential blocks, appends new craft blocks). The overall
+ * block partition invariant is preserved.
  *
  * Eligibility rules (environment proxies, no resource plumbing):
  *   potters  — any size, any terrain
@@ -752,7 +758,7 @@ export function assignCraftRoles(
 
   // ── River edge set for adjacency checks ────────────────────────────────
   // [Voronoi-polygon] Index all canonical edge keys along the river strand so
-  // we can cheaply test whether a polygon shares any edge with the river.
+  // we can cheaply test whether a polygon shares an edge with the river.
   const riverEdgeKeys = new Set<string>();
   if (river) {
     for (const [a, b] of river.edges) {
@@ -785,7 +791,6 @@ export function assignCraftRoles(
       eligibleTypes.push('textile');
     }
   }
-
   if (eligibleTypes.length === 0) return;
 
   // ── Count ───────────────────────────────────────────────────────────────
@@ -805,75 +810,84 @@ export function assignCraftRoles(
     typeList.push(shuffled[i % shuffled.length]);
   }
 
-  // ── Score residential blocks by outskirt bias ───────────────────────────
-  // [Voronoi-polygon] Outskirt score = mean `polygon.site` distance from the
-  // canvas centre (500, 500).  Higher scores rank first (farthest out).
-  type ScoredBlock = { index: number; outskirtScore: number; isRiverAdjacent: boolean };
+  // ── Build polygon candidate list (one entry per polygon in residential blocks)
+  // [Voronoi-polygon] We work at the polygon level, not the block level.
+  // Each candidate tracks which block index owns it so we can remove it.
+  // isEdge polygons are skipped — they belong to outside-walls sprawl.
+  type Candidate = {
+    polygonId: number;
+    blockIndex: number;
+    outskirtScore: number;  // distance from canvas centre (500, 500)
+    isRiverAdjacent: boolean;
+  };
   const CANVAS_CX = 500;
   const CANVAS_CY = 500;
-  const scoredResidential: ScoredBlock[] = [];
+  const candidates: Candidate[] = [];
 
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i];
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi];
     if (block.role !== 'residential') continue;
-    if (block.polygonIds.length === 0) continue;
-
-    let sumDx = 0;
-    let sumDy = 0;
-    let isRiverAdjacent = false;
     for (const pid of block.polygonIds) {
       const p = polygons[pid];
-      if (!p) continue;
-      sumDx += p.site[0] - CANVAS_CX;
-      sumDy += p.site[1] - CANVAS_CY;
-      if (!isRiverAdjacent && riverAdjacentPolygonIds.has(pid)) {
-        isRiverAdjacent = true;
-      }
+      if (!p || p.isEdge) continue; // skip canvas-border polygons (sprawl territory)
+      const [px, py] = p.site;
+      candidates.push({
+        polygonId: pid,
+        blockIndex: bi,
+        outskirtScore: Math.hypot(px - CANVAS_CX, py - CANVAS_CY),
+        isRiverAdjacent: riverAdjacentPolygonIds.has(pid),
+      });
     }
-    const n = block.polygonIds.length;
-    scoredResidential.push({
-      index: i,
-      outskirtScore: Math.hypot(sumDx / n, sumDy / n),
-      isRiverAdjacent,
-    });
   }
 
-  // Sort outskirt-first (largest distance from centre first).
-  scoredResidential.sort((a, b) => b.outskirtScore - a.outskirtScore || a.index - b.index);
+  // Sort outskirt-first (farthest from centre first), stable id tie-break.
+  candidates.sort((a, b) => b.outskirtScore - a.outskirtScore || a.polygonId - b.polygonId);
 
-  // ── Assign craft roles ──────────────────────────────────────────────────
-  const consumed = new Set<number>();
+  // ── Assign craft roles — one polygon per slot ───────────────────────────
+  const usedPolygonIds = new Set<number>();
+  let craftBlockCount = 0;
 
-  for (let slot = 0; slot < typeList.length; slot++) {
-    const type = typeList[slot];
+  for (const type of typeList) {
     const needsRiver = RIVER_REQUIRING.has(type);
 
-    let picked: ScoredBlock | null = null;
+    let picked: Candidate | null = null;
 
+    // Prefer river-adjacent polygons for river-requiring types.
     if (needsRiver && riverAdjacentPolygonIds.size > 0) {
-      for (const sb of scoredResidential) {
-        if (!consumed.has(sb.index) && sb.isRiverAdjacent) {
-          picked = sb;
+      for (const c of candidates) {
+        if (!usedPolygonIds.has(c.polygonId) && c.isRiverAdjacent) {
+          picked = c;
           break;
         }
       }
     }
 
+    // Fall back to any available outskirt polygon.
     if (!picked) {
-      for (const sb of scoredResidential) {
-        if (!consumed.has(sb.index)) {
-          picked = sb;
+      for (const c of candidates) {
+        if (!usedPolygonIds.has(c.polygonId)) {
+          picked = c;
           break;
         }
       }
     }
 
-    if (!picked) break; // no more residential blocks available
+    if (!picked) break; // pool exhausted
 
-    consumed.add(picked.index);
-    const block = blocks[picked.index];
-    block.role = type;
+    usedPolygonIds.add(picked.polygonId);
+
+    // Remove the polygon from its residential block. The block may become
+    // empty — that is harmless (downstream consumers iterate polygonIds).
+    const srcBlock = blocks[picked.blockIndex];
+    srcBlock.polygonIds = srcBlock.polygonIds.filter(pid => pid !== picked!.polygonId);
+
+    // Push a new 1-polygon craft block.
     const names = CRAFT_NAMES[type];
-    block.name = names[picked.index % names.length];
+    blocks.push({
+      polygonIds: [picked.polygonId],
+      role: type,
+      name: names[craftBlockCount % names.length],
+    });
+    craftBlockCount++;
   }
 }
