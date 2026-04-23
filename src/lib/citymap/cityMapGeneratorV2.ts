@@ -44,6 +44,7 @@ import { generateBlocks, assignCraftRoles } from './cityMapBlocks';
 import { assignSFHRoles } from './cityMapSFHQuarters';
 import { assignMilitaryRoles } from './cityMapMilitaryQuarters';
 import { assignTradeFinanceRoles } from './cityMapTradeFinanceQuarters';
+import { assignEntertainmentRoles } from './cityMapEntertainmentQuarters';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -677,6 +678,16 @@ export function generateCityMapV2(
   // for foreign_quarter + warehouse_row market bias, `gates` for caravanserai
   // gate-adjacency bias.
   assignTradeFinanceRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
+
+  // Re-classify a seeded subset of `residential` blocks (interior 3) and
+  // `agricultural`/`slum` blocks (festival_grounds only) as entertainment &
+  // social districts: theater_district / bathhouse_quarter / pleasure_quarter
+  // / festival_grounds. Called LAST among the assigners so it does not steal
+  // civic / market / military / trade picks. `landmarks` is passed for
+  // theater_district's monument/wonder bias, `openSpaces` for marketBoost,
+  // `gates` for pleasure_quarter gate-adjacency bias. Counts per env.size are
+  // small:0 / medium:0-1 / large:1-2 / metropolis:1-3 / megalopolis:2-5.
+  assignEntertainmentRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
 
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain

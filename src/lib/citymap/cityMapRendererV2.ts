@@ -504,6 +504,7 @@ function drawBlockBackgrounds(
     const craftFill = CRAFT_BG_FILL[block.role];
     const militaryFill = MILITARY_BG_FILL[block.role];
     const tradeFill = TRADE_BG_FILL[block.role];
+    const entertainmentFill = ENTERTAINMENT_BG_FILL[block.role];
     if (sfhFill) {
       // Scholarship / faith / health district — light reddish/pink/violet fill.
       ctx.fillStyle = sfhFill;
@@ -534,6 +535,15 @@ function drawBlockBackgrounds(
     } else if (tradeFill) {
       // Trade & finance district — light yellow / golden fill.
       ctx.fillStyle = tradeFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (entertainmentFill) {
+      // Entertainment & social district — light orange / pumpkin fill.
+      ctx.fillStyle = entertainmentFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -983,6 +993,31 @@ const TRADE_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
   warehouse_row:   '#3a2a08',
 };
 
+// ── Entertainment & social district colours ─────────────────────────────────
+// Light orange and pumpkin family — visually distinct from craft browns, SFH
+// violets/pinks, military greens, and trade golds. Theater is the brightest
+// light orange (theatrical), bathhouse leans pale peach (mild / aquatic),
+// pleasure_quarter is vivid pumpkin (sin-quarter), festival_grounds is a warm
+// orange-tan (earthy fairground). festival_grounds is exterior-only (not in
+// PACKING_ROLES), so it appears only as a block background fill with no
+// building packing on top — same precedent as necropolis / plague_ward.
+const ENTERTAINMENT_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  theater_district:  '#f4b878',
+  bathhouse_quarter: '#f4c8a4',
+  pleasure_quarter:  '#e08540',
+  festival_grounds:  '#e8a868',
+};
+const ENTERTAINMENT_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  theater_district:  ['#f0a868', '#e09858', '#d08848'],
+  bathhouse_quarter: ['#f0bc94', '#e0ac84', '#d09c74'],
+  pleasure_quarter:  ['#d87838', '#c86828', '#b85818'],
+};
+const ENTERTAINMENT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  theater_district:  '#3a1a00',
+  bathhouse_quarter: '#3a2208',
+  pleasure_quarter:  '#3a1000',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -1060,10 +1095,10 @@ function drawBuildings(
     // the role belongs to.
     const role = polygonRole.get(b.polygonId);
     const craftFills = role
-      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role])
+      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role] ?? ENTERTAINMENT_BUILDING_FILLS[role])
       : undefined;
     const craftInk   = role
-      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role])
+      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role]   ?? ENTERTAINMENT_BUILDING_INK[role])
       : undefined;
 
     traceClosedRing(ctx, b.vertices);
@@ -1660,11 +1695,17 @@ const DISTRICT_ICON_PALETTE: Partial<Record<DistrictRole, [fill: string, ink: st
   caravanserai:      ['#ecd488', '#3a2808'],
   bankers_row:       ['#f0c850', '#3a2000'],
   warehouse_row:     ['#f4e8b0', '#3a2a08'],
+  // Entertainment & social — light orange / pumpkin fills with dark warm ink.
+  theater_district:  ['#f8c890', '#3a1a00'],
+  bathhouse_quarter: ['#f8d8b8', '#3a2208'],
+  pleasure_quarter:  ['#f09058', '#3a1000'],
 };
 
-// Roles that do not receive a district icon.
+// Roles that do not receive a district icon. festival_grounds is exterior
+// (an open fairground field) and reads better as a bare coloured polygon —
+// matches the slum / agricultural / dock convention.
 const NO_DISTRICT_ICON: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
-  'slum', 'agricultural', 'dock',
+  'slum', 'agricultural', 'dock', 'festival_grounds',
 ]);
 
 // [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
@@ -1746,6 +1787,9 @@ function drawDistrictGlyph(
     case 'caravanserai':     drawCaravanseraiIcon(ctx, s, fill, ink); break;
     case 'bankers_row':      drawBankersRowIcon(ctx, s, fill, ink); break;
     case 'warehouse_row':    drawWarehouseRowIcon(ctx, s, fill, ink); break;
+    case 'theater_district':  drawTheaterIcon(ctx, s, fill, ink); break;
+    case 'bathhouse_quarter': drawBathhouseIcon(ctx, s, fill, ink); break;
+    case 'pleasure_quarter':  drawPleasureQuarterIcon(ctx, s, fill, ink); break;
   }
 
   ctx.restore();
@@ -2307,5 +2351,108 @@ function drawWarehouseRowIcon(ctx: CanvasRenderingContext2D, s: number, fill: st
   ctx.lineTo(-s * 0.22, s * 0.22);
   ctx.moveTo(s * 0.22, s * 0.22);
   ctx.lineTo(s * 0.72, s * 0.22);
+  ctx.stroke();
+}
+
+// ── Theater: arched proscenium with stage curtain centre-fold ───────────────
+function drawTheaterIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Stage building base
+  ctx.fillRect(-s * 0.7, s * 0.35, s * 1.4, s * 0.3);
+  ctx.strokeRect(-s * 0.7, s * 0.35, s * 1.4, s * 0.3);
+  // Arched proscenium (semicircle on top of a short rect)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.6, s * 0.35);
+  ctx.lineTo(-s * 0.6, -s * 0.1);
+  ctx.arc(0, -s * 0.1, s * 0.6, Math.PI, 0, false);
+  ctx.lineTo(s * 0.6, s * 0.35);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Curtain centre fold (single vertical line)
+  ctx.lineWidth = Math.max(0.3, s * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.55);
+  ctx.lineTo(0, s * 0.35);
+  ctx.stroke();
+  // Two side curtain pleats
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.35, -s * 0.05);
+  ctx.lineTo(-s * 0.35, s * 0.35);
+  ctx.moveTo(s * 0.35, -s * 0.05);
+  ctx.lineTo(s * 0.35, s * 0.35);
+  ctx.stroke();
+}
+
+// ── Bathhouse: domed pool with rising steam squiggles ───────────────────────
+function drawBathhouseIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Pool basin (wide low rect)
+  ctx.fillRect(-s * 0.7, s * 0.2, s * 1.4, s * 0.4);
+  ctx.strokeRect(-s * 0.7, s * 0.2, s * 1.4, s * 0.4);
+  // Dome (semicircle on top of basin)
+  ctx.beginPath();
+  ctx.arc(0, s * 0.2, s * 0.55, Math.PI, 0, false);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Tiny finial on the dome
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(0, -s * 0.4, s * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+  // Steam squiggles rising above the dome (three short S-curves)
+  ctx.lineWidth = Math.max(0.3, s * 0.08);
+  ctx.strokeStyle = ink;
+  for (const xOff of [-s * 0.3, 0, s * 0.3]) {
+    ctx.beginPath();
+    ctx.moveTo(xOff, -s * 0.55);
+    ctx.bezierCurveTo(
+      xOff + s * 0.12, -s * 0.7,
+      xOff - s * 0.12, -s * 0.85,
+      xOff, -s * 0.95,
+    );
+    ctx.stroke();
+  }
+}
+
+// ── Pleasure quarter: hanging lantern silhouette ────────────────────────────
+function drawPleasureQuarterIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.strokeStyle = ink;
+  // Hanging cord from top
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.85);
+  ctx.lineTo(0, -s * 0.55);
+  ctx.stroke();
+  // Lantern cap (small trapezoid)
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.22, -s * 0.55);
+  ctx.lineTo(s * 0.22, -s * 0.55);
+  ctx.lineTo(s * 0.16, -s * 0.45);
+  ctx.lineTo(-s * 0.16, -s * 0.45);
+  ctx.closePath();
+  ctx.fill();
+  // Lantern body (rounded rectangle / oval)
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.ellipse(0, s * 0.05, s * 0.42, s * 0.5, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Horizontal ribs across the lantern (paper-lantern read)
+  ctx.lineWidth = Math.max(0.3, s * 0.06);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.4, -s * 0.18);
+  ctx.lineTo(s * 0.4, -s * 0.18);
+  ctx.moveTo(-s * 0.42, s * 0.05);
+  ctx.lineTo(s * 0.42, s * 0.05);
+  ctx.moveTo(-s * 0.4, s * 0.28);
+  ctx.lineTo(s * 0.4, s * 0.28);
+  ctx.stroke();
+  // Tassel hanging below
+  ctx.lineWidth = Math.max(0.4, s * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.55);
+  ctx.lineTo(0, s * 0.78);
   ctx.stroke();
 }

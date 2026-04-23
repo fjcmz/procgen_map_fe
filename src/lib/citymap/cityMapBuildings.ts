@@ -81,6 +81,12 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'caravanserai',
   'bankers_row',
   'warehouse_row',
+  // Entertainment & social — three of four roles are interior.
+  // festival_grounds is exterior (sourced from agricultural/slum) and appears
+  // as a bare coloured fill, mirroring the necropolis / plague_ward precedent.
+  'theater_district',
+  'bathhouse_quarter',
+  'pleasure_quarter',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -118,6 +124,13 @@ const LOT_BASE: Record<DistrictRole, number> = {
   caravanserai:      2,
   bankers_row:       2,
   warehouse_row:     2,
+  // Entertainment & social: theater = a few large halls; bathhouse = civic-
+  // scale; pleasure_quarter packs denser like residential (taverns + shops);
+  // festival_grounds is exterior, value unused.
+  theater_district:  2,
+  bathhouse_quarter: 2,
+  pleasure_quarter:  3,
+  festival_grounds:  0,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -152,6 +165,12 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   caravanserai:      500,
   bankers_row:       600,
   warehouse_row:     350,
+  // Entertainment & social: theater + bathhouse get civic-scale spacing for
+  // larger notable structures; pleasure_quarter packs denser like residential.
+  theater_district:  700,
+  bathhouse_quarter: 600,
+  pleasure_quarter:  300,
+  festival_grounds:  1,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -179,6 +198,10 @@ const LOT_MIN: Record<DistrictRole, number> = {
   caravanserai:      1,
   bankers_row:       1,
   warehouse_row:     2,
+  theater_district:  1,
+  bathhouse_quarter: 1,
+  pleasure_quarter:  2,
+  festival_grounds:  0,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -206,6 +229,10 @@ const LOT_MAX: Record<DistrictRole, number> = {
   caravanserai:      3,
   bankers_row:       3,
   warehouse_row:     5,
+  theater_district:  3,
+  bathhouse_quarter: 3,
+  pleasure_quarter:  5,
+  festival_grounds:  0,
 };
 
 // Setback in pixels from polygon boundary edges.
