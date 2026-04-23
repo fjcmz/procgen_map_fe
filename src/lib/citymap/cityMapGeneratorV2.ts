@@ -21,13 +21,22 @@ import type { Cell, City, MapData } from '../types';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
   CityEnvironment,
+  CityLandmarkV2,
   CityMapDataV2,
   CityPolygon,
   CitySize,
 } from './cityMapTypesV2';
 import { generateWallsAndGates, type WallConfig } from './cityMapWalls';
 import { selectCityFootprint } from './cityMapShape';
-import { buildPolygonEdgeGraph } from './cityMapEdgeGraph';
+import {
+  buildPolygonEdgeGraph,
+  aStarEdgeGraph,
+  keyPathToPoints,
+  nearestVertexKey,
+  type EdgeNeighbor,
+  type Point,
+  type PolygonEdgeGraph,
+} from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
@@ -183,6 +192,106 @@ export const POLYGON_COUNTS: Record<CitySize, number> = {
 
 const CANVAS_SIZE = 1000;
 const LLOYD_ROUNDS = 2;
+
+// Spec: "limit where a landmark can be set to no more than 5 polygons away
+// from the city." BFS hop limit from any city interior polygon.
+const MOUNTAIN_LANDMARK_MAX_DISTANCE = 5;
+
+/**
+ * Multi-source BFS from every interior polygon outward through the polygon
+ * adjacency graph. Returns the subset of `mountainPolygonIds` that are
+ * reachable within `maxDistance` hops from any interior polygon.
+ *
+ * Used to restrict temple / monument placement on mountain polygons so
+ * only foothills-range peaks (within MOUNTAIN_LANDMARK_MAX_DISTANCE steps
+ * of the city wall) are eligible — distant peaks that the city would never
+ * realistically claim are excluded.
+ */
+function findNearMountainPolygons(
+  polygons: CityPolygon[],
+  interiorPolygonIds: Set<number>,
+  mountainPolygonIds: Set<number>,
+  maxDistance: number,
+): Set<number> {
+  if (mountainPolygonIds.size === 0 || interiorPolygonIds.size === 0) {
+    return new Set<number>();
+  }
+  const dist = new Map<number, number>();
+  const queue: number[] = [];
+  for (const pid of interiorPolygonIds) {
+    dist.set(pid, 0);
+    queue.push(pid);
+  }
+  let head = 0;
+  while (head < queue.length) {
+    const pid = queue[head++];
+    const d = dist.get(pid)!;
+    if (d >= maxDistance) continue;
+    for (const nb of polygons[pid].neighbors) {
+      if (!dist.has(nb)) {
+        dist.set(nb, d + 1);
+        queue.push(nb);
+      }
+    }
+  }
+  const result = new Set<number>();
+  for (const pid of mountainPolygonIds) {
+    const d = dist.get(pid);
+    if (d !== undefined && d <= maxDistance) result.add(pid);
+  }
+  return result;
+}
+
+/**
+ * For each landmark placed on a mountain polygon, A* a street path from the
+ * canvas center to that polygon's site vertex, allowing mountain polygon
+ * edges (only water edges remain impassable). Returns additional path
+ * segments to append to the main `streets` array.
+ *
+ * Spec: "if a landmark is set on mountains, there must be a street from
+ * the city to that landmark."
+ */
+function generateMountainLandmarkStreets(
+  polygons: CityPolygon[],
+  graph: PolygonEdgeGraph,
+  landmarks: CityLandmarkV2[],
+  mountainPolygonIds: Set<number>,
+  waterPolygonIds: Set<number>,
+  canvasSize: number,
+): Point[][] {
+  const mountainLandmarks = landmarks.filter(lm => mountainPolygonIds.has(lm.polygonId));
+  if (mountainLandmarks.length === 0) return [];
+
+  // Build water-only edge block set. Mountain polygon edges are intentionally
+  // NOT included so the path can traverse from the city into the mountain.
+  const waterEdgeKeys = new Set<string>();
+  for (const [eKey, rec] of graph.edges) {
+    for (const pid of rec.polyIds) {
+      if (waterPolygonIds.has(pid)) { waterEdgeKeys.add(eKey); break; }
+    }
+  }
+
+  const centerKey = nearestVertexKey(graph, [canvasSize / 2, canvasSize / 2]);
+  if (!centerKey) return [];
+
+  const result: Point[][] = [];
+  for (const lm of mountainLandmarks) {
+    const lmPoly = polygons[lm.polygonId];
+    const targetKey = nearestVertexKey(graph, lmPoly.site);
+    if (!targetKey || targetKey === centerKey) continue;
+    const costFn = (
+      _currKey: string,
+      _currPoint: Point,
+      nb: EdgeNeighbor,
+      _prevKey: string | null,
+    ): number => (waterEdgeKeys.has(nb.edgeKey) ? Infinity : nb.edgeLen);
+    const pathKeys = aStarEdgeGraph(graph, centerKey, targetKey, costFn);
+    if (pathKeys && pathKeys.length >= 2) {
+      result.push(keyPathToPoints(graph, pathKeys));
+    }
+  }
+  return result;
+}
 
 // [Voronoi foundation] — builds the city's polygon graph from N seeded points.
 //
@@ -501,6 +610,17 @@ export function generateCityMapV2(
     mountainPolygonIds,
   );
 
+  // Filter mountain polygons for landmark eligibility: only those within
+  // MOUNTAIN_LANDMARK_MAX_DISTANCE polygon hops of the city footprint
+  // boundary are candidates. Distant peaks that the city cannot plausibly
+  // claim are excluded from temple / monument pools.
+  const nearMountainPolygonIds = findNearMountainPolygons(
+    polygons,
+    footprint.interior,
+    mountainPolygonIds,
+    MOUNTAIN_LANDMARK_MAX_DISTANCE,
+  );
+
   // PR 4 (landmarks slice) — capital castle/palace + temple-per-religion +
   // monument-per-wonder. Every landmark anchors to one `polygon.id`, sourced
   // from civic / market blocks with a shared `used` set enforcing de-dup
@@ -516,7 +636,21 @@ export function generateCityMapV2(
     blocks,
     openSpaces,
     CANVAS_SIZE,
-    mountainPolygonIds,
+    nearMountainPolygonIds,
+  );
+
+  // Spec: "if a landmark is set on mountains, there must be a street from
+  // the city to that landmark." For each landmark placed on a mountain
+  // polygon, A* a path from the city center through the polygon edge graph
+  // (mountain edges allowed, water edges still blocked) and append it to
+  // the streets array so the renderer draws it as a thin connecting path.
+  const mountainStreets = generateMountainLandmarkStreets(
+    polygons,
+    edgeGraph,
+    landmarks,
+    nearMountainPolygonIds,
+    waterPolygonIds,
+    CANVAS_SIZE,
   );
 
   // PR 5 (buildings slice) — polygon-interior rejection-sampling packer.
@@ -575,7 +709,7 @@ export function generateCityMapV2(
     river,
     bridges,
     roads,
-    streets,
+    streets: mountainStreets.length > 0 ? [...streets, ...mountainStreets] : streets,
     blocks,
     openSpaces,
     buildings,
