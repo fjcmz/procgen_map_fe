@@ -71,6 +71,11 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'temple_quarter',
   'academia',
   'archive_quarter',
+  // Military & security — all four roles are interior.
+  'barracks',
+  'citadel',
+  'arsenal',
+  'watchmen_precinct',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -94,6 +99,12 @@ const LOT_BASE: Record<DistrictRole, number> = {
   archive_quarter: 2,
   necropolis:      0,
   plague_ward:     0,
+  // Military: barracks = many drill-row buildings; citadel = single keep-scale
+  // footprint; arsenal = few large magazines; watchmen = moderate.
+  barracks:          3,
+  citadel:           2,
+  arsenal:           2,
+  watchmen_precinct: 2,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -115,6 +126,12 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   archive_quarter: 700,
   necropolis:      1,
   plague_ward:     1,
+  // Military: large divisors for citadel / arsenal (few big footprints),
+  // smaller for barracks (drill-rows pack more lots per polygon).
+  barracks:          400,
+  citadel:           900,
+  arsenal:           700,
+  watchmen_precinct: 500,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -134,6 +151,10 @@ const LOT_MIN: Record<DistrictRole, number> = {
   archive_quarter: 1,
   necropolis:      0,
   plague_ward:     0,
+  barracks:          2,
+  citadel:           1,
+  arsenal:           1,
+  watchmen_precinct: 1,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -153,6 +174,10 @@ const LOT_MAX: Record<DistrictRole, number> = {
   archive_quarter: 3,
   necropolis:      0,
   plague_ward:     0,
+  barracks:          6,
+  citadel:           2,
+  arsenal:           3,
+  watchmen_precinct: 4,
 };
 
 // Setback in pixels from polygon boundary edges.

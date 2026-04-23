@@ -496,6 +496,7 @@ function drawBlockBackgrounds(
   for (const block of data.blocks) {
     const sfhFill = SFH_BG_FILL[block.role];
     const craftFill = CRAFT_BG_FILL[block.role];
+    const militaryFill = MILITARY_BG_FILL[block.role];
     if (sfhFill) {
       // Scholarship / faith / health district — light reddish/pink/violet fill.
       ctx.fillStyle = sfhFill;
@@ -508,6 +509,15 @@ function drawBlockBackgrounds(
     } else if (craftFill) {
       // Craft & industry district — distinctive industrial background.
       ctx.fillStyle = craftFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (militaryFill) {
+      // Military & security district — army-green / camouflage fill.
+      ctx.fillStyle = militaryFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -909,6 +919,30 @@ const SFH_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
   archive_quarter: '#250825',
 };
 
+// ── Military & security district colours ────────────────────────────────────
+// Army-green / camouflage family, visually distinct from the SFH lavender/
+// periwinkle/rose palette and the craft warm-earth palette. Each of the four
+// roles gets a distinct hue inside the green-khaki-olive-drab band so adjacent
+// military blocks still read as separate districts.
+const MILITARY_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  barracks:          '#8a9a5a', // olive drab        — infantry quarters
+  citadel:           '#4a5a3a', // deep forest green — fortified inner keep
+  arsenal:           '#6a7a4a', // field green       — powder magazines
+  watchmen_precinct: '#a8b088', // khaki / light camo — utility watch posts
+};
+const MILITARY_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  barracks:          ['#7a8a4a', '#6a7a3a', '#5a6a2a'],
+  citadel:           ['#3e4e30', '#324228', '#263620'],
+  arsenal:           ['#5a6a3a', '#4a5a2a', '#3a4a1a'],
+  watchmen_precinct: ['#98a078', '#889068', '#788058'],
+};
+const MILITARY_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  barracks:          '#20280a',
+  citadel:           '#101808',
+  arsenal:           '#181c08',
+  watchmen_precinct: '#2a2e18',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -980,10 +1014,14 @@ function drawBuildings(
     const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
-    // Resolve per-role colors — craft & industry first, then SFH districts.
+    // Resolve per-role colors — craft & industry first, then SFH, then military.
     const role = polygonRole.get(b.polygonId);
-    const craftFills = role ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role]) : undefined;
-    const craftInk   = role ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role])   : undefined;
+    const craftFills = role
+      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role])
+      : undefined;
+    const craftInk   = role
+      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role])
+      : undefined;
 
     traceClosedRing(ctx, b.vertices);
     if (ruinRng) {
