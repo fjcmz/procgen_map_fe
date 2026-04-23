@@ -29,7 +29,8 @@ export type DistrictRole =
   | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill'
   | 'temple_quarter' | 'necropolis' | 'academia' | 'plague_ward' | 'archive_quarter'
   | 'barracks' | 'citadel' | 'arsenal' | 'watchmen_precinct'
-  | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row';
+  | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row'
+  | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds';
 
 export interface CityEnvironment {
   biome: BiomeType;
