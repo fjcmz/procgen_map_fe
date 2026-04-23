@@ -87,8 +87,6 @@ import { seededPRNG } from '../terrain/noise';
 
 const BASE_FILL = '#ece5d3';
 const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
-const CITY_NAME_INK = '#2a241c';
-const QA_TAG_INK = '#8a8070';
 
 // Coastal water — polygons bordering `env.waterSide`. Light-blue sea fill
 // slightly bluer than the river channel so the two read as separate bodies.
@@ -334,17 +332,15 @@ export function renderCityMapV2(
   }
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
-  ctx.fillStyle = CITY_NAME_INK;
   ctx.font = 'bold 22px Georgia, serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.fillText(cityName, size / 2, 16);
+  drawOutlinedText(ctx, cityName, size / 2, 16, 3);
 
-  ctx.fillStyle = QA_TAG_INK;
   ctx.font = '10px Georgia, serif';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
-  ctx.fillText('V2', size - 8, size - 8);
+  drawOutlinedText(ctx, 'V2', size - 8, size - 8, 2);
 }
 
 // [Voronoi-polygon] Fill every water polygon with a light-blue sea colour
@@ -1197,6 +1193,23 @@ function randIntInclusive(rng: () => number, lo: number, hi: number): number {
   return lo + Math.floor(rng() * (hi - lo + 1));
 }
 
+// Draw text with a black outline so it stays readable against any background.
+// Stroke (outline) is drawn first, fill (white) on top.
+function drawOutlinedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  outlineWidth: number,
+): void {
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = outlineWidth;
+  ctx.lineJoin = 'round';
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(text, x, y);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PR 4 (slice) — landmarks (castle / palace / temple / monument) on Layer 12
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1239,11 +1252,9 @@ function drawLandmarks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void
     if (!polygon) continue;
     const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
-    const { ink } = LANDMARK_COLORS[lm.type];
     const fontPx = Math.max(8, Math.round(sz * 0.35));
     ctx.font = `bold ${fontPx}px Georgia, 'Times New Roman', serif`;
-    ctx.fillStyle = ink;
-    ctx.fillText(lm.type.toUpperCase(), cx, cy + sz / 2 + 1);
+    drawOutlinedText(ctx, lm.type.toUpperCase(), cx, cy + sz / 2 + 1, 2.5);
   }
 }
 
