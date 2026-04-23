@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CityEnvironment } from '../lib/citymap';
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
@@ -13,6 +13,7 @@ interface CityMapPopupV2Props {
 
 export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [showIcons, setShowIcons] = useState(true);
 
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
@@ -36,8 +37,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     ctx.scale(dpr, dpr);
 
     const data = generateCityMapV2(seed, cityName, environment);
-    renderCityMapV2(ctx, data, environment, seed, cityName);
-  }, [isOpen, seed, cityName, environment]);
+    renderCityMapV2(ctx, data, environment, seed, cityName, showIcons);
+  }, [isOpen, seed, cityName, environment, showIcons]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -58,8 +59,19 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     <div style={styles.backdrop} onClick={handleBackdropClick}>
       <div style={styles.container}>
         <div style={styles.header}>
-          <span style={styles.title}>{cityName} (V2)</span>
-          <button style={styles.closeBtn} onClick={onClose} title="Close">&times;</button>
+          <span style={styles.title}>{cityName}</span>
+          <div style={styles.headerControls}>
+            <label style={styles.iconToggle}>
+              <input
+                type="checkbox"
+                checked={showIcons}
+                onChange={e => setShowIcons(e.target.checked)}
+                style={styles.checkbox}
+              />
+              <span style={styles.iconToggleText}>Icons</span>
+            </label>
+            <button style={styles.closeBtn} onClick={onClose} title="Close">&times;</button>
+          </div>
         </div>
         <div style={styles.canvasWrapper}>
           <canvas ref={canvasRef} style={styles.canvas} />
@@ -111,17 +123,50 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#ecdbb8',
     borderRadius: '6px 6px 0 0',
     flexShrink: 0,
+    gap: 8,
   },
   title: {
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 15,
     color: '#3a1a00',
     letterSpacing: 0.5,
-    fontFamily: 'serif',
+    fontFamily: 'Georgia, serif',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    marginRight: 8,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  headerControls: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  iconToggle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 5,
+    cursor: 'pointer',
+    userSelect: 'none',
+    padding: '3px 8px',
+    borderRadius: 4,
+    border: '1px solid #c4a070',
+    background: 'rgba(255,255,255,0.35)',
+    transition: 'background 0.15s',
+  },
+  checkbox: {
+    cursor: 'pointer',
+    accentColor: '#8a6a3a',
+    width: 14,
+    height: 14,
+    flexShrink: 0,
+  },
+  iconToggleText: {
+    fontSize: 11,
+    color: '#5a3a10',
+    fontFamily: 'sans-serif',
+    letterSpacing: 0.3,
   },
   closeBtn: {
     background: 'none',
@@ -133,7 +178,6 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1,
     fontWeight: 'bold',
     flexShrink: 0,
-    // Ensure a large-enough touch target on mobile
     minWidth: 44,
     minHeight: 44,
     display: 'flex',

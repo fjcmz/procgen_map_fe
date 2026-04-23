@@ -77,6 +77,7 @@
 
 import type {
   CityBuildingV2,
+  CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
   CityMapDataV2,
@@ -215,6 +216,7 @@ export function renderCityMapV2(
   env: CityEnvironment,
   seed: string,
   cityName: string,
+  showIcons = true,
 ): void {
   const size = data.canvasSize;
 
@@ -279,7 +281,8 @@ export function renderCityMapV2(
   drawSprawl(ctx, data, ruinRng);
 
   // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
-  drawOpenSpaces(ctx, data, seed, cityName);
+  // Area fills always drawn; stall dots + park trees only when showIcons=true.
+  drawOpenSpaces(ctx, data, seed, cityName, showIcons);
 
   // ── Layer 6: streets (PR 3) ────────────────────────────────────────────
   if (ruinRng) {
@@ -292,7 +295,10 @@ export function renderCityMapV2(
   drawBuildings(ctx, data, seed, cityName, ruinRng);
 
   // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
-  drawLandmarks(ctx, data);
+  if (showIcons) drawLandmarks(ctx, data);
+
+  // ── Layer 12.5: district icons — small role glyphs at block centroids ──
+  if (showIcons) drawDistrictIcons(ctx, data);
 
   // ── Wall rings — drawn innermost first so outer rings sit visually on top ──
   drawInnerWalls(ctx, data);
@@ -1196,13 +1202,16 @@ function drawOpenSpaces(
   data: CityMapDataV2,
   seed: string,
   cityName: string,
+  showIcons = true,
 ): void {
   if (data.openSpaces.length === 0) return;
 
-  // Pass 1 — fill polygon rings. Each kind has its own palette.
+  // Pass 1 — fill polygon rings (always, regardless of showIcons).
   fillOpenSpaceKind(ctx, data, ['square'], OPEN_SPACE_SQUARE_FILL, OPEN_SPACE_SQUARE_STROKE);
   fillOpenSpaceKind(ctx, data, ['market'], OPEN_SPACE_MARKET_FILL, OPEN_SPACE_MARKET_STROKE);
   fillOpenSpaceKind(ctx, data, ['park'], OPEN_SPACE_PARK_FILL, OPEN_SPACE_PARK_STROKE);
+
+  if (!showIcons) return;
 
   // Pass 2 — market stall dots scattered inside each market polygon.
   const stallRng = seededPRNG(`${seed}_city_${cityName}_openspaces_render_markets`);
@@ -1563,4 +1572,556 @@ function drawMonumentGlyph(
   const stepW = size * 0.42;
   const stepH = size * 0.07;
   ctx.fillRect(cx - stepW / 2, baseY, stepW, stepH);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// District icons — small role-identifying glyphs drawn at each block's
+// centroid. Shown only when `showIcons` is true in `renderCityMapV2`.
+//
+// Design rules:
+//   - White background disc for readability on any block-fill color.
+//   - Each glyph is drawn at DISTRICT_ICON_SIZE (16 px bounding box, s=8 px
+//     half-size) centered on the block centroid.
+//   - Colors are lighter versions of the block background fills so the icon
+//     reads as part of the block's theme.
+//   - Blocks that host a landmark glyph are skipped to avoid overlap.
+//   - slum / agricultural / dock blocks are skipped — outside-walls territory
+//     whose identity is already clear from the biome tint / plank styling.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const DISTRICT_ICON_SIZE = 16;
+const DISTRICT_ICON_BG_ALPHA = 0.85;
+
+// Icon palette: slightly lighter/brighter than the block background fills.
+const DISTRICT_ICON_PALETTE: Partial<Record<DistrictRole, [fill: string, ink: string]>> = {
+  civic:             ['#f0e8d8', '#3a2810'],
+  residential:       ['#ece4d4', '#3a2810'],
+  harbor:            ['#b8d4e8', '#1a3858'],
+  market:            ['#f8eebc', '#5a3000'],
+  forge:             ['#dcc8a8', '#2a1a0a'],
+  tannery:           ['#d0b888', '#3a1808'],
+  textile:           ['#dcc898', '#382010'],
+  potters:           ['#e0b090', '#3a1808'],
+  mill:              ['#ccc8b8', '#202018'],
+  temple_quarter:    ['#e8cce8', '#280838'],
+  necropolis:        ['#d8cce0', '#201828'],
+  academia:          ['#ccd0f0', '#080830'],
+  plague_ward:       ['#f4ccd0', '#380820'],
+  archive_quarter:   ['#e8cce4', '#250825'],
+  barracks:          ['#b0c078', '#20280a'],
+  citadel:           ['#7a9060', '#101808'],
+  arsenal:           ['#98b070', '#181c08'],
+  watchmen_precinct: ['#ccd8a8', '#2a2e18'],
+};
+
+// Roles that do not receive a district icon.
+const NO_DISTRICT_ICON: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
+  'slum', 'agricultural', 'dock',
+]);
+
+// [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
+// all valid polygons in a block's `polygonIds`. Falls back to canvas center.
+function blockCentroid(polygonIds: number[], polygons: CityPolygon[]): [number, number] {
+  let x = 0, y = 0, n = 0;
+  for (const pid of polygonIds) {
+    const p = polygons[pid];
+    if (!p) continue;
+    x += p.site[0]; y += p.site[1]; n++;
+  }
+  return n > 0 ? [x / n, y / n] : [500, 500];
+}
+
+// [Voronoi-polygon] Render a small role icon at the centroid of every
+// interior block that has a defined palette entry. Blocks that already host
+// a landmark glyph on any of their polygons are skipped to avoid overlap.
+function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.blocks.length === 0) return;
+
+  // Set of polygons that host a landmark — skip those blocks.
+  const landmarkPolygons = new Set(data.landmarks.map(lm => lm.polygonId));
+
+  for (const block of data.blocks as CityBlockV2[]) {
+    if (NO_DISTRICT_ICON.has(block.role)) continue;
+    const palette = DISTRICT_ICON_PALETTE[block.role];
+    if (!palette) continue;
+    if (block.polygonIds.some(pid => landmarkPolygons.has(pid))) continue;
+
+    const [cx, cy] = blockCentroid(block.polygonIds, data.polygons);
+    const [fill, ink] = palette;
+    drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, block.role, fill, ink);
+  }
+}
+
+// Draw a single district glyph: white background disc + role-specific icon.
+function drawDistrictGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  role: DistrictRole,
+  fill: string,
+  ink: string,
+): void {
+  const s = size / 2;
+
+  // White background disc.
+  ctx.beginPath();
+  ctx.arc(cx, cy, s * 1.25, 0, Math.PI * 2);
+  ctx.fillStyle = `rgba(255,255,255,${DISTRICT_ICON_BG_ALPHA})`;
+  ctx.fill();
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  switch (role) {
+    case 'civic':            drawCivicIcon(ctx, s, fill, ink); break;
+    case 'residential':      drawResidentialIcon(ctx, s, fill, ink); break;
+    case 'harbor':           drawHarborIcon(ctx, s, fill, ink); break;
+    case 'market':           drawMarketIcon(ctx, s, fill, ink); break;
+    case 'forge':            drawForgeIcon(ctx, s, fill, ink); break;
+    case 'tannery':          drawTanneryIcon(ctx, s, fill, ink); break;
+    case 'textile':          drawTextileIcon(ctx, s, fill, ink); break;
+    case 'potters':          drawPottersIcon(ctx, s, fill, ink); break;
+    case 'mill':             drawMillIcon(ctx, s, fill, ink); break;
+    case 'temple_quarter':   drawTempleQuarterIcon(ctx, s, fill, ink); break;
+    case 'necropolis':       drawNecropolisIcon(ctx, s, fill, ink); break;
+    case 'academia':         drawAcademiaIcon(ctx, s, fill, ink); break;
+    case 'plague_ward':      drawPlagueWardIcon(ctx, s, fill, ink); break;
+    case 'archive_quarter':  drawArchiveIcon(ctx, s, fill, ink); break;
+    case 'barracks':         drawBarracksIcon(ctx, s, fill, ink); break;
+    case 'citadel':          drawCitadelIcon(ctx, s, fill, ink); break;
+    case 'arsenal':          drawArsenalIcon(ctx, s, fill, ink); break;
+    case 'watchmen_precinct': drawWatchmenIcon(ctx, s, fill, ink); break;
+  }
+
+  ctx.restore();
+}
+
+// ── Civic: 3 columns + entablature (Greco-Roman civic hall) ─────────────────
+function drawCivicIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  const lw = Math.max(0.4, s * 0.1);
+  ctx.lineWidth = lw;
+  const cw = s * 0.18;
+  // 3 pillars
+  for (const xOff of [-s * 0.42, 0, s * 0.42]) {
+    ctx.fillStyle = fill; ctx.strokeStyle = ink;
+    ctx.fillRect(xOff - cw / 2, -s * 0.48, cw, s * 0.88);
+    ctx.strokeRect(xOff - cw / 2, -s * 0.48, cw, s * 0.88);
+  }
+  // Entablature (wider top bar)
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.fillRect(-s * 0.75, -s * 0.78, s * 1.5, s * 0.3);
+  ctx.strokeRect(-s * 0.75, -s * 0.78, s * 1.5, s * 0.3);
+  // Base step
+  ctx.fillRect(-s * 0.75, s * 0.4, s * 1.5, s * 0.25);
+  ctx.strokeRect(-s * 0.75, s * 0.4, s * 1.5, s * 0.25);
+}
+
+// ── Residential: simple house shape ─────────────────────────────────────────
+function drawResidentialIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Body
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.fillRect(-s * 0.62, -s * 0.1, s * 1.24, s * 0.82);
+  ctx.strokeRect(-s * 0.62, -s * 0.1, s * 1.24, s * 0.82);
+  // Roof triangle
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.75, -s * 0.1);
+  ctx.lineTo(0, -s * 0.82);
+  ctx.lineTo(s * 0.75, -s * 0.1);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Door
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.18, s * 0.32, s * 0.36, s * 0.4);
+}
+
+// ── Harbor: anchor (ring + shaft + crossbar + flukes) ───────────────────────
+function drawHarborIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.5, s * 0.13);
+  // Ring at top
+  ctx.beginPath();
+  ctx.arc(0, -s * 0.6, s * 0.22, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Vertical shaft
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.38);
+  ctx.lineTo(0, s * 0.52);
+  ctx.stroke();
+  // Crossbar
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.5, -s * 0.22);
+  ctx.lineTo(s * 0.5, -s * 0.22);
+  ctx.stroke();
+  // Curved flukes (two short arcs at bottom)
+  ctx.beginPath();
+  ctx.arc(-s * 0.35, s * 0.42, s * 0.22, -Math.PI * 0.25, Math.PI * 0.65);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(s * 0.35, s * 0.42, s * 0.22, Math.PI * 0.35, -Math.PI * 0.65, true);
+  ctx.stroke();
+}
+
+// ── Market: awning + open stall ──────────────────────────────────────────────
+function drawMarketIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Stall body
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.fillRect(-s * 0.52, -s * 0.05, s * 1.04, s * 0.68);
+  ctx.strokeRect(-s * 0.52, -s * 0.05, s * 1.04, s * 0.68);
+  // Awning (trapezoid)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.72, -s * 0.05);
+  ctx.lineTo(-s * 0.52, -s * 0.58);
+  ctx.lineTo(s * 0.52, -s * 0.58);
+  ctx.lineTo(s * 0.72, -s * 0.05);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Two stall goods
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.38, s * 0.08, s * 0.24, s * 0.26);
+  ctx.fillRect(s * 0.14, s * 0.08, s * 0.24, s * 0.26);
+}
+
+// ── Forge: anvil shape ──────────────────────────────────────────────────────
+function drawForgeIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Anvil top body
+  ctx.fillRect(-s * 0.62, -s * 0.35, s * 1.24, s * 0.48);
+  ctx.strokeRect(-s * 0.62, -s * 0.35, s * 1.24, s * 0.48);
+  // Horn (left protrusion)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.62, -s * 0.35);
+  ctx.lineTo(-s * 0.62, s * 0.13);
+  ctx.lineTo(-s * 0.9, -s * 0.1);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Pedestal base
+  ctx.fillRect(-s * 0.38, s * 0.13, s * 0.76, s * 0.52);
+  ctx.strokeRect(-s * 0.38, s * 0.13, s * 0.76, s * 0.52);
+}
+
+// ── Tannery: barrel with hoops ──────────────────────────────────────────────
+function drawTanneryIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, s * 0.52, s * 0.72, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Barrel hoops (3)
+  ctx.lineWidth = Math.max(0.3, s * 0.08);
+  for (const hy of [-s * 0.38, 0, s * 0.38]) {
+    ctx.beginPath();
+    ctx.ellipse(0, hy, s * 0.52, s * 0.13, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+// ── Textile: thread spool / bobbin ──────────────────────────────────────────
+function drawTextileIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Top flange
+  ctx.beginPath();
+  ctx.ellipse(0, -s * 0.52, s * 0.48, s * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Bottom flange
+  ctx.beginPath();
+  ctx.ellipse(0, s * 0.52, s * 0.48, s * 0.18, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Barrel body
+  ctx.fillRect(-s * 0.2, -s * 0.52, s * 0.4, s * 1.04);
+  ctx.strokeRect(-s * 0.2, -s * 0.52, s * 0.4, s * 1.04);
+  // Thread wound around (diagonal lines)
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.3, s * 0.07);
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.2, i * s * 0.2);
+    ctx.lineTo(s * 0.2, i * s * 0.2 + s * 0.07);
+    ctx.stroke();
+  }
+}
+
+// ── Potters: pot / vase shape ────────────────────────────────────────────────
+function drawPottersIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Vase body via bezier
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.2, -s * 0.72);
+  ctx.lineTo(s * 0.2, -s * 0.72);
+  ctx.bezierCurveTo(s * 0.62, -s * 0.35, s * 0.68, s * 0.2, s * 0.52, s * 0.58);
+  ctx.lineTo(-s * 0.52, s * 0.58);
+  ctx.bezierCurveTo(-s * 0.68, s * 0.2, -s * 0.62, -s * 0.35, -s * 0.2, -s * 0.72);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Rim at top
+  ctx.fillRect(-s * 0.28, -s * 0.85, s * 0.56, s * 0.15);
+  ctx.strokeRect(-s * 0.28, -s * 0.85, s * 0.56, s * 0.15);
+}
+
+// ── Mill: 4-blade windmill ────────────────────────────────────────────────────
+function drawMillIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // 4 blades radiating from hub (each is a filled lozenge)
+  const bladeR = s * 0.78;
+  const bladeW = s * 0.2;
+  const angles = [Math.PI / 4, -Math.PI / 4, Math.PI * 3 / 4, -Math.PI * 3 / 4];
+  ctx.lineWidth = Math.max(0.3, s * 0.08);
+  for (const a of angles) {
+    const ex = Math.cos(a) * bladeR;
+    const ey = Math.sin(a) * bladeR;
+    const px = -Math.sin(a) * bladeW;
+    const py = Math.cos(a) * bladeW;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(ex / 2 + px / 2, ey / 2 + py / 2);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(ex / 2 - px / 2, ey / 2 - py / 2);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+  }
+  // Central hub circle
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.beginPath();
+  ctx.arc(0, 0, s * 0.22, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+}
+
+// ── Temple quarter: pediment + 3 columns ─────────────────────────────────────
+function drawTempleQuarterIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Triangular pediment
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.72, -s * 0.15);
+  ctx.lineTo(0, -s * 0.78);
+  ctx.lineTo(s * 0.72, -s * 0.15);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 3 columns
+  const cw = s * 0.16;
+  for (const xOff of [-s * 0.4, 0, s * 0.4]) {
+    ctx.fillRect(xOff - cw / 2, -s * 0.15, cw, s * 0.88);
+    ctx.strokeRect(xOff - cw / 2, -s * 0.15, cw, s * 0.88);
+  }
+  // Base
+  ctx.fillRect(-s * 0.72, s * 0.68, s * 1.44, s * 0.2);
+  ctx.strokeRect(-s * 0.72, s * 0.68, s * 1.44, s * 0.2);
+}
+
+// ── Necropolis: tombstone (arch-topped rectangle + cross) ────────────────────
+function drawNecropolisIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  const hw = s * 0.5;
+  const bodyTop = -s * 0.2;
+  const bodyBot = s * 0.75;
+  // Arch-topped tombstone path
+  ctx.beginPath();
+  ctx.moveTo(-hw, bodyTop);
+  ctx.arc(0, bodyTop, hw, Math.PI, 0, false);
+  ctx.lineTo(hw, bodyBot);
+  ctx.lineTo(-hw, bodyBot);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Cross
+  ctx.fillStyle = ink;
+  ctx.lineWidth = Math.max(0.4, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(0, bodyTop + s * 0.08);
+  ctx.lineTo(0, bodyBot - s * 0.1);
+  ctx.moveTo(-s * 0.28, bodyTop + s * 0.42);
+  ctx.lineTo(s * 0.28, bodyTop + s * 0.42);
+  ctx.stroke();
+}
+
+// ── Academia: open book ──────────────────────────────────────────────────────
+function drawAcademiaIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Left page
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.06, -s * 0.72);
+  ctx.lineTo(-s * 0.72, -s * 0.48);
+  ctx.lineTo(-s * 0.72, s * 0.62);
+  ctx.lineTo(-s * 0.06, s * 0.72);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Right page
+  ctx.beginPath();
+  ctx.moveTo(s * 0.06, -s * 0.72);
+  ctx.lineTo(s * 0.72, -s * 0.48);
+  ctx.lineTo(s * 0.72, s * 0.62);
+  ctx.lineTo(s * 0.06, s * 0.72);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Spine
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.5, s * 0.14);
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.72);
+  ctx.lineTo(0, s * 0.72);
+  ctx.stroke();
+  // Text lines
+  ctx.lineWidth = Math.max(0.25, s * 0.06);
+  for (const ty of [-s * 0.25, s * 0.08, s * 0.4]) {
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.58, ty);
+    ctx.lineTo(-s * 0.14, ty + s * 0.05);
+    ctx.moveTo(s * 0.14, ty - s * 0.05);
+    ctx.lineTo(s * 0.58, ty);
+    ctx.stroke();
+  }
+}
+
+// ── Plague ward: medical cross in circle ─────────────────────────────────────
+function drawPlagueWardIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Circle
+  ctx.beginPath();
+  ctx.arc(0, 0, s * 0.82, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Bold cross
+  const arm = s * 0.48;
+  const aw = s * 0.24;
+  ctx.fillStyle = ink;
+  ctx.fillRect(-aw / 2, -arm, aw, arm * 2);
+  ctx.fillRect(-arm, -aw / 2, arm * 2, aw);
+}
+
+// ── Archive quarter: scroll with rolled ends ─────────────────────────────────
+function drawArchiveIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Scroll body
+  ctx.fillRect(-s * 0.52, -s * 0.32, s * 1.04, s * 0.64);
+  ctx.strokeRect(-s * 0.52, -s * 0.32, s * 1.04, s * 0.64);
+  // Left end roll (ellipse)
+  ctx.beginPath();
+  ctx.ellipse(-s * 0.52, 0, s * 0.2, s * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Right end roll
+  ctx.beginPath();
+  ctx.ellipse(s * 0.52, 0, s * 0.2, s * 0.32, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  // Text lines on scroll body
+  ctx.lineWidth = Math.max(0.25, s * 0.06);
+  for (const ty of [-s * 0.16, 0, s * 0.16]) {
+    ctx.beginPath();
+    ctx.moveTo(-s * 0.38, ty);
+    ctx.lineTo(s * 0.38, ty);
+    ctx.stroke();
+  }
+}
+
+// ── Barracks: crossed swords ─────────────────────────────────────────────────
+function drawBarracksIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(0.5, s * 0.14);
+  // Sword 1 (NW→SE blade)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.7, -s * 0.7);
+  ctx.lineTo(s * 0.58, s * 0.58);
+  ctx.stroke();
+  // Sword 2 (NE→SW blade)
+  ctx.beginPath();
+  ctx.moveTo(s * 0.7, -s * 0.7);
+  ctx.lineTo(-s * 0.58, s * 0.58);
+  ctx.stroke();
+  // Cross-guards (perpendicular bars at center)
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.24, 0);
+  ctx.lineTo(s * 0.24, 0);
+  ctx.moveTo(0, -s * 0.24);
+  ctx.lineTo(0, s * 0.24);
+  ctx.stroke();
+  // Pommels
+  ctx.fillStyle = ink;
+  for (const [px, py] of [[-s * 0.68, -s * 0.68], [s * 0.68, -s * 0.68]] as [number, number][]) {
+    ctx.beginPath();
+    ctx.arc(px, py, s * 0.12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ── Citadel: tower with crenellations ────────────────────────────────────────
+function drawCitadelIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Tower body
+  ctx.fillRect(-s * 0.44, -s * 0.38, s * 0.88, s * 1.1);
+  ctx.strokeRect(-s * 0.44, -s * 0.38, s * 0.88, s * 1.1);
+  // 3 merlons (battlements on top)
+  const mw = s * 0.24;
+  const mh = s * 0.28;
+  for (const xOff of [-s * 0.28, 0, s * 0.28]) {
+    ctx.fillRect(xOff - mw / 2, -s * 0.66, mw, mh);
+    ctx.strokeRect(xOff - mw / 2, -s * 0.66, mw, mh);
+  }
+  // Window slit
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.08, -s * 0.1, s * 0.16, s * 0.34);
+}
+
+// ── Arsenal: heater shield with central boss ─────────────────────────────────
+function drawArsenalIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Shield outline (heater shape: straight top + curved taper to bottom point)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.68, -s * 0.68);
+  ctx.lineTo(s * 0.68, -s * 0.68);
+  ctx.lineTo(s * 0.68, -s * 0.1);
+  ctx.quadraticCurveTo(s * 0.68, s * 0.6, 0, s * 0.82);
+  ctx.quadraticCurveTo(-s * 0.68, s * 0.6, -s * 0.68, -s * 0.1);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Central boss (circle)
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(0, s * 0.08, s * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── Watchmen precinct: lantern with panes ────────────────────────────────────
+function drawWatchmenIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Lantern body (hexagon rotated 30°)
+  const r = s * 0.52;
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const a = (i * Math.PI) / 3 - Math.PI / 6;
+    const lx = Math.cos(a) * r;
+    const ly = Math.sin(a) * r + s * 0.12;
+    if (i === 0) ctx.moveTo(lx, ly);
+    else ctx.lineTo(lx, ly);
+  }
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Handle arc at top
+  ctx.beginPath();
+  ctx.arc(0, -s * 0.52, s * 0.22, Math.PI, 0, false);
+  ctx.stroke();
+  // Pane cross dividers
+  ctx.lineWidth = Math.max(0.3, s * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.28);
+  ctx.lineTo(0, s * 0.6);
+  ctx.moveTo(-s * 0.44, s * 0.12);
+  ctx.lineTo(s * 0.44, s * 0.12);
+  ctx.stroke();
+  // Warm glow fill
+  ctx.fillStyle = 'rgba(255, 220, 100, 0.5)';
+  ctx.beginPath();
+  ctx.arc(0, s * 0.08, s * 0.26, 0, Math.PI * 2);
+  ctx.fill();
 }
