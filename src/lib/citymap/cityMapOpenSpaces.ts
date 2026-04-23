@@ -72,10 +72,10 @@ const MARKET_COUNT: Record<CitySize, number> = {
 };
 const PARK_COUNT: Record<CitySize, number> = {
   small: 1,
-  medium: 1,
-  large: 2,
-  metropolis: 2,
-  megalopolis: 3,
+  medium: 3,
+  large: 5,
+  metropolis: 7,
+  megalopolis: 10,
 };
 // Each park BFS-grows from a seed polygon up to this size cap. Larger cities
 // get bigger parks so the visual proportion stays sensible.
