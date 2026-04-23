@@ -40,7 +40,7 @@ import {
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
-import { generateBlocks } from './cityMapBlocks';
+import { generateBlocks, assignCraftRoles } from './cityMapBlocks';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -609,6 +609,12 @@ export function generateCityMapV2(
     cityPolygonCount,
     mountainPolygonIds,
   );
+
+  // Re-classify a seeded subset of `residential` blocks as craft / industry
+  // districts (forge / tannery / textile / potters / mill). Mutates
+  // `block.role` and `block.name` in-place so all downstream consumers
+  // (landmarks, buildings, sprawl, renderer) see the updated roles.
+  assignCraftRoles(blocks, env, polygons, river, seed, cityName);
 
   // Filter mountain polygons for landmark eligibility: only those within
   // MOUNTAIN_LANDMARK_MAX_DISTANCE polygon hops of the city footprint

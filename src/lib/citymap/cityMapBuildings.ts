@@ -60,6 +60,12 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'market',
   'harbor',
   'residential',
+  // Craft & industry — larger sparse workshops (1–3 per polygon).
+  'forge',
+  'tannery',
+  'textile',
+  'potters',
+  'mill',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -70,6 +76,12 @@ const LOT_BASE: Record<DistrictRole, number> = {
   slum: 0,
   agricultural: 0,
   dock: 0,
+  // Craft: sparse — 1–2 large workshop footprints per polygon.
+  forge:   1,
+  tannery: 1,
+  textile: 1,
+  potters: 2,
+  mill:    1,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -79,6 +91,12 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   slum: 1,
   agricultural: 1,
   dock: 1,
+  // Craft: large divisor → fewer lots → bigger individual footprints.
+  forge:   800,
+  tannery: 800,
+  textile: 800,
+  potters: 600,
+  mill:    900,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -88,6 +106,11 @@ const LOT_MIN: Record<DistrictRole, number> = {
   slum: 0,
   agricultural: 0,
   dock: 0,
+  forge:   1,
+  tannery: 1,
+  textile: 1,
+  potters: 1,
+  mill:    1,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -97,6 +120,11 @@ const LOT_MAX: Record<DistrictRole, number> = {
   slum: 0,
   agricultural: 0,
   dock: 0,
+  forge:   3,
+  tannery: 3,
+  textile: 3,
+  potters: 3,
+  mill:    2,
 };
 
 // Setback in pixels from polygon boundary edges.
