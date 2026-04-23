@@ -299,8 +299,8 @@ export function generateBlocks(
   // [Voronoi-polygon] Select up to `DOCK_MAX_FRACTION_OF_CITY × cityPolygonCount`
   // water polygons that sit Delaunay-adjacent to the city footprint. They
   // become `dock` blocks — the only exception to the "no blocks on water"
-  // rule. Each cluster becomes its own block so the renderer can stamp a
-  // wood-plank pattern per dock. Small / medium cities don't emit docks
+  // rule. Large / metropolis cities get exactly 1 dock; megalopolis cities
+  // have a 50% chance of 2 docks. Small / medium cities don't emit docks
   // (harbor land blocks already cover their waterfront).
   if (
     water.size > 0
@@ -313,9 +313,18 @@ export function generateBlocks(
       if (dockPolygonIds.length > 0) {
         const rawClusters = clusterAdjacentPolygons(polygons, dockPolygonIds);
         // Split clusters that are too wide along the coastline axis.
-        const dockClusters = env.waterSide
+        const allClusters = env.waterSide
           ? splitDocksToWidth(rawClusters, polygons, env.waterSide, canvasSize)
           : rawClusters;
+        // Limit to 1 dock cluster (2 for megalopolis at 50% chance). Uses a
+        // dedicated RNG sub-stream so this roll doesn't perturb block names.
+        const docksRng = seededPRNG(`${seed}_city_${cityName}_docks`);
+        const maxDocks = env.size === 'megalopolis' && docksRng() < 0.5 ? 2 : 1;
+        // Prefer larger clusters (more prominent piers); stable id tie-break.
+        const dockClusters = allClusters
+          .slice()
+          .sort((a, b) => b.length - a.length || Math.min(...a) - Math.min(...b))
+          .slice(0, maxDocks);
         for (const cluster of dockClusters) {
           const name = generateBlockName(blocks.length, 'dock', nameRng, usedNames);
           blocks.push({ polygonIds: cluster, role: 'dock', name });
