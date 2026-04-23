@@ -282,3 +282,70 @@ export const PROFILES: Record<string, TerrainProfile> = {
     shallowSeaThreshold: 0.12,
   },
 };
+
+/**
+ * Landmass shape overlays — a parallel preset dimension orthogonal to biome profiles.
+ *
+ * Applied as a `Partial<TerrainProfile>` patch over the biome profile in the worker's
+ * merge step: `biomeProfile → shapeOverlay → user profileOverrides`. Entries MUST
+ * remain partial (never a full profile) so fields the shape doesn't set fall through
+ * to the biome layer. `default` is an empty overlay so a biome profile's baked-in
+ * shape hints (e.g. the `ocean` biome's 0 continental plates) keep working byte-
+ * identically when the user hasn't picked a shape.
+ */
+export const SHAPE_PROFILES: Record<string, Partial<TerrainProfile>> = {
+  default: {},
+
+  /** One welded supercontinent: a single continental plate with aggressive seam spread. */
+  pangaea: {
+    numContinentalMin: 1,
+    numContinentalMax: 1,
+    numOceanicMin: 8,
+    numOceanicMax: 10,
+    continentalGrowthMin: 3.5,
+    continentalGrowthMax: 4.5,
+    seamBoostMin: 0.18,
+    seamBoostMax: 0.25,
+    seamSpreadRings: 8,
+    elevationPower: 0.85,
+  },
+
+  /** Several distinct landmasses — explicit form of the default behavior. */
+  continents: {
+    numContinentalMin: 3,
+    numContinentalMax: 5,
+    numOceanicMin: 8,
+    numOceanicMax: 12,
+    continentalGrowthMin: 2.0,
+    continentalGrowthMax: 3.5,
+    seamBoostMin: 0.08,
+    seamBoostMax: 0.12,
+    seamSpreadRings: 4,
+  },
+
+  /** Many small landmasses: no continental plates, lots of oceanic arcs, flattened elevation. */
+  islands: {
+    numContinentalMin: 0,
+    numContinentalMax: 0,
+    numOceanicMin: 20,
+    numOceanicMax: 26,
+    seamBoostMin: 0,
+    seamBoostMax: 0,
+    seamSpreadRings: 0,
+    elevationPower: 1.6,
+  },
+
+  /** A few starved continents ringed by island chains. */
+  archipelago: {
+    numContinentalMin: 2,
+    numContinentalMax: 3,
+    numOceanicMin: 16,
+    numOceanicMax: 22,
+    continentalGrowthMin: 1.3,
+    continentalGrowthMax: 1.8,
+    seamBoostMin: 0.02,
+    seamBoostMax: 0.04,
+    seamSpreadRings: 1,
+    elevationPower: 1.35,
+  },
+};

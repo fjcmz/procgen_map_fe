@@ -103,7 +103,11 @@ interface SeedResult {
 function runSeed(seed: string, args: CliArgs): SeedResult {
   const t0 = Date.now();
 
-  // Mirror mapgen.worker.ts exactly.
+  // Mirror mapgen.worker.ts exactly. The sweep uses DEFAULT_PROFILE with no
+  // biome or shape overlay so runs against baseline-a.json stay byte-identical.
+  // If this harness ever accepts a --profile or --shape CLI flag, mirror the
+  // worker's three-way merge: PROFILES[profileName] → SHAPE_PROFILES[shapeName]
+  // → user overrides (see src/workers/mapgen.worker.ts).
   const profile = DEFAULT_PROFILE;
   const { cells } = buildCellGraph(seed, args.cells, args.width, args.height);
   const noise = createNoiseSamplers3D(seed);

@@ -12,6 +12,8 @@ export interface GenerationTabProps {
   onWaterRatioChange: (r: number) => void;
   profileName: string;
   onProfileChange: (name: string) => void;
+  shapeName: string;
+  onShapeChange: (name: string) => void;
   mapView: MapView;
   onMapViewChange: (view: MapView) => void;
   politicalMode: PoliticalMode;
@@ -46,6 +48,14 @@ const PROFILE_OPTIONS: { value: string; label: string }[] = [
   { value: 'swamp', label: 'Swamp World' },
   { value: 'mountains', label: 'Mountain World' },
   { value: 'ocean', label: 'Ocean World' },
+];
+
+const SHAPE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'default', label: 'Default (from biome)' },
+  { value: 'pangaea', label: 'Pangaea' },
+  { value: 'continents', label: 'Continents' },
+  { value: 'islands', label: 'Islands' },
+  { value: 'archipelago', label: 'Archipelago' },
 ];
 
 const PROFILE_BADGE_COLORS: Record<string, string> = {
@@ -84,6 +94,8 @@ export function GenerationTab({
   onWaterRatioChange,
   profileName,
   onProfileChange,
+  shapeName,
+  onShapeChange,
   mapView,
   onMapViewChange,
   politicalMode,
@@ -188,6 +200,22 @@ export function GenerationTab({
           disabled={generating}
         >
           {PROFILE_OPTIONS.map(opt => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label style={styles.label}>
+        Landmass Shape
+        <select
+          style={styles.input}
+          value={shapeName}
+          onChange={(e: ChangeEvent<HTMLSelectElement>) => onShapeChange(e.target.value)}
+          disabled={generating}
+        >
+          {SHAPE_OPTIONS.map(opt => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
