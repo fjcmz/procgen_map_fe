@@ -43,6 +43,7 @@ import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks, assignCraftRoles } from './cityMapBlocks';
 import { assignSFHRoles } from './cityMapSFHQuarters';
 import { assignMilitaryRoles } from './cityMapMilitaryQuarters';
+import { assignTradeFinanceRoles } from './cityMapTradeFinanceQuarters';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -666,6 +667,16 @@ export function generateCityMapV2(
   // `gates` is destructured from `wall` above and passed for barracks' wall/
   // gate adjacency bias.
   assignMilitaryRoles(blocks, env, polygons, landmarks, gates, seed, cityName);
+
+  // Re-classify a seeded subset of `residential` blocks as trade & finance
+  // districts: foreign_quarter / caravanserai / bankers_row / warehouse_row.
+  // Called AFTER assignMilitaryRoles so citadel / arsenal polygons have
+  // already been reserved, and BEFORE generateBuildings so the packer sees
+  // the updated roles (all four are interior and in PACKING_ROLES).
+  // `landmarks` is passed for bankers_row's monument/wonder bias, `openSpaces`
+  // for foreign_quarter + warehouse_row market bias, `gates` for caravanserai
+  // gate-adjacency bias.
+  assignTradeFinanceRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
 
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain
