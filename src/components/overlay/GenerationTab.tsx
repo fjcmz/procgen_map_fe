@@ -185,43 +185,45 @@ export function GenerationTab({
         />
       </label>
 
-      <label style={styles.label}>
-        Terrain Profile
-        <select
-          style={styles.input}
-          value={profileName}
-          onChange={(e: ChangeEvent<HTMLSelectElement>) => {
-            const name = e.target.value;
-            onProfileChange(name);
-            if (name in PROFILE_WATER_RATIOS) {
-              onWaterRatioChange(PROFILE_WATER_RATIOS[name]);
-            }
-          }}
-          disabled={generating}
-        >
-          {PROFILE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <label style={{ ...styles.label, flex: 1, minWidth: 0 }}>
+          Terrain
+          <select
+            style={styles.input}
+            value={profileName}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => {
+              const name = e.target.value;
+              onProfileChange(name);
+              if (name in PROFILE_WATER_RATIOS) {
+                onWaterRatioChange(PROFILE_WATER_RATIOS[name]);
+              }
+            }}
+            disabled={generating}
+          >
+            {PROFILE_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
-      <label style={styles.label}>
-        Landmass Shape
-        <select
-          style={styles.input}
-          value={shapeName}
-          onChange={(e: ChangeEvent<HTMLSelectElement>) => onShapeChange(e.target.value)}
-          disabled={generating}
-        >
-          {SHAPE_OPTIONS.map(opt => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </label>
+        <label style={{ ...styles.label, flex: 1, minWidth: 0 }}>
+          Shape
+          <select
+            style={styles.input}
+            value={shapeName}
+            onChange={(e: ChangeEvent<HTMLSelectElement>) => onShapeChange(e.target.value)}
+            disabled={generating}
+          >
+            {SHAPE_OPTIONS.map(opt => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
       <div style={styles.label}>
         Resources
@@ -246,26 +248,28 @@ export function GenerationTab({
         </div>
       </div>
 
-      <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-        <input
-          type="checkbox"
-          checked={generateHistory}
-          onChange={onGenerateHistoryToggle}
-          disabled={generating}
-        />
-        Generate History
-      </label>
-
-      {generateHistory && (
-        <label style={styles.toggle}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
           <input
             type="checkbox"
-            checked={convertYears}
-            onChange={onConvertYearsToggle}
+            checked={generateHistory}
+            onChange={onGenerateHistoryToggle}
+            disabled={generating}
           />
-          Convert years (BC/AD)
+          Generate History
         </label>
-      )}
+
+        {generateHistory && (
+          <label style={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={convertYears}
+              onChange={onConvertYearsToggle}
+            />
+            Convert years (BC/AD)
+          </label>
+        )}
+      </div>
 
       {generateHistory && (
         <label style={styles.label}>
@@ -349,9 +353,9 @@ export function GenerationTab({
         </div>
       </div>
 
-      <div style={styles.label}>
-        Layers
-        <div style={styles.toggleRow}>
+      <details style={styles.details}>
+        <summary style={styles.detailsSummary}>Layers</summary>
+        <div style={{ ...styles.toggleRow, marginTop: 6 }}>
           {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[]).map(key => (
             <label key={key} style={styles.toggle}>
               <input
@@ -363,7 +367,7 @@ export function GenerationTab({
             </label>
           ))}
         </div>
-      </div>
+      </details>
 
       <button
         style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
@@ -544,5 +548,21 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 10,
     color: '#5a3a10',
     textAlign: 'center',
+  },
+  details: {
+    border: '1px solid #c0a070',
+    borderRadius: 4,
+    padding: '4px 8px',
+    background: '#faf6ee',
+  },
+  detailsSummary: {
+    fontWeight: 'bold',
+    fontSize: 11,
+    color: '#5a3a10',
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    cursor: 'pointer',
+    userSelect: 'none' as const,
+    listStyle: 'none',
   },
 };
