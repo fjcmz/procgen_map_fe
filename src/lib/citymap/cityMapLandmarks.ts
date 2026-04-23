@@ -92,13 +92,13 @@ const CAPITAL_LARGE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
  * Wired into `cityMapGeneratorV2.ts` AFTER `generateBlocks` so the role-
  * filtered candidate pools (civic / market) are already computed.
  */
-// Spec: "Mountain polygons are 5 times more prone to having a temple or a
+// Spec: "Mountain polygons are 2 times more prone to having a temple or a
 // landmark." Temple and monument candidate pools concat each mountain
 // polygon id MOUNTAIN_LANDMARK_WEIGHT times so its random-pick probability
 // multiplies by the same factor. Capitals (castle / palace) still anchor
 // to civic polygons near canvas center — they do not migrate to mountain
 // peaks because the spec requires them on central civic blocks.
-const MOUNTAIN_LANDMARK_WEIGHT = 5;
+const MOUNTAIN_LANDMARK_WEIGHT = 2;
 
 export function generateLandmarks(
   seed: string,
