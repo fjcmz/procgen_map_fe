@@ -42,6 +42,7 @@ import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks, assignCraftRoles } from './cityMapBlocks';
 import { assignSFHRoles } from './cityMapSFHQuarters';
+import { assignMilitaryRoles } from './cityMapMilitaryQuarters';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -656,6 +657,15 @@ export function generateCityMapV2(
   // are available for temple_quarter placement bias, and BEFORE
   // generateBuildings so the packer sees the updated roles.
   assignSFHRoles(blocks, env, polygons, landmarks, seed, cityName);
+
+  // Re-classify a seeded subset of `residential` blocks as military & security
+  // districts: barracks / citadel / arsenal / watchmen_precinct. Called AFTER
+  // assignSFHRoles so both temple landmark sites AND temple_quarter blocks are
+  // visible for placement bias, and BEFORE generateBuildings so the packer
+  // sees the updated roles (all four are interior and in PACKING_ROLES).
+  // `gates` is destructured from `wall` above and passed for barracks' wall/
+  // gate adjacency bias.
+  assignMilitaryRoles(blocks, env, polygons, landmarks, gates, seed, cityName);
 
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain
