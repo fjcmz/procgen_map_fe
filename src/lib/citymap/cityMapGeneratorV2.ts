@@ -637,6 +637,9 @@ export function generateCityMapV2(
     openSpaces,
     CANVAS_SIZE,
     nearMountainPolygonIds,
+    innerWallPath as [number, number][],
+    middleWallPath as [number, number][],
+    wallPath as [number, number][],
   );
 
   // Spec: "if a landmark is set on mountains, there must be a street from
