@@ -29,6 +29,7 @@ interface CityFeatureFlags {
   hasResource: boolean;
   hasReligion: boolean;
   hasWonder: boolean;
+  hasMountain: boolean;
 }
 
 const FEATURE_ICONS = {
@@ -37,6 +38,7 @@ const FEATURE_ICONS = {
   resource: '⛏️',
   religion: '☦️',
   wonder:   '🏛️',
+  mountain: '⛰️',
 } as const;
 
 const FEATURE_LABELS = {
@@ -45,6 +47,7 @@ const FEATURE_LABELS = {
   resource: 'Controls resource cells',
   religion: 'Active religion',
   wonder:   'Standing wonder',
+  mountain: 'In mountain terrain',
 } as const;
 
 /** Unicode icon and tooltip label per city size, conveying scale progression. */
@@ -219,7 +222,8 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
   }, [mapData]);
 
   const getCityFlags = useCallback((city: City): CityFeatureFlags => {
-    const cell = mapData?.cells?.[city.cellIndex];
+    const cells = mapData?.cells;
+    const cell = cells?.[city.cellIndex];
     let hasResource = false;
     if (city.ownedCells && resourceCellSet.size > 0) {
       for (const oc of city.ownedCells) {
@@ -229,12 +233,16 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
         }
       }
     }
+    const isMountainCell = (c: typeof cell) => !!c && !c.isWater && c.elevation >= 0.75;
+    const hasMountain = isMountainCell(cell) ||
+      (!!cell && !!cells && cell.neighbors.some(ni => isMountainCell(cells[ni])));
     return {
       hasCoast: !!cell?.isCoast,
       hasRiver: !!cell && cell.riverFlow > 0,
       hasResource,
       hasReligion: religionCitySet.has(city.cellIndex),
       hasWonder: wonderCitySet.has(city.cellIndex),
+      hasMountain,
     };
   }, [mapData, resourceCellSet, religionCitySet, wonderCitySet, selectedYear]);
 
@@ -472,6 +480,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           <span style={styles.cityIcons} aria-label="city features">
             {flags.hasCoast && <span style={styles.cityIcon} title={FEATURE_LABELS.coast}>{FEATURE_ICONS.coast}</span>}
             {flags.hasRiver && <span style={styles.cityIcon} title={FEATURE_LABELS.river}>{FEATURE_ICONS.river}</span>}
+            {flags.hasMountain && <span style={styles.cityIcon} title={FEATURE_LABELS.mountain}>{FEATURE_ICONS.mountain}</span>}
             {flags.hasResource && <span style={styles.cityIcon} title={FEATURE_LABELS.resource}>{FEATURE_ICONS.resource}</span>}
             {flags.hasReligion && <span style={styles.cityIcon} title={FEATURE_LABELS.religion}>{FEATURE_ICONS.religion}</span>}
             {flags.hasWonder && <span style={styles.cityIcon} title={FEATURE_LABELS.wonder}>{FEATURE_ICONS.wonder}</span>}
