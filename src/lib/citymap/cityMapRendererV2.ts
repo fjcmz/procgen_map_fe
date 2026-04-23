@@ -503,6 +503,7 @@ function drawBlockBackgrounds(
     const sfhFill = SFH_BG_FILL[block.role];
     const craftFill = CRAFT_BG_FILL[block.role];
     const militaryFill = MILITARY_BG_FILL[block.role];
+    const tradeFill = TRADE_BG_FILL[block.role];
     if (sfhFill) {
       // Scholarship / faith / health district — light reddish/pink/violet fill.
       ctx.fillStyle = sfhFill;
@@ -524,6 +525,15 @@ function drawBlockBackgrounds(
     } else if (militaryFill) {
       // Military & security district — army-green / camouflage fill.
       ctx.fillStyle = militaryFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (tradeFill) {
+      // Trade & finance district — light yellow / golden fill.
+      ctx.fillStyle = tradeFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -949,6 +959,30 @@ const MILITARY_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
   watchmen_precinct: '#2a2e18',
 };
 
+// ── Trade & finance district colours ────────────────────────────────────────
+// Light-yellow / golden family — visually distinct from craft browns, SFH
+// violets/pinks, and military greens. Foreign quarter leans exotic gold,
+// caravanserai leans sand/tan, bankers_row is the richest deep gold
+// (counting houses flaunt wealth), warehouse_row is the palest wheat yellow.
+const TRADE_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  foreign_quarter: '#ecd898', // pale exotic gold
+  caravanserai:    '#e4c878', // sand / tan gold
+  bankers_row:     '#d4ae40', // rich deep gold
+  warehouse_row:   '#ecdca0', // pale wheat yellow
+};
+const TRADE_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  foreign_quarter: ['#e8d088', '#d8c078', '#c8b068'],
+  caravanserai:    ['#dcc070', '#ccb060', '#bca050'],
+  bankers_row:     ['#d0a838', '#c09828', '#b08818'],
+  warehouse_row:   ['#e8d490', '#d8c480', '#c8b470'],
+};
+const TRADE_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  foreign_quarter: '#3a2a08',
+  caravanserai:    '#3a2808',
+  bankers_row:     '#3a2000',
+  warehouse_row:   '#3a2a08',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -1020,13 +1054,16 @@ function drawBuildings(
     const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
-    // Resolve per-role colors — craft & industry first, then SFH, then military.
+    // Resolve per-role colors — craft & industry first, then SFH, then
+    // military, then trade & finance. Variable names kept as `craftFills` /
+    // `craftInk` for minimal churn; they hold whichever family's palette
+    // the role belongs to.
     const role = polygonRole.get(b.polygonId);
     const craftFills = role
-      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role])
+      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role])
       : undefined;
     const craftInk   = role
-      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role])
+      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role])
       : undefined;
 
     traceClosedRing(ctx, b.vertices);
@@ -1095,6 +1132,12 @@ const RUIN_INTERIOR_ROLES: ReadonlySet<string> = new Set<string>([
   'textile',
   'potters',
   'mill',
+  // Trade & finance districts — all four are interior and should also
+  // receive the overgrowth / decay wash in ruin cities.
+  'foreign_quarter',
+  'caravanserai',
+  'bankers_row',
+  'warehouse_row',
 ]);
 
 // Convert a `#rrggbb` color to an `rgba(r,g,b,a)` string. Used to derive the
@@ -1612,6 +1655,11 @@ const DISTRICT_ICON_PALETTE: Partial<Record<DistrictRole, [fill: string, ink: st
   citadel:           ['#7a9060', '#101808'],
   arsenal:           ['#98b070', '#181c08'],
   watchmen_precinct: ['#ccd8a8', '#2a2e18'],
+  // Trade & finance — lighter gold / yellow fills with darker gold-brown ink.
+  foreign_quarter:   ['#f4e4ac', '#3a2a08'],
+  caravanserai:      ['#ecd488', '#3a2808'],
+  bankers_row:       ['#f0c850', '#3a2000'],
+  warehouse_row:     ['#f4e8b0', '#3a2a08'],
 };
 
 // Roles that do not receive a district icon.
@@ -1694,6 +1742,10 @@ function drawDistrictGlyph(
     case 'citadel':          drawCitadelIcon(ctx, s, fill, ink); break;
     case 'arsenal':          drawArsenalIcon(ctx, s, fill, ink); break;
     case 'watchmen_precinct': drawWatchmenIcon(ctx, s, fill, ink); break;
+    case 'foreign_quarter':  drawForeignQuarterIcon(ctx, s, fill, ink); break;
+    case 'caravanserai':     drawCaravanseraiIcon(ctx, s, fill, ink); break;
+    case 'bankers_row':      drawBankersRowIcon(ctx, s, fill, ink); break;
+    case 'warehouse_row':    drawWarehouseRowIcon(ctx, s, fill, ink); break;
   }
 
   ctx.restore();
@@ -2124,4 +2176,136 @@ function drawWatchmenIcon(ctx: CanvasRenderingContext2D, s: number, fill: string
   ctx.beginPath();
   ctx.arc(0, s * 0.08, s * 0.26, 0, Math.PI * 2);
   ctx.fill();
+}
+
+// ── Foreign quarter: crescent-banner on a pole ──────────────────────────────
+function drawForeignQuarterIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.5, s * 0.12);
+  ctx.strokeStyle = ink;
+  // Flagpole
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.42, -s * 0.78);
+  ctx.lineTo(-s * 0.42, s * 0.72);
+  ctx.stroke();
+  // Pennon: triangular banner swept to the right
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.42, -s * 0.72);
+  ctx.lineTo(s * 0.58, -s * 0.42);
+  ctx.lineTo(-s * 0.42, -s * 0.12);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Crescent moon on the banner — outer arc minus a clipped inner arc for
+  // the classic "crescent with horns" silhouette.
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(s * 0.02, -s * 0.42, s * 0.18, -Math.PI * 0.6, Math.PI * 0.6);
+  ctx.arc(s * 0.10, -s * 0.42, s * 0.18, Math.PI * 0.5, -Math.PI * 0.5, true);
+  ctx.closePath();
+  ctx.fill();
+  // Pole finial
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(-s * 0.42, -s * 0.82, s * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── Caravanserai: tented wagon with pack canopy ─────────────────────────────
+function drawCaravanseraiIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Wagon bed (rectangle)
+  ctx.fillRect(-s * 0.62, s * 0.12, s * 1.24, s * 0.32);
+  ctx.strokeRect(-s * 0.62, s * 0.12, s * 1.24, s * 0.32);
+  // Curved canopy (arch above the bed)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.62, s * 0.12);
+  ctx.quadraticCurveTo(0, -s * 0.72, s * 0.62, s * 0.12);
+  ctx.lineTo(-s * 0.62, s * 0.12);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Canopy ribs (two thin arcs for that tented look)
+  ctx.lineWidth = Math.max(0.3, s * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.25, s * 0.12);
+  ctx.quadraticCurveTo(-s * 0.25, -s * 0.34, 0, -s * 0.48);
+  ctx.moveTo(s * 0.25, s * 0.12);
+  ctx.quadraticCurveTo(s * 0.25, -s * 0.34, 0, -s * 0.48);
+  ctx.stroke();
+  // Two wheels (filled circles)
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = ink;
+  ctx.beginPath(); ctx.arc(-s * 0.38, s * 0.58, s * 0.16, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(s * 0.38, s * 0.58, s * 0.16, 0, Math.PI * 2); ctx.fill();
+}
+
+// ── Bankers row: stack of three coins ───────────────────────────────────────
+function drawBankersRowIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.09);
+  ctx.strokeStyle = ink;
+  // Three stacked discs (back to front): bottom coin widest, top coin narrowest
+  // to imply a leaning stack. All share the same colors for a gold-pile read.
+  const cx = 0;
+  const rOuter = s * 0.44;
+  const rInner = s * 0.3;
+  const ellH = s * 0.14;
+
+  // Helper — draw one elliptical coin at vertical offset `oy`.
+  function coin(oy: number): void {
+    ctx.fillStyle = fill;
+    // Front face
+    ctx.beginPath();
+    ctx.ellipse(cx, oy, rOuter, ellH, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    // Slot on the face
+    ctx.beginPath();
+    ctx.moveTo(cx - rInner * 0.45, oy);
+    ctx.lineTo(cx + rInner * 0.45, oy);
+    ctx.stroke();
+  }
+
+  // Draw bottom to top so each disc covers the one behind it.
+  coin(s * 0.44);
+  coin(s * 0.14);
+  coin(-s * 0.18);
+  // Tiny sparkle dot near the top coin for the "wealth" feel.
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(s * 0.34, -s * 0.44, s * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── Warehouse row: gable-roofed shed with a side door ───────────────────────
+function drawWarehouseRowIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  // Shed body (wider than a house icon)
+  ctx.fillRect(-s * 0.72, -s * 0.05, s * 1.44, s * 0.72);
+  ctx.strokeRect(-s * 0.72, -s * 0.05, s * 1.44, s * 0.72);
+  // Shallow gable roof (trapezoidal)
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.82, -s * 0.05);
+  ctx.lineTo(-s * 0.5, -s * 0.62);
+  ctx.lineTo(s * 0.5, -s * 0.62);
+  ctx.lineTo(s * 0.82, -s * 0.05);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Ridge cap
+  ctx.lineWidth = Math.max(0.3, s * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.5, -s * 0.62);
+  ctx.lineTo(s * 0.5, -s * 0.62);
+  ctx.stroke();
+  // Big cargo door (centre, darker)
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.22, s * 0.22, s * 0.44, s * 0.45);
+  // Horizontal bracing lines across the shed face
+  ctx.lineWidth = Math.max(0.3, s * 0.06);
+  ctx.strokeStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.72, s * 0.22);
+  ctx.lineTo(-s * 0.22, s * 0.22);
+  ctx.moveTo(s * 0.22, s * 0.22);
+  ctx.lineTo(s * 0.72, s * 0.22);
+  ctx.stroke();
 }

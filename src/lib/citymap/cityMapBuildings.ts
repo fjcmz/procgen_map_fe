@@ -76,6 +76,11 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'citadel',
   'arsenal',
   'watchmen_precinct',
+  // Trade & finance — all four roles are interior.
+  'foreign_quarter',
+  'caravanserai',
+  'bankers_row',
+  'warehouse_row',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -105,6 +110,14 @@ const LOT_BASE: Record<DistrictRole, number> = {
   citadel:           2,
   arsenal:           2,
   watchmen_precinct: 2,
+  // Trade & finance: foreign_quarter = enclave blocks (moderately dense);
+  // caravanserai = walled inn with stables (sparse central court);
+  // bankers_row = civic-scale counting houses (sparse); warehouse_row =
+  // long storage sheds packed densely like residential.
+  foreign_quarter:   3,
+  caravanserai:      2,
+  bankers_row:       2,
+  warehouse_row:     2,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -132,6 +145,13 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   citadel:           900,
   arsenal:           700,
   watchmen_precinct: 500,
+  // Trade & finance: warehouse packs densely (small divisor) like residential;
+  // bankers_row sparser like civic; foreign_quarter and caravanserai
+  // moderately sparse — big enclave / courtyard footprints.
+  foreign_quarter:   400,
+  caravanserai:      500,
+  bankers_row:       600,
+  warehouse_row:     350,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -155,6 +175,10 @@ const LOT_MIN: Record<DistrictRole, number> = {
   citadel:           1,
   arsenal:           1,
   watchmen_precinct: 1,
+  foreign_quarter:   1,
+  caravanserai:      1,
+  bankers_row:       1,
+  warehouse_row:     2,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -178,6 +202,10 @@ const LOT_MAX: Record<DistrictRole, number> = {
   citadel:           2,
   arsenal:           3,
   watchmen_precinct: 4,
+  foreign_quarter:   4,
+  caravanserai:      3,
+  bankers_row:       3,
+  warehouse_row:     5,
 };
 
 // Setback in pixels from polygon boundary edges.

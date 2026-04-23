@@ -1183,6 +1183,10 @@ const QUARTER_ICONS: Record<string, string> = {
   academia: '\u{1F4DA}',     // 📚 books
   plague_ward: '⚕',     // ⚕ medical
   archive_quarter: '\u{1F4DC}', // 📜 scroll
+  foreign_quarter: '\u{1F3F4}', // 🏴 flag (foreign banner)
+  caravanserai: '\u{1F42A}',    // 🐪 camel
+  bankers_row: '\u{1F4B0}',     // 💰 money bag
+  warehouse_row: '\u{1F4E6}',   // 📦 package
 };
 
 const QUARTER_LABELS: Record<string, string> = {
@@ -1203,6 +1207,10 @@ const QUARTER_LABELS: Record<string, string> = {
   academia: 'Academia',
   plague_ward: 'Plague Ward',
   archive_quarter: 'Archive',
+  foreign_quarter: 'Foreign Quarter',
+  caravanserai: 'Caravanserai',
+  bankers_row: 'Bankers Row',
+  warehouse_row: 'Warehouse Row',
 };
 
 function QuartersList({ counts }: { counts: Record<string, number> }) {

@@ -28,7 +28,8 @@ export type DistrictRole =
   | 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock'
   | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill'
   | 'temple_quarter' | 'necropolis' | 'academia' | 'plague_ward' | 'archive_quarter'
-  | 'barracks' | 'citadel' | 'arsenal' | 'watchmen_precinct';
+  | 'barracks' | 'citadel' | 'arsenal' | 'watchmen_precinct'
+  | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row';
 
 export interface CityEnvironment {
   biome: BiomeType;
