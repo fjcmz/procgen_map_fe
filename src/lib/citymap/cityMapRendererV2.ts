@@ -81,6 +81,7 @@ import type {
   CityLandmarkV2,
   CityMapDataV2,
   CityPolygon,
+  DistrictRole,
 } from './cityMapTypesV2';
 import type { BiomeType } from '../types';
 import { seededPRNG } from '../terrain/noise';
@@ -491,15 +492,26 @@ function drawBlockBackgrounds(
   env: CityEnvironment,
 ): void {
   if (data.blocks.length === 0) return;
-  const fill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
-  ctx.fillStyle = fill;
+  const biomeFill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
   for (const block of data.blocks) {
-    if (block.role !== 'slum' && block.role !== 'agricultural') continue;
-    for (const pid of block.polygonIds) {
-      const polygon = data.polygons[pid];
-      if (!polygon || polygon.vertices.length < 3) continue;
-      tracePolygonRing(ctx, polygon);
-      ctx.fill();
+    const craftFill = CRAFT_BG_FILL[block.role];
+    if (craftFill) {
+      // Craft & industry district — distinctive industrial background.
+      ctx.fillStyle = craftFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (block.role === 'slum' || block.role === 'agricultural') {
+      ctx.fillStyle = biomeFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
     }
   }
 }
@@ -835,6 +847,33 @@ const BUILDING_FILLS = ['#e6e6e4', '#d6d6d4', '#c6c6c4'] as const;
 const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
+// Craft & industry district background fills (Layer 2.5) and building ink
+// (Layer 10).  Browns, greys, and dark tones to read as industrial / pre-
+// modern manufacturing zones distinct from the cream residential core.
+const CRAFT_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  forge:   '#c8b498', // warm cinder ash
+  tannery: '#c0a070', // tanned leather
+  textile: '#cca870', // undyed linen
+  potters: '#c8906a', // terracotta clay
+  mill:    '#b8b0a0', // millstone grey
+};
+// Per-role building fill palettes (three shades, cycled like standard grey).
+const CRAFT_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  forge:   ['#d8c8a0', '#c8b890', '#b8a880'],
+  tannery: ['#d0b080', '#c0a070', '#b09060'],
+  textile: ['#d8b888', '#c8a878', '#b89868'],
+  potters: ['#d8a888', '#c89878', '#b88868'],
+  mill:    ['#c8c0b0', '#b8b0a0', '#a8a090'],
+};
+// Per-role building outline ink (darker / role-tinted).
+const CRAFT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  forge:   '#2a1a0a',
+  tannery: '#3a1808',
+  textile: '#382010',
+  potters: '#3a1808',
+  mill:    '#202018',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -889,6 +928,12 @@ function drawBuildings(
 ): void {
   if (data.buildings.length === 0) return;
 
+  // Build a polygon-id → block role map so we can apply per-craft-role ink.
+  const polygonRole = new Map<number, DistrictRole>();
+  for (const block of data.blocks) {
+    for (const pid of block.polygonIds) polygonRole.set(pid, block.role);
+  }
+
   const fillRng = seededPRNG(`${seed}_city_${cityName}_buildings_render`);
   ctx.lineWidth = BUILDING_STROKE_WIDTH;
   ctx.lineJoin = 'round';
@@ -900,10 +945,23 @@ function drawBuildings(
     const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
+    // Resolve per-role colors for craft & industry buildings.
+    const role = polygonRole.get(b.polygonId);
+    const craftFills = role ? CRAFT_BUILDING_FILLS[role] : undefined;
+    const craftInk   = role ? CRAFT_BUILDING_INK[role]   : undefined;
+
     traceClosedRing(ctx, b.vertices);
-    ctx.fillStyle = ruinRng ? RUIN_BUILDING_FILL : BUILDING_FILLS[fillIdx];
+    if (ruinRng) {
+      ctx.fillStyle   = RUIN_BUILDING_FILL;
+      ctx.strokeStyle = RUIN_BUILDING_OUTLINE;
+    } else if (craftFills && craftInk) {
+      ctx.fillStyle   = craftFills[fillIdx % craftFills.length];
+      ctx.strokeStyle = craftInk;
+    } else {
+      ctx.fillStyle   = BUILDING_FILLS[fillIdx];
+      ctx.strokeStyle = BUILDING_OUTLINE;
+    }
     ctx.fill();
-    ctx.strokeStyle = ruinRng ? RUIN_BUILDING_OUTLINE : BUILDING_OUTLINE;
     ctx.stroke();
   }
 }
@@ -951,6 +1009,13 @@ const RUIN_INTERIOR_ROLES: ReadonlySet<string> = new Set<string>([
   'market',
   'residential',
   'harbor',
+  // Craft & industry districts are inside the city footprint and should
+  // receive the overgrowth / decay treatment in ruin cities.
+  'forge',
+  'tannery',
+  'textile',
+  'potters',
+  'mill',
 ]);
 
 // Convert a `#rrggbb` color to an `rgba(r,g,b,a)` string. Used to derive the

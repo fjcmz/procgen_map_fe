@@ -24,7 +24,9 @@ import type { BiomeType } from '../types';
 
 export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
 
-export type DistrictRole = 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock';
+export type DistrictRole =
+  | 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock'
+  | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill';
 
 export interface CityEnvironment {
   biome: BiomeType;
