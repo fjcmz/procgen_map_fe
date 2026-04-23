@@ -26,7 +26,8 @@ export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopoli
 
 export type DistrictRole =
   | 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock'
-  | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill';
+  | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill'
+  | 'temple_quarter' | 'necropolis' | 'academia' | 'plague_ward' | 'archive_quarter';
 
 export interface CityEnvironment {
   biome: BiomeType;

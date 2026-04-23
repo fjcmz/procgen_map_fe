@@ -41,6 +41,7 @@ import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
 import { generateOpenSpaces } from './cityMapOpenSpaces';
 import { generateBlocks, assignCraftRoles } from './cityMapBlocks';
+import { assignSFHRoles } from './cityMapSFHQuarters';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -647,6 +648,14 @@ export function generateCityMapV2(
     middleWallPath as [number, number][],
     wallPath as [number, number][],
   );
+
+  // Re-classify a seeded subset of `residential` blocks (interior) and
+  // `agricultural`/`slum` blocks (exterior) as scholarship / faith / health
+  // districts: temple_quarter / necropolis / academia / plague_ward /
+  // archive_quarter. Called AFTER generateLandmarks so temple polygon sites
+  // are available for temple_quarter placement bias, and BEFORE
+  // generateBuildings so the packer sees the updated roles.
+  assignSFHRoles(blocks, env, polygons, landmarks, seed, cityName);
 
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain
