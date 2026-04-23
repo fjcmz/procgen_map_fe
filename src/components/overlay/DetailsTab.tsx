@@ -10,7 +10,7 @@ import { BIOME_INFO } from '../../lib/terrain/biomes';
 import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } from '../../lib/history/physical/ResourceCatalog';
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
 import { CityMapPopupV2 } from '../CityMapPopupV2';
-import { deriveCityEnvironment } from '../../lib/citymap/cityMapGeneratorV2';
+import { deriveCityEnvironment, generateCityMapV2 } from '../../lib/citymap/cityMapGeneratorV2';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -451,6 +451,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const countryId = ownershipAtYear ? ownershipAtYear[cellIndex] : -1;
   const country = countryId >= 0 ? history.countries[countryId] : undefined;
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [quartersOpen, setQuartersOpen] = useState(false);
   const [showCityMapV2, setShowCityMapV2] = useState(false);
   const empire = country ? findEmpireForCountry(empireSnap, country.id) : undefined;
 
@@ -531,6 +532,19 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
     );
   }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);
 
+  // Block counts — computed lazily when the Quarters section is expanded.
+  // Keyed on env fields that affect block layout (size, coastal, mountains)
+  // rather than year-varying wonder/religion counts which only affect landmarks.
+  const blockCounts = useMemo(() => {
+    if (!quartersOpen || !city || !cityEnvironment) return null;
+    const mapV2 = generateCityMapV2(seed, city.name, cityEnvironment);
+    const counts: Record<string, number> = {};
+    for (const block of mapV2.blocks) {
+      counts[block.role] = (counts[block.role] ?? 0) + 1;
+    }
+    return counts;
+  }, [quartersOpen, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div style={styles.root}>
       <div style={styles.miniHeader}>
@@ -605,6 +619,23 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               {resourcesOpen ? '\u25be' : '\u25b8'} Resources ({cityResources.size})
             </button>
             {resourcesOpen && <ResourceList resources={cityResources} />}
+          </>
+        )}
+
+        {/* Quarters (city district blocks) */}
+        {city && cityEnvironment && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setQuartersOpen(v => !v)}
+              aria-expanded={quartersOpen}
+            >
+              {quartersOpen ? '▾' : '▸'} Quarters
+              {blockCounts && ` (${Object.values(blockCounts).reduce((s, c) => s + c, 0)})`}
+            </button>
+            {quartersOpen && !blockCounts && <div style={styles.loadingNote}>Computing&hellip;</div>}
+            {quartersOpen && blockCounts && <QuartersList counts={blockCounts} />}
           </>
         )}
 
@@ -1132,6 +1163,66 @@ function EventRow({ event, startOfTime, convertYears }: { event: HistoryEvent; s
   );
 }
 
+// ── Quarters List ──
+
+const QUARTER_ICONS: Record<string, string> = {
+  civic: '\u{1F3DB}',        // 🏛 classical building
+  market: '⚖',          // ⚖ balance scales
+  harbor: '⚓',          // ⚓ anchor
+  residential: '\u{1F3E0}',  // 🏠 house
+  agricultural: '\u{1F33E}', // 🌾 sheaf
+  slum: '\u{1F3DA}',         // 🏚 derelict house
+  dock: '⛵',            // ⛵ sailboat
+  forge: '\u{1F528}',        // 🔨 hammer
+  tannery: '\u{1F6E1}',      // 🛡 shield (leather)
+  textile: '\u{1F9F5}',      // 🧵 thread
+  potters: '\u{1F3FA}',      // 🏺 amphora
+  mill: '⚙',            // ⚙ gear
+  temple_quarter: '⛩',  // ⛩ shinto shrine
+  necropolis: '⚰',      // ⚰ coffin
+  academia: '\u{1F4DA}',     // 📚 books
+  plague_ward: '⚕',     // ⚕ medical
+  archive_quarter: '\u{1F4DC}', // 📜 scroll
+};
+
+const QUARTER_LABELS: Record<string, string> = {
+  civic: 'Civic',
+  market: 'Market',
+  harbor: 'Harbor',
+  residential: 'Residential',
+  agricultural: 'Agricultural',
+  slum: 'Slum',
+  dock: 'Dock',
+  forge: 'Forge',
+  tannery: 'Tannery',
+  textile: 'Textile',
+  potters: 'Potters',
+  mill: 'Mill',
+  temple_quarter: 'Temple',
+  necropolis: 'Necropolis',
+  academia: 'Academia',
+  plague_ward: 'Plague Ward',
+  archive_quarter: 'Archive',
+};
+
+function QuartersList({ counts }: { counts: Record<string, number> }) {
+  const entries = useMemo(
+    () => Object.entries(counts).sort((a, b) => b[1] - a[1]),
+    [counts],
+  );
+  return (
+    <div style={styles.techGrid}>
+      {entries.map(([role, count]) => (
+        <div key={role} style={styles.techRow} title={QUARTER_LABELS[role] ?? role}>
+          <span style={{ fontSize: 11, lineHeight: 1 }}>{QUARTER_ICONS[role] ?? '▪'}</span>
+          <span style={styles.techLabel}>{QUARTER_LABELS[role] ?? role}</span>
+          <span style={styles.techLevel}>{count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Resource List ──
 
 /** Dot color per legacy category, matches the map icon bucket split in renderer.ts. */
@@ -1512,6 +1603,12 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 9,
     color: '#8a6a30',
     fontStyle: 'italic',
+  },
+  loadingNote: {
+    fontSize: 10,
+    color: '#9a7a50',
+    fontStyle: 'italic',
+    padding: '2px 0',
   },
   eventList: {
     display: 'flex',
