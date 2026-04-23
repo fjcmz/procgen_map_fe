@@ -93,6 +93,13 @@ const DOCK_ELIGIBLE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
 ]);
 // Cap on dock-block water-polygon coverage as a fraction of cityPolygonCount.
 const DOCK_MAX_FRACTION_OF_CITY = 0.10;
+// Maximum BFS depth into water from the shoreline. Dock polygons more than
+// this many Delaunay steps from interior-adjacent water are excluded so piers
+// don't extend unrealistically far offshore.
+const DOCK_MAX_DEPTH = 3;
+// Maximum dock cluster width (in estimated polygon diameters) along the
+// coastline axis. Clusters wider than this are split into narrower piers.
+const DOCK_MAX_WIDTH_CELLS = 5;
 
 // Cap on mountain polygons absorbed into city blocks as a fraction of
 // cityPolygonCount. Spec: "City blocks can expand to mountain polygons but
@@ -304,7 +311,11 @@ export function generateBlocks(
     if (dockBudget > 0) {
       const dockPolygonIds = pickDockPolygons(polygons, water, interior, dockBudget);
       if (dockPolygonIds.length > 0) {
-        const dockClusters = clusterAdjacentPolygons(polygons, dockPolygonIds);
+        const rawClusters = clusterAdjacentPolygons(polygons, dockPolygonIds);
+        // Split clusters that are too wide along the coastline axis.
+        const dockClusters = env.waterSide
+          ? splitDocksToWidth(rawClusters, polygons, env.waterSide, canvasSize)
+          : rawClusters;
         for (const cluster of dockClusters) {
           const name = generateBlockName(blocks.length, 'dock', nameRng, usedNames);
           blocks.push({ polygonIds: cluster, role: 'dock', name });
@@ -359,32 +370,57 @@ function pickAbsorbedMountainPolygons(
 // ─── Dock block helpers ─────────────────────────────────────────────────────
 
 // [Voronoi-polygon] Pick water polygons to become docks. Eligibility:
-//   - polygon must be in `water`
-//   - polygon must be Delaunay-adjacent to at least one `interior` polygon
-//     (city footprint) — docks touch the city, they don't float offshore
-// Picks the polygons closest to the interior first so dock blocks cluster
-// against the coastline (stable, deterministic — no RNG).
+//   - polygon must be within DOCK_MAX_DEPTH BFS steps from the shoreline
+//     (interior-adjacent water polygons = depth 1, each step deeper adds 1)
+//   - depth-1 polygons are preferred; deeper ones fill remaining budget
+// Shallower (closer to shore) polygons rank first; ties broken by id.
 function pickDockPolygons(
   polygons: CityPolygon[],
   water: Set<number>,
   interior: Set<number>,
   budget: number,
 ): number[] {
-  type Candidate = { id: number; score: number };
-  const candidates: Candidate[] = [];
+  // BFS from shore: seed with water polygons adjacent to interior (depth 1),
+  // then expand up to DOCK_MAX_DEPTH steps further into open water.
+  const depthMap = new Map<number, number>();
+  const bfsQueue: number[] = [];
   for (const pid of water) {
     const poly = polygons[pid];
     if (!poly) continue;
-    // Count interior neighbors — more interior neighbors = more prominent coast.
+    for (const nb of poly.neighbors) {
+      if (interior.has(nb)) {
+        depthMap.set(pid, 1);
+        bfsQueue.push(pid);
+        break;
+      }
+    }
+  }
+  let head = 0;
+  while (head < bfsQueue.length) {
+    const pid = bfsQueue[head++];
+    const d = depthMap.get(pid)!;
+    if (d >= DOCK_MAX_DEPTH) continue;
+    for (const nb of polygons[pid].neighbors) {
+      if (water.has(nb) && !depthMap.has(nb)) {
+        depthMap.set(nb, d + 1);
+        bfsQueue.push(nb);
+      }
+    }
+  }
+
+  type Candidate = { id: number; score: number };
+  const candidates: Candidate[] = [];
+  for (const [pid, depth] of depthMap) {
+    const poly = polygons[pid];
+    if (!poly) continue;
     let interiorTouches = 0;
     let landTouches = 0;
     for (const nb of poly.neighbors) {
       if (interior.has(nb)) interiorTouches++;
       if (!water.has(nb)) landTouches++;
     }
-    if (interiorTouches === 0) continue; // must actually touch the city
-    // Score: more interior contact ranks first; break ties by id for determinism.
-    candidates.push({ id: pid, score: -interiorTouches * 10 - landTouches });
+    // Lower depth + more shoreline contact = picked first.
+    candidates.push({ id: pid, score: depth * 100 - interiorTouches * 10 - landTouches });
   }
   candidates.sort((a, b) => (a.score - b.score) || (a.id - b.id));
 
@@ -425,6 +461,53 @@ function clusterAdjacentPolygons(
     clusters.push(cluster);
   }
   return clusters;
+}
+
+// [Voronoi-polygon] Split any cluster that is wider than DOCK_MAX_WIDTH_CELLS
+// polygon-diameters along the coastline axis. Each resulting band is then
+// re-split by Delaunay connectivity so every dock block is contiguous.
+// Deterministic — no RNG; sort is stable via id tie-break.
+function splitDocksToWidth(
+  clusters: number[][],
+  polygons: CityPolygon[],
+  waterSide: NonNullable<CityEnvironment['waterSide']>,
+  canvasSize: number,
+): number[][] {
+  // Approximate polygon cell diameter as sqrt(canvas area / polygon count).
+  const cellDiam = canvasSize / Math.sqrt(polygons.length);
+  const maxWidth = DOCK_MAX_WIDTH_CELLS * cellDiam;
+
+  // Return the polygon's coordinate along the shoreline axis.
+  const coastCoord = (pid: number): number => {
+    const [x, y] = polygons[pid].site;
+    return (waterSide === 'north' || waterSide === 'south') ? x : y;
+  };
+
+  const result: number[][] = [];
+  for (const cluster of clusters) {
+    const sorted = cluster.slice().sort((a, b) => coastCoord(a) - coastCoord(b) || a - b);
+    const span = coastCoord(sorted[sorted.length - 1]) - coastCoord(sorted[0]);
+    if (span <= maxWidth) {
+      result.push(cluster);
+      continue;
+    }
+    // Split into sequential bands of width ≤ maxWidth, then re-cluster each
+    // band so disconnected fragments (after the positional cut) become
+    // separate pier blocks rather than one discontiguous block.
+    let bandStart = coastCoord(sorted[0]);
+    let band: number[] = [];
+    for (const pid of sorted) {
+      const c = coastCoord(pid);
+      if (c - bandStart > maxWidth && band.length > 0) {
+        result.push(...clusterAdjacentPolygons(polygons, band));
+        band = [];
+        bandStart = c;
+      }
+      band.push(pid);
+    }
+    if (band.length > 0) result.push(...clusterAdjacentPolygons(polygons, band));
+  }
+  return result;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
