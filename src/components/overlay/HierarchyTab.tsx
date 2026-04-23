@@ -30,24 +30,27 @@ interface CityFeatureFlags {
   hasReligion: boolean;
   hasWonder: boolean;
   hasMountain: boolean;
+  hasDistricts: boolean;
 }
 
 const FEATURE_ICONS = {
-  coast:    '⚓',
-  river:    '〰️',
-  resource: '⛏️',
-  religion: '☦️',
-  wonder:   '🏛️',
-  mountain: '⛰️',
+  coast:     '⚓',
+  river:     '〰️',
+  resource:  '⛏️',
+  religion:  '☦️',
+  wonder:    '🏛️',
+  mountain:  '⛰️',
+  districts: '⊞',
 } as const;
 
 const FEATURE_LABELS = {
-  coast:    'On the coast',
-  river:    'On a river',
-  resource: 'Controls resource cells',
-  religion: 'Active religion',
-  wonder:   'Standing wonder',
-  mountain: 'In mountain terrain',
+  coast:     'On the coast',
+  river:     'On a river',
+  resource:  'Controls resource cells',
+  religion:  'Active religion',
+  wonder:    'Standing wonder',
+  mountain:  'In mountain terrain',
+  districts: 'Has city quarters',
 } as const;
 
 /** Unicode icon and tooltip label per city size, conveying scale progression. */
@@ -243,8 +246,9 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       hasReligion: religionCitySet.has(city.cellIndex),
       hasWonder: wonderCitySet.has(city.cellIndex),
       hasMountain,
+      hasDistricts: !!mapData && !!seed,
     };
-  }, [mapData, resourceCellSet, religionCitySet, wonderCitySet, selectedYear]);
+  }, [mapData, seed, resourceCellSet, religionCitySet, wonderCitySet, selectedYear]);
 
   const snapKey = selectedYear;
 
@@ -484,6 +488,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
             {flags.hasResource && <span style={styles.cityIcon} title={FEATURE_LABELS.resource}>{FEATURE_ICONS.resource}</span>}
             {flags.hasReligion && <span style={styles.cityIcon} title={FEATURE_LABELS.religion}>{FEATURE_ICONS.religion}</span>}
             {flags.hasWonder && <span style={styles.cityIcon} title={FEATURE_LABELS.wonder}>{FEATURE_ICONS.wonder}</span>}
+            {flags.hasDistricts && <span style={styles.cityIcon} title={FEATURE_LABELS.districts}>{FEATURE_ICONS.districts}</span>}
           </span>
         )}
         {canShowMap && (
