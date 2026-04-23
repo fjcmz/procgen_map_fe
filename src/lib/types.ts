@@ -445,6 +445,7 @@ export interface GenerateRequest {
   generateHistory?: boolean;
   numSimYears?: number;
   profileName?: string;
+  shapeName?: string;
   profileOverrides?: Partial<TerrainProfile>;
   resourceRarityMode?: ResourceRarityMode;
 }

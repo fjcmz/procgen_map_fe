@@ -37,6 +37,7 @@ export default function App() {
   const [numCells, setNumCells] = useState(DEFAULT_CELLS);
   const [waterRatio, setWaterRatio] = useState(DEFAULT_WATER_RATIO);
   const [profileName, setProfileName] = useState('default');
+  const [shapeName, setShapeName] = useState('default');
   const [mapView, setMapView] = useState<MapView>('terrain');
   const [politicalMode, setPoliticalMode] = useState<PoliticalMode>('countries');
   const [layers, setLayers] = useState<LayerVisibility>(DEFAULT_LAYERS);
@@ -294,11 +295,12 @@ export default function App() {
       height,
       waterRatio,
       profileName,
+      shapeName,
       generateHistory,
       numSimYears,
       resourceRarityMode,
     });
-  }, [generating, seed, numCells, waterRatio, profileName, generateHistory, numSimYears, resourceRarityMode]);
+  }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode]);
 
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -316,6 +318,7 @@ export default function App() {
           numCells,
           waterRatio,
           profileName,
+          shapeName,
           generateHistory,
           numSimYears,
         });
@@ -326,7 +329,7 @@ export default function App() {
         setExporting(false);
       }
     });
-  }, [mapData, exporting, seed, numCells, waterRatio, profileName, generateHistory, numSimYears]);
+  }, [mapData, exporting, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears]);
 
   return (
     <>
@@ -360,6 +363,8 @@ export default function App() {
         onWaterRatioChange={setWaterRatio}
         profileName={profileName}
         onProfileChange={setProfileName}
+        shapeName={shapeName}
+        onShapeChange={setShapeName}
         mapView={mapView}
         onMapViewChange={setMapView}
         politicalMode={politicalMode}

@@ -11,6 +11,7 @@ export interface ExportParams {
   numCells: number;
   waterRatio: number;
   profileName: string;
+  shapeName: string;
   generateHistory: boolean;
   numSimYears: number;
 }

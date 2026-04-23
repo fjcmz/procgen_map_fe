@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, TerrainProfile } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE, SHAPE_PROFILES } from '../lib/terrain';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 import { RARITY_WEIGHTS_BY_MODE } from '../lib/history/physical/ResourceCatalog';
@@ -40,11 +40,16 @@ _assertTradeCapMonotonic();
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
   const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = e.data;
 
-  // Resolve terrain profile from request
+  // Resolve terrain profile from request. Shapes stack between the biome profile
+  // and any user overrides so the user override always wins and the biome layer
+  // shines through for every field the shape doesn't explicitly set.
   const profileBase = PROFILES[e.data.profileName ?? 'default'] ?? DEFAULT_PROFILE;
-  const profile: TerrainProfile = e.data.profileOverrides
-    ? { ...profileBase, ...e.data.profileOverrides }
-    : profileBase;
+  const shapeOverlay = SHAPE_PROFILES[e.data.shapeName ?? 'default'] ?? {};
+  const profile: TerrainProfile = {
+    ...profileBase,
+    ...shapeOverlay,
+    ...(e.data.profileOverrides ?? {}),
+  };
 
   // Resolve resource rarity weights from mode (default: 'natural')
   const rarityMode = e.data.resourceRarityMode ?? 'natural';
