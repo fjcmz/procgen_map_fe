@@ -68,9 +68,22 @@ export interface WallConfig {
 }
 
 export interface WallGenerationResult {
-  /** Closed polyline along polygon edges (first === last). Empty when hasOuterWall=false. */
+  /**
+   * The longest (primary) wall segment as a polyline (first === last for closed
+   * rings, open for coastal gaps). Empty when hasOuterWall=false.
+   * Retained for legacy consumers that need a single representative polyline;
+   * prefer `wallSegments` when you need ALL wall sections.
+   */
   wallPath: Point[];
-  /** Gates distributed around the outer wall. */
+  /**
+   * ALL disconnected wall segments, sorted longest-first. Each segment is a
+   * polyline (closed ring or open chain). Mountains / water gaps in the city
+   * footprint boundary produce multiple disjoint sections — this array holds
+   * all of them so the renderer and barrier builders cover every section.
+   * Empty when hasOuterWall=false.
+   */
+  wallSegments: Point[][];
+  /** Gates distributed around the outer wall (drawn from all wall segments). */
   gates: { edge: Edge; dir: GateDir }[];
   /** Set of polygon ids that lie inside the wall footprint. */
   interiorPolygonIds: Set<number>;
@@ -106,7 +119,7 @@ export function generateWallsAndGates(
   waterPolygonIds?: Set<number>,
 ): WallGenerationResult {
   const empty: WallGenerationResult = {
-    wallPath: [], gates: [], interiorPolygonIds: new Set(),
+    wallPath: [], wallSegments: [], gates: [], interiorPolygonIds: new Set(),
     wallTowers: [], innerWallPath: [], innerGates: [],
     middleWallPath: [], middleGates: [],
   };
@@ -128,29 +141,40 @@ export function generateWallsAndGates(
   // border water (spec). The resulting path may be an OPEN polyline instead
   // of a closed ring; `chainWallPath` handles both.
   let wallPath: Point[] = [];
+  let wallSegments: Point[][] = [];
   let gates: { edge: Edge; dir: GateDir }[] = [];
   let wallTowers: Point[] = [];
 
   const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership, water);
-  const footprintPath = chainWallPath(boundaryEdges);
+  // Extract ALL disconnected wall chains — mountains / water gaps in the
+  // footprint boundary split it into multiple disjoint sections. The legacy
+  // `chainWallPath` only returned one; `chainAllWallPaths` returns all of them
+  // sorted longest-first so callers that need only the primary ring can take [0].
+  const footprintSegments = chainAllWallPaths(boundaryEdges);
+  const footprintPath = footprintSegments[0] ?? []; // longest segment (or empty)
 
   if (wallConfig.hasOuterWall) {
-    wallPath = footprintPath;
-    if (wallPath.length >= 4) {
+    wallSegments = footprintSegments;
+    wallPath = footprintPath; // longest segment kept for legacy consumers
+    if (wallSegments.length > 0) {
       const gateMin = GATE_COUNT_MIN[env.size];
       const gateMax = GATE_COUNT_MAX[env.size];
       const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
-      gates = pickGatesAngular(wallPath, env.waterSide, canvasSize, gateCount, rng);
-      wallTowers = computeTowerPositions(wallPath);
+      // Collect edges from ALL wall segments so gates are distributed across
+      // every disconnected wall section, not only the primary ring.
+      const allWallEdges = wallSegmentsToEdges(wallSegments);
+      gates = pickGatesAngular(allWallEdges, env.waterSide, canvasSize, gateCount, rng);
+      wallTowers = computeTowerPositionsMulti(wallSegments);
     }
   } else {
     // No outer wall: derive virtual entry points from the footprint boundary so
     // road generation has targets and block barriers are produced correctly.
-    if (footprintPath.length >= 4) {
+    if (footprintSegments.length > 0) {
       const gateMin = GATE_COUNT_MIN[env.size];
       const gateMax = GATE_COUNT_MAX[env.size];
       const gateCount = gateMin + Math.floor(rng() * (gateMax - gateMin + 1));
-      gates = pickGatesAngular(footprintPath, env.waterSide, canvasSize, gateCount, rng);
+      const allFootprintEdges = wallSegmentsToEdges(footprintSegments);
+      gates = pickGatesAngular(allFootprintEdges, env.waterSide, canvasSize, gateCount, rng);
     }
   }
 
@@ -168,7 +192,7 @@ export function generateWallsAndGates(
       if (midPath.length >= 4) {
         middleWallPath = midPath;
         const midGateCount = Math.max(INNER_WALL_MIN_GATES, GATE_COUNT_MIN[env.size]);
-        middleGates = pickGatesAngular(midPath, env.waterSide, canvasSize, midGateCount, rng);
+        middleGates = pickGatesAngular(wallSegmentsToEdges([midPath]), env.waterSide, canvasSize, midGateCount, rng);
       }
     }
   }
@@ -187,13 +211,13 @@ export function generateWallsAndGates(
       if (innerPath.length >= 4) {
         innerWallPath = innerPath;
         const innerGateCount = Math.max(INNER_WALL_MIN_GATES, GATE_COUNT_MIN[env.size]);
-        innerGates = pickGatesAngular(innerPath, env.waterSide, canvasSize, innerGateCount, rng);
+        innerGates = pickGatesAngular(wallSegmentsToEdges([innerPath]), env.waterSide, canvasSize, innerGateCount, rng);
       }
     }
   }
 
   return {
-    wallPath, gates, interiorPolygonIds: interior,
+    wallPath, wallSegments, gates, interiorPolygonIds: interior,
     wallTowers, innerWallPath, innerGates, middleWallPath, middleGates,
   };
 }
@@ -298,6 +322,72 @@ function collectWallBoundaryEdges(
 // Wall path chaining
 // ─────────────────────────────────────────────────────────────────────────────
 
+// [Voronoi-polygon] Flatten a list of wall-path segments into a single list
+// of directed edges. Used to feed all wall sections into `pickGatesAngular`
+// and barrier-key builders without assuming the segments are connected.
+function wallSegmentsToEdges(segments: Point[][]): Edge[] {
+  const edges: Edge[] = [];
+  for (const seg of segments) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      edges.push([[seg[i][0], seg[i][1]], [seg[i + 1][0], seg[i + 1][1]]]);
+    }
+  }
+  return edges;
+}
+
+// [Voronoi-polygon] Chain ALL disconnected boundary components into separate
+// polylines. Mountains / water gaps in the footprint boundary split it into
+// multiple disjoint sections; this function returns one chain per section,
+// sorted longest-first so callers that only need the primary ring take [0].
+// Each chain is produced by the same CW-turn walking logic as `chainWallPath`.
+function chainAllWallPaths(edges: Edge[]): Point[][] {
+  if (edges.length === 0) return [];
+
+  // Build an undirected adjacency map from vertex key → neighbour keys so we
+  // can BFS the edge graph and group vertices into connected components.
+  const adjVertices = new Map<string, string[]>();
+  for (const [a, b] of edges) {
+    const ka = vertexKey(a);
+    const kb = vertexKey(b);
+    if (!adjVertices.has(ka)) adjVertices.set(ka, []);
+    if (!adjVertices.has(kb)) adjVertices.set(kb, []);
+    adjVertices.get(ka)!.push(kb);
+    adjVertices.get(kb)!.push(ka);
+  }
+
+  // BFS to partition vertex keys into connected components.
+  const visitedVertices = new Set<string>();
+  const componentVertexSets: Set<string>[] = [];
+  for (const vk of adjVertices.keys()) {
+    if (visitedVertices.has(vk)) continue;
+    const component = new Set<string>();
+    const queue: string[] = [vk];
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      if (visitedVertices.has(curr)) continue;
+      visitedVertices.add(curr);
+      component.add(curr);
+      for (const nb of adjVertices.get(curr) ?? []) {
+        if (!visitedVertices.has(nb)) queue.push(nb);
+      }
+    }
+    componentVertexSets.push(component);
+  }
+
+  // For each component, collect its edges and chain them into a polyline.
+  // Checking only vertex `a` is sufficient — both endpoints of every edge
+  // belong to the same component so no edge is missed.
+  const chains: Point[][] = [];
+  for (const vertexSet of componentVertexSets) {
+    const compEdges = edges.filter(([a]) => vertexSet.has(vertexKey(a)));
+    const chain = chainWallPath(compEdges);
+    if (chain.length >= 4) chains.push(chain);
+  }
+
+  chains.sort((a, b) => b.length - a.length);
+  return chains;
+}
+
 // [Voronoi-polygon] Chain the boundary edges into the longest polyline we
 // can walk. Returns a closed ring for fully-walled footprints (typical
 // inland cities) OR an open polyline for coastal cities where the
@@ -398,14 +488,16 @@ function chainWallPath(edges: Edge[]): Point[] {
 // The `rng` is used to add a small random offset to sector start angles so the
 // distribution is less grid-rigid. Uses angular closeness rather than a strict
 // threshold so any reasonable wall topology produces the requested gate count.
+// Accepts a flat `wallEdges` list so it works across multiple disconnected wall
+// sections — call `wallSegmentsToEdges(segments)` to flatten before passing.
 function pickGatesAngular(
-  wallPath: Point[],
+  wallEdges: Edge[],
   waterSide: CityEnvironment['waterSide'],
   canvasSize: number,
   gateCount: number,
   rng: () => number,
 ): { edge: Edge; dir: GateDir }[] {
-  if (wallPath.length < 2) return [];
+  if (wallEdges.length === 0) return [];
 
   const center: Point = [canvasSize / 2, canvasSize / 2];
   // Small random rotation of the sector grid so gates don't always land exactly
@@ -430,9 +522,7 @@ function pickGatesAngular(
     let bestEdge: Edge | null = null;
     let bestScore = -Infinity;
 
-    for (let i = 0; i < wallPath.length - 1; i++) {
-      const a = wallPath[i];
-      const b = wallPath[i + 1];
+    for (const [a, b] of wallEdges) {
       const dx = b[0] - a[0];
       const dy = b[1] - a[1];
       const len = Math.hypot(dx, dy);
@@ -558,4 +648,21 @@ function computeTowerPositions(wallPath: Point[]): Point[] {
   }
 
   return towers;
+}
+
+// [Voronoi-polygon] Compute tower positions for ALL wall segments and
+// concatenate them into a single list. Towers are deduplicated globally
+// so a shared vertex between two (nearly touching) segments is not doubled.
+function computeTowerPositionsMulti(segments: Point[][]): Point[] {
+  const allTowers: Point[] = [];
+  const seen = new Set<string>();
+  for (const seg of segments) {
+    for (const pt of computeTowerPositions(seg)) {
+      const k = vertexKey(pt);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      allTowers.push(pt);
+    }
+  }
+  return allTowers;
 }

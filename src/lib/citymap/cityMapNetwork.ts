@@ -109,8 +109,10 @@ export function generateNetwork(
 
   // Precompute the wall-edge key set for street-served coverage.
   const wallEdgeKeySet = new Set<string>();
-  for (let i = 0; i < wall.wallPath.length - 1; i++) {
-    wallEdgeKeySet.add(canonicalEdgeKey(wall.wallPath[i], wall.wallPath[i + 1]));
+  for (const seg of wall.wallSegments) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      wallEdgeKeySet.add(canonicalEdgeKey(seg[i], seg[i + 1]));
+    }
   }
 
   // [Voronoi-polygon] Precompute the water-edge key set — any polygon edge

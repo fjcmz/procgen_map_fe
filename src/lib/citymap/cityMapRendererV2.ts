@@ -508,9 +508,19 @@ function drawBlockBackgrounds(
   }
 }
 
-// [Voronoi-polygon] Draw the outer wall as a thick closed polyline.
+// [Voronoi-polygon] Draw the outer wall as one or more thick polylines.
+// When mountains / water gaps split the footprint boundary, `wallSegments`
+// holds each disconnected section; we draw all of them. For cities with a
+// single unbroken perimeter, `wallSegments` has one entry matching `wallPath`.
 function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
-  strokePolyline(ctx, data.wallPath, WALL_INK, WALL_WIDTH);
+  if (data.wallSegments && data.wallSegments.length > 0) {
+    for (const seg of data.wallSegments) {
+      strokePolyline(ctx, seg, WALL_INK, WALL_WIDTH);
+    }
+  } else {
+    // Fallback for data generated before wallSegments was added.
+    strokePolyline(ctx, data.wallPath, WALL_INK, WALL_WIDTH);
+  }
 }
 
 // [Voronoi-polygon] Draw the intermediate wall ring (megalopolis only).

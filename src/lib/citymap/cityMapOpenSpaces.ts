@@ -121,8 +121,10 @@ export function generateOpenSpaces(
   // Streets are NOT in the exclusion set: plazas / markets *should* front
   // streets, and parks pressed up against a street still read fine.
   const blockedEdgeKeys = new Set<string>();
-  for (let i = 0; i < wall.wallPath.length - 1; i++) {
-    blockedEdgeKeys.add(canonicalEdgeKey(wall.wallPath[i], wall.wallPath[i + 1]));
+  for (const seg of wall.wallSegments) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      blockedEdgeKeys.add(canonicalEdgeKey(seg[i], seg[i + 1]));
+    }
   }
   if (river) {
     for (const [a, b] of river.edges) {
@@ -135,7 +137,7 @@ export function generateOpenSpaces(
     }
   }
 
-  const hasWalls = wall.wallPath.length > 0;
+  const hasWalls = wall.wallSegments.length > 0;
   const eligible = new Set<number>();
   for (const p of polygons) {
     if (p.isEdge) continue;

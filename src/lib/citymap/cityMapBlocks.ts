@@ -169,8 +169,10 @@ export function generateBlocks(
   // contrast, want to front streets, so openSpaces leaves streets out of
   // its blocked set).
   const barrierEdgeKeys = new Set<string>();
-  for (let i = 0; i < wall.wallPath.length - 1; i++) {
-    barrierEdgeKeys.add(canonicalEdgeKey(wall.wallPath[i], wall.wallPath[i + 1]));
+  for (const seg of wall.wallSegments) {
+    for (let i = 0; i < seg.length - 1; i++) {
+      barrierEdgeKeys.add(canonicalEdgeKey(seg[i], seg[i + 1]));
+    }
   }
   if (river) {
     for (const [a, b] of river.edges) {
