@@ -532,17 +532,15 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
     );
   }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);
 
-  // Block counts — computed lazily when the Quarters section is expanded.
+  // Named quarter blocks — computed lazily when the Quarters section is expanded.
   // Keyed on env fields that affect block layout (size, coastal, mountains)
   // rather than year-varying wonder/religion counts which only affect landmarks.
-  const blockCounts = useMemo(() => {
+  const cityBlocks = useMemo(() => {
     if (!quartersOpen || !city || !cityEnvironment) return null;
     const mapV2 = generateCityMapV2(seed, city.name, cityEnvironment);
-    const counts: Record<string, number> = {};
-    for (const block of mapV2.blocks) {
-      counts[block.role] = (counts[block.role] ?? 0) + 1;
-    }
-    return counts;
+    return mapV2.blocks
+      .filter(b => b.polygonIds.length > 0)
+      .map(b => ({ role: b.role, name: b.name }));
   }, [quartersOpen, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -632,10 +630,10 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               aria-expanded={quartersOpen}
             >
               {quartersOpen ? '▾' : '▸'} Quarters
-              {blockCounts && ` (${Object.values(blockCounts).reduce((s, c) => s + c, 0)})`}
+              {cityBlocks && ` (${cityBlocks.length})`}
             </button>
-            {quartersOpen && !blockCounts && <div style={styles.loadingNote}>Computing&hellip;</div>}
-            {quartersOpen && blockCounts && <QuartersList counts={blockCounts} />}
+            {quartersOpen && !cityBlocks && <div style={styles.loadingNote}>Computing&hellip;</div>}
+            {quartersOpen && cityBlocks && <QuartersList blocks={cityBlocks} />}
           </>
         )}
 
@@ -1166,27 +1164,38 @@ function EventRow({ event, startOfTime, convertYears }: { event: HistoryEvent; s
 // ── Quarters List ──
 
 const QUARTER_ICONS: Record<string, string> = {
-  civic: '\u{1F3DB}',        // 🏛 classical building
-  market: '⚖',          // ⚖ balance scales
-  harbor: '⚓',          // ⚓ anchor
-  residential: '\u{1F3E0}',  // 🏠 house
-  agricultural: '\u{1F33E}', // 🌾 sheaf
-  slum: '\u{1F3DA}',         // 🏚 derelict house
-  dock: '⛵',            // ⛵ sailboat
-  forge: '\u{1F528}',        // 🔨 hammer
-  tannery: '\u{1F6E1}',      // 🛡 shield (leather)
-  textile: '\u{1F9F5}',      // 🧵 thread
-  potters: '\u{1F3FA}',      // 🏺 amphora
-  mill: '⚙',            // ⚙ gear
-  temple_quarter: '⛩',  // ⛩ shinto shrine
-  necropolis: '⚰',      // ⚰ coffin
-  academia: '\u{1F4DA}',     // 📚 books
-  plague_ward: '⚕',     // ⚕ medical
+  civic: '\u{1F3DB}',           // 🏛 classical building
+  market: '⚖',             // ⚖ balance scales
+  harbor: '⚓',             // ⚓ anchor
+  residential: '\u{1F3E0}',     // 🏠 house
+  agricultural: '\u{1F33E}',    // 🌾 sheaf
+  slum: '\u{1F3DA}',            // 🏚 derelict house
+  dock: '⛵',               // ⛵ sailboat
+  forge: '\u{1F528}',           // 🔨 hammer
+  tannery: '\u{1F6E1}',         // 🛡 shield (leather)
+  textile: '\u{1F9F5}',         // 🧵 thread
+  potters: '\u{1F3FA}',         // 🏺 amphora
+  mill: '⚙',               // ⚙ gear
+  temple_quarter: '⛩',     // ⛩ shinto shrine
+  necropolis: '⚰',         // ⚰ coffin
+  academia: '\u{1F4DA}',        // 📚 books
+  plague_ward: '⚕',        // ⚕ medical
   archive_quarter: '\u{1F4DC}', // 📜 scroll
   foreign_quarter: '\u{1F3F4}', // 🏴 flag (foreign banner)
   caravanserai: '\u{1F42A}',    // 🐪 camel
   bankers_row: '\u{1F4B0}',     // 💰 money bag
   warehouse_row: '\u{1F4E6}',   // 📦 package
+  barracks: '⚔',           // ⚔ crossed swords
+  citadel: '\u{1F3F0}',         // 🏰 castle
+  arsenal: '⚒',            // ⚒ hammer and pick
+  watchmen_precinct: '\u{1F441}', // 👁 eye
+  theater_district: '\u{1F3AD}',  // 🎭 performing arts
+  bathhouse_quarter: '\u{1F6C1}', // 🛁 bathtub
+  pleasure_quarter: '\u{1F3AA}',  // 🎪 circus tent
+  festival_grounds: '\u{1F38A}',  // 🎊 confetti
+  ghetto: '\u{1F512}',          // 🔒 lock
+  workhouse: '⚒',          // ⚒ hammer and pick
+  gallows_hill: '☠',       // ☠ skull and crossbones
 };
 
 const QUARTER_LABELS: Record<string, string> = {
@@ -1211,20 +1220,34 @@ const QUARTER_LABELS: Record<string, string> = {
   caravanserai: 'Caravanserai',
   bankers_row: 'Bankers Row',
   warehouse_row: 'Warehouse Row',
+  barracks: 'Barracks',
+  citadel: 'Citadel',
+  arsenal: 'Arsenal',
+  watchmen_precinct: 'Watchmen',
+  theater_district: 'Theater',
+  bathhouse_quarter: 'Bathhouse',
+  pleasure_quarter: 'Pleasure',
+  festival_grounds: 'Festival Grounds',
+  ghetto: 'Ghetto',
+  workhouse: 'Workhouse',
+  gallows_hill: 'Gallows Hill',
 };
 
-function QuartersList({ counts }: { counts: Record<string, number> }) {
-  const entries = useMemo(
-    () => Object.entries(counts).sort((a, b) => b[1] - a[1]),
-    [counts],
+function QuartersList({ blocks }: { blocks: { role: string; name: string }[] }) {
+  const sorted = useMemo(
+    () => [...blocks].sort((a, b) => {
+      const ra = QUARTER_LABELS[a.role] ?? a.role;
+      const rb = QUARTER_LABELS[b.role] ?? b.role;
+      return ra.localeCompare(rb) || a.name.localeCompare(b.name);
+    }),
+    [blocks],
   );
   return (
     <div style={styles.techGrid}>
-      {entries.map(([role, count]) => (
-        <div key={role} style={styles.techRow} title={QUARTER_LABELS[role] ?? role}>
-          <span style={{ fontSize: 11, lineHeight: 1 }}>{QUARTER_ICONS[role] ?? '▪'}</span>
-          <span style={styles.techLabel}>{QUARTER_LABELS[role] ?? role}</span>
-          <span style={styles.techLevel}>{count}</span>
+      {sorted.map((block, i) => (
+        <div key={i} style={styles.techRow} title={QUARTER_LABELS[block.role] ?? block.role}>
+          <span style={{ fontSize: 11, lineHeight: 1 }}>{QUARTER_ICONS[block.role] ?? '▪'}</span>
+          <span style={styles.techLabel}>{block.name}</span>
         </div>
       ))}
     </div>
