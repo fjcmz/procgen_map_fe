@@ -217,6 +217,7 @@ export function renderCityMapV2(
   seed: string,
   cityName: string,
   showIcons = true,
+  showLabels = true,
 ): void {
   const size = data.canvasSize;
 
@@ -258,9 +259,9 @@ export function renderCityMapV2(
     ctx.stroke();
   }
 
-  // ── Layers 3, 13 reserved for PR 5 (remainder) ─────────────────────────
-  //   Layer 3  — docks (PR 5, env.waterSide hatching)
-  //   Layer 13 — district labels (PR 5)
+  // ── Layer 3 reserved for PR 5 (docks) ──────────────────────────────────
+  //   Layer 3  — docks (PR 5, env.waterSide hatching, not yet implemented)
+  //   Layer 13 — district labels (PR 5 slice, drawn late — see below)
   //   Layer 10 — buildings (PR 5) — drawn below after bridges and before walls.
   //   (Layer 12 landmarks — PR 4 slice — drawn below after walls.)
 
@@ -337,6 +338,10 @@ export function renderCityMapV2(
   if (ruinRng) {
     drawRuinOvergrowth(ctx, data, env, ruinRng);
   }
+
+  // ── Layer 13: district labels (PR 5 slice) ───────────────────────────────
+  // Drawn after all infrastructure so labels sit on top and remain readable.
+  if (showLabels) drawDistrictLabels(ctx, data);
 
   // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
   ctx.font = 'bold 22px Georgia, serif';
@@ -1774,6 +1779,33 @@ function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
     const [cx, cy] = blockCentroid(block.polygonIds, data.polygons);
     const [fill, ink] = palette;
     drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, block.role, fill, ink);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR 5 (slice) — district labels on Layer 13
+// ─────────────────────────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Draw each block's name as a small white-fill label with a
+// dark outline, centered on the block centroid and rotated along the block's
+// principal axis (angle pre-computed by the generator via PCA of polygon sites).
+// Font size is also pre-computed per block (8–13 px) so labels scale with
+// polygon area — larger polygons in small cities get slightly bigger text.
+// Skips exterior roles (slum / agricultural / dock / festival_grounds /
+// gallows_hill) and landmark-hosting blocks — both handled at generation time,
+// so `data.districtLabels` is already the filtered set.
+function drawDistrictLabels(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.districtLabels.length === 0) return;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const lbl of data.districtLabels) {
+    const { text, cx, cy, angle, fontSize } = lbl;
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (angle !== 0) ctx.rotate(angle);
+    ctx.font = `bold ${fontSize}px Georgia, 'Times New Roman', serif`;
+    drawOutlinedText(ctx, text, 0, 0, Math.max(2, fontSize * 0.28));
+    ctx.restore();
   }
 }
 
