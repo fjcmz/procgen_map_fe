@@ -532,15 +532,18 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
     );
   }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);
 
-  // Named quarter blocks — computed lazily when the Quarters section is expanded.
+  // Block counts by role — computed lazily when the Quarters section is expanded.
   // Keyed on env fields that affect block layout (size, coastal, mountains)
   // rather than year-varying wonder/religion counts which only affect landmarks.
-  const cityBlocks = useMemo(() => {
+  const blockCounts = useMemo(() => {
     if (!quartersOpen || !city || !cityEnvironment) return null;
     const mapV2 = generateCityMapV2(seed, city.name, cityEnvironment);
-    return mapV2.blocks
-      .filter(b => b.polygonIds.length > 0)
-      .map(b => ({ role: b.role, name: b.name }));
+    const counts: Record<string, number> = {};
+    for (const block of mapV2.blocks) {
+      if (block.polygonIds.length === 0) continue;
+      counts[block.role] = (counts[block.role] ?? 0) + 1;
+    }
+    return counts;
   }, [quartersOpen, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
@@ -630,10 +633,10 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               aria-expanded={quartersOpen}
             >
               {quartersOpen ? '▾' : '▸'} Quarters
-              {cityBlocks && ` (${cityBlocks.length})`}
+              {blockCounts && ` (${Object.values(blockCounts).reduce((s, c) => s + c, 0)})`}
             </button>
-            {quartersOpen && !cityBlocks && <div style={styles.loadingNote}>Computing&hellip;</div>}
-            {quartersOpen && cityBlocks && <QuartersList blocks={cityBlocks} />}
+            {quartersOpen && !blockCounts && <div style={styles.loadingNote}>Computing&hellip;</div>}
+            {quartersOpen && blockCounts && <QuartersList counts={blockCounts} />}
           </>
         )}
 
@@ -1233,21 +1236,18 @@ const QUARTER_LABELS: Record<string, string> = {
   gallows_hill: 'Gallows Hill',
 };
 
-function QuartersList({ blocks }: { blocks: { role: string; name: string }[] }) {
-  const sorted = useMemo(
-    () => [...blocks].sort((a, b) => {
-      const ra = QUARTER_LABELS[a.role] ?? a.role;
-      const rb = QUARTER_LABELS[b.role] ?? b.role;
-      return ra.localeCompare(rb) || a.name.localeCompare(b.name);
-    }),
-    [blocks],
+function QuartersList({ counts }: { counts: Record<string, number> }) {
+  const entries = useMemo(
+    () => Object.entries(counts).sort((a, b) => b[1] - a[1]),
+    [counts],
   );
   return (
     <div style={styles.techGrid}>
-      {sorted.map((block, i) => (
-        <div key={i} style={styles.techRow} title={QUARTER_LABELS[block.role] ?? block.role}>
-          <span style={{ fontSize: 11, lineHeight: 1 }}>{QUARTER_ICONS[block.role] ?? '▪'}</span>
-          <span style={styles.techLabel}>{block.name}</span>
+      {entries.map(([role, count]) => (
+        <div key={role} style={styles.techRow}>
+          <span style={{ fontSize: 11, lineHeight: 1 }}>{QUARTER_ICONS[role] ?? '▪'}</span>
+          <span style={styles.techLabel}>{QUARTER_LABELS[role] ?? role}</span>
+          <span style={styles.techLevel}>{count}</span>
         </div>
       ))}
     </div>
