@@ -505,6 +505,7 @@ function drawBlockBackgrounds(
     const militaryFill = MILITARY_BG_FILL[block.role];
     const tradeFill = TRADE_BG_FILL[block.role];
     const entertainmentFill = ENTERTAINMENT_BG_FILL[block.role];
+    const excludedFill = EXCLUDED_BG_FILL[block.role];
     if (sfhFill) {
       // Scholarship / faith / health district — light reddish/pink/violet fill.
       ctx.fillStyle = sfhFill;
@@ -544,6 +545,15 @@ function drawBlockBackgrounds(
     } else if (entertainmentFill) {
       // Entertainment & social district — light orange / pumpkin fill.
       ctx.fillStyle = entertainmentFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+    } else if (excludedFill) {
+      // Excluded / outcast district — deep grey / silver fill.
+      ctx.fillStyle = excludedFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -1018,6 +1028,28 @@ const ENTERTAINMENT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
   pleasure_quarter:  '#3a1000',
 };
 
+// ── Excluded / outcast district colours ─────────────────────────────────────
+// Deep grey / silver family — visually distinct from every other family
+// (craft browns, SFH violets/pinks, military greens, trade golds, entertainment
+// oranges). Ghetto leans cool slate (walled enclave), workhouse leans light
+// silver (institutional stone), gallows_hill is deep charcoal (somber
+// execution ground). gallows_hill is exterior-only (not in PACKING_ROLES),
+// so it appears only as a block background fill with no building packing on
+// top — same precedent as necropolis / plague_ward / festival_grounds.
+const EXCLUDED_BG_FILL: Partial<Record<DistrictRole, string>> = {
+  ghetto:       '#9098a4',
+  workhouse:    '#b0b4bc',
+  gallows_hill: '#5c5e68',
+};
+const EXCLUDED_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
+  ghetto:    ['#b8bcc4', '#a8acb4', '#989ca4'],
+  workhouse: ['#c8ccd4', '#b8bcc4', '#a8acb0'],
+};
+const EXCLUDED_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
+  ghetto:    '#1a1c22',
+  workhouse: '#1a1c22',
+};
+
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
 // interior buildings, slightly thinner stroke so sprawl reads airier.
 const SPRAWL_INK = '#2a241c';
@@ -1095,10 +1127,10 @@ function drawBuildings(
     // the role belongs to.
     const role = polygonRole.get(b.polygonId);
     const craftFills = role
-      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role] ?? ENTERTAINMENT_BUILDING_FILLS[role])
+      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role] ?? ENTERTAINMENT_BUILDING_FILLS[role] ?? EXCLUDED_BUILDING_FILLS[role])
       : undefined;
     const craftInk   = role
-      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role]   ?? ENTERTAINMENT_BUILDING_INK[role])
+      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role]   ?? ENTERTAINMENT_BUILDING_INK[role]   ?? EXCLUDED_BUILDING_INK[role])
       : undefined;
 
     traceClosedRing(ctx, b.vertices);
@@ -1699,13 +1731,17 @@ const DISTRICT_ICON_PALETTE: Partial<Record<DistrictRole, [fill: string, ink: st
   theater_district:  ['#f8c890', '#3a1a00'],
   bathhouse_quarter: ['#f8d8b8', '#3a2208'],
   pleasure_quarter:  ['#f09058', '#3a1000'],
+  // Excluded / outcast — light silver fills with near-black cool ink.
+  ghetto:            ['#c8ccd4', '#1a1c22'],
+  workhouse:         ['#d8dce4', '#1a1c22'],
 };
 
 // Roles that do not receive a district icon. festival_grounds is exterior
 // (an open fairground field) and reads better as a bare coloured polygon —
-// matches the slum / agricultural / dock convention.
+// matches the slum / agricultural / dock convention. gallows_hill is
+// exterior-only and follows the same precedent.
 const NO_DISTRICT_ICON: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
-  'slum', 'agricultural', 'dock', 'festival_grounds',
+  'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
 ]);
 
 // [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
@@ -1790,6 +1826,8 @@ function drawDistrictGlyph(
     case 'theater_district':  drawTheaterIcon(ctx, s, fill, ink); break;
     case 'bathhouse_quarter': drawBathhouseIcon(ctx, s, fill, ink); break;
     case 'pleasure_quarter':  drawPleasureQuarterIcon(ctx, s, fill, ink); break;
+    case 'ghetto':            drawGhettoIcon(ctx, s, fill, ink); break;
+    case 'workhouse':         drawWorkhouseIcon(ctx, s, fill, ink); break;
   }
 
   ctx.restore();
@@ -2454,5 +2492,82 @@ function drawPleasureQuarterIcon(ctx: CanvasRenderingContext2D, s: number, fill:
   ctx.beginPath();
   ctx.moveTo(0, s * 0.55);
   ctx.lineTo(0, s * 0.78);
+  ctx.stroke();
+}
+
+// ── Ghetto: arched walled gate (rounded arch on a plinth with a vertical bar) ─
+// Reads as a walled minority quarter with a single gated entrance — spec line
+// 90 ("walled minority quarter — religious/ethnic enclave, often gated at
+// night"). Thick outer wall silhouette, a central arch opening, and a small
+// lintel bar across the arch top.
+function drawGhettoIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = fill;
+  // Outer wall silhouette — rounded-top rectangle (the enclosure).
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.7, s * 0.65);
+  ctx.lineTo(-s * 0.7, -s * 0.2);
+  ctx.arc(0, -s * 0.2, s * 0.7, Math.PI, 0, false);
+  ctx.lineTo(s * 0.7, s * 0.65);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Central gate opening — rounded-top arch, cut out of the wall.
+  ctx.fillStyle = '#f5f0e8'; // cream base so it reads as a cut-out
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.28, s * 0.65);
+  ctx.lineTo(-s * 0.28, s * 0.0);
+  ctx.arc(0, s * 0.0, s * 0.28, Math.PI, 0, false);
+  ctx.lineTo(s * 0.28, s * 0.65);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Lintel bar across the arch top (gated signal).
+  ctx.lineWidth = Math.max(0.3, s * 0.08);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.32, s * 0.0);
+  ctx.lineTo(s * 0.32, s * 0.0);
+  ctx.stroke();
+  // Two dot studs on the wall flanking the gate (rivets / locks).
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(-s * 0.5, s * 0.28, s * 0.06, 0, Math.PI * 2);
+  ctx.arc( s * 0.5, s * 0.28, s * 0.06, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ── Workhouse: alms bowl with a cross above it ──────────────────────────────
+// Reads as institutional charity / poorhouse — spec line 91 ("institutional
+// poverty — almshouses, charity kitchens"). A small cross at top (monastic /
+// charitable origin), a vertical bar descending to a shallow bowl at the
+// bottom (the alms bowl or soup kettle).
+function drawWorkhouseIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = fill;
+  // Bowl (half-ellipse at the bottom).
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.58, s * 0.18);
+  ctx.ellipse(0, s * 0.18, s * 0.58, s * 0.38, 0, 0, Math.PI, false);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // Rim line across the top of the bowl.
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.58, s * 0.18);
+  ctx.lineTo( s * 0.58, s * 0.18);
+  ctx.stroke();
+  // Steam wisp from the bowl centre.
+  ctx.lineWidth = Math.max(0.3, s * 0.06);
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.05);
+  ctx.quadraticCurveTo(-s * 0.12, -s * 0.1, 0, -s * 0.22);
+  ctx.quadraticCurveTo( s * 0.12, -s * 0.34, 0, -s * 0.44);
+  ctx.stroke();
+  // Cross above the bowl (charitable / almshouse signal).
+  ctx.lineWidth = Math.max(0.4, s * 0.12);
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 0.88);
+  ctx.lineTo(0, -s * 0.5);
+  ctx.moveTo(-s * 0.22, -s * 0.72);
+  ctx.lineTo( s * 0.22, -s * 0.72);
   ctx.stroke();
 }

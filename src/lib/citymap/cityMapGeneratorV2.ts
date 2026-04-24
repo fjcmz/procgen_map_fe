@@ -45,6 +45,7 @@ import { assignSFHRoles } from './cityMapSFHQuarters';
 import { assignMilitaryRoles } from './cityMapMilitaryQuarters';
 import { assignTradeFinanceRoles } from './cityMapTradeFinanceQuarters';
 import { assignEntertainmentRoles } from './cityMapEntertainmentQuarters';
+import { assignExcludedRoles } from './cityMapExcludedQuarters';
 import { generateLandmarks } from './cityMapLandmarks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
@@ -682,12 +683,20 @@ export function generateCityMapV2(
   // Re-classify a seeded subset of `residential` blocks (interior 3) and
   // `agricultural`/`slum` blocks (festival_grounds only) as entertainment &
   // social districts: theater_district / bathhouse_quarter / pleasure_quarter
-  // / festival_grounds. Called LAST among the assigners so it does not steal
-  // civic / market / military / trade picks. `landmarks` is passed for
-  // theater_district's monument/wonder bias, `openSpaces` for marketBoost,
-  // `gates` for pleasure_quarter gate-adjacency bias. Counts per env.size are
+  // / festival_grounds. `landmarks` is passed for theater_district's
+  // monument/wonder bias, `openSpaces` for marketBoost, `gates` for
+  // pleasure_quarter gate-adjacency bias. Counts per env.size are
   // small:0 / medium:0-1 / large:1-2 / metropolis:1-3 / megalopolis:2-5.
   assignEntertainmentRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
+
+  // Re-classify a seeded subset of `residential` blocks (interior 2) and
+  // `agricultural`/`slum` blocks (gallows_hill only) as excluded & outcast
+  // districts: ghetto / workhouse / gallows_hill. Called LAST among the
+  // assigners so it does not steal civic / market / military / trade /
+  // entertainment picks. `landmarks` is passed for workhouse's monument/
+  // wonder bias, `openSpaces` for ghetto's market bias. Counts per env.size
+  // are small:0 / medium:0-1 / large:1-2 / metropolis:1-3 / megalopolis:2-5.
+  assignExcludedRoles(blocks, env, polygons, landmarks, openSpaces, seed, cityName);
 
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain

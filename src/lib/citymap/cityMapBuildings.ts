@@ -87,6 +87,11 @@ const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
   'theater_district',
   'bathhouse_quarter',
   'pleasure_quarter',
+  // Excluded / outcast — two of three roles are interior.
+  // gallows_hill is exterior (sourced from agricultural/slum) and appears as
+  // a bare coloured fill, mirroring festival_grounds / necropolis / plague_ward.
+  'ghetto',
+  'workhouse',
 ]);
 
 const LOT_BASE: Record<DistrictRole, number> = {
@@ -131,6 +136,12 @@ const LOT_BASE: Record<DistrictRole, number> = {
   bathhouse_quarter: 2,
   pleasure_quarter:  3,
   festival_grounds:  0,
+  // Excluded / outcast: ghetto packs dense like residential (tenement rows);
+  // workhouse is civic-scale (one or two large institutional halls);
+  // gallows_hill is exterior, value unused.
+  ghetto:            3,
+  workhouse:         2,
+  gallows_hill:      0,
 };
 const LOT_DIVISOR: Record<DistrictRole, number> = {
   civic: 700,
@@ -171,6 +182,11 @@ const LOT_DIVISOR: Record<DistrictRole, number> = {
   bathhouse_quarter: 600,
   pleasure_quarter:  300,
   festival_grounds:  1,
+  // Excluded / outcast: ghetto packs dense like residential (cramped
+  // tenements); workhouse gets civic-scale spacing; gallows_hill exterior.
+  ghetto:            240,
+  workhouse:         600,
+  gallows_hill:      1,
 };
 const LOT_MIN: Record<DistrictRole, number> = {
   civic: 1,
@@ -202,6 +218,9 @@ const LOT_MIN: Record<DistrictRole, number> = {
   bathhouse_quarter: 1,
   pleasure_quarter:  2,
   festival_grounds:  0,
+  ghetto:            2,
+  workhouse:         1,
+  gallows_hill:      0,
 };
 const LOT_MAX: Record<DistrictRole, number> = {
   civic: 4,
@@ -233,6 +252,9 @@ const LOT_MAX: Record<DistrictRole, number> = {
   bathhouse_quarter: 3,
   pleasure_quarter:  5,
   festival_grounds:  0,
+  ghetto:            5,
+  workhouse:         3,
+  gallows_hill:      0,
 };
 
 // Setback in pixels from polygon boundary edges.
