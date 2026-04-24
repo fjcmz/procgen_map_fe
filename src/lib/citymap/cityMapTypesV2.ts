@@ -195,8 +195,7 @@ export interface CityMapDataV2 {
   sprawlBuildings: CityBuildingV2[];
   // TODO PR 4: castle / palace / temple / monument placements.
   landmarks: CityLandmarkV2[];
-  // TODO PR 5: rotated district labels ("BLUEGATE", "GLASS DOCKS", …).
-  districtLabels: { text: string; cx: number; cy: number; angle: number }[];
+  districtLabels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[];
 
   /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */
   wallTowers: [number, number][];

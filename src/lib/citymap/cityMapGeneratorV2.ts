@@ -20,6 +20,7 @@ import { seededPRNG } from '../terrain/noise';
 import type { Cell, City, MapData } from '../types';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
+  CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
   CityMapDataV2,
@@ -410,6 +411,53 @@ function buildCityPolygonGraph(
  * The polygon graph uses a dedicated `_voronoi` suffix so it stays decoupled
  * from PR 2-5 random streams (walls, rivers, etc.) and avoids cross-PR drift.
  */
+
+// Roles that don't get district labels (exterior / docks / special ground).
+// Mirrors the NO_DISTRICT_ICON set in the renderer.
+const NO_LABEL_ROLES: ReadonlySet<string> = new Set([
+  'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
+]);
+
+// [Voronoi-polygon] Compute `districtLabels` from the block list. For each
+// interior block, derives a centroid (mean polygon site), a principal-axis
+// angle via PCA of the polygon sites (so labels lean along the block's long
+// axis), and a font size scaled from the average polygon area (larger polygons
+// in small cities get slightly bigger text; clamped to [8, 13] px).
+// Blocks hosting a landmark glyph are omitted to avoid overlap.
+function computeDistrictLabels(
+  blocks: CityBlockV2[],
+  landmarks: CityLandmarkV2[],
+  polygons: CityPolygon[],
+): { text: string; cx: number; cy: number; angle: number; fontSize: number }[] {
+  const landmarkPids = new Set(landmarks.map(lm => lm.polygonId));
+  const labels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[] = [];
+  for (const block of blocks) {
+    if (NO_LABEL_ROLES.has(block.role)) continue;
+    if (block.polygonIds.some(pid => landmarkPids.has(pid))) continue;
+    let cx = 0, cy = 0, totalArea = 0, n = 0;
+    for (const pid of block.polygonIds) {
+      const p = polygons[pid];
+      if (!p) continue;
+      cx += p.site[0]; cy += p.site[1]; totalArea += p.area; n++;
+    }
+    if (n === 0) continue;
+    cx /= n; cy /= n;
+    // PCA: angle of principal axis through the block's polygon sites.
+    let sxx = 0, sxy = 0, syy = 0;
+    for (const pid of block.polygonIds) {
+      const p = polygons[pid];
+      if (!p) continue;
+      const dx = p.site[0] - cx; const dy = p.site[1] - cy;
+      sxx += dx * dx; sxy += dx * dy; syy += dy * dy;
+    }
+    // atan2(2·sxy, sxx−syy)/2 ∈ (−π/2, π/2] — never upside-down.
+    const angle = n >= 2 ? Math.atan2(2 * sxy, sxx - syy) / 2 : 0;
+    const fontSize = Math.max(8, Math.min(13, Math.sqrt(totalArea / n) * 0.12));
+    labels.push({ text: block.name, cx, cy, angle, fontSize });
+  }
+  return labels;
+}
+
 export function generateCityMapV2(
   seed: string,
   cityName: string,
@@ -780,8 +828,6 @@ export function generateCityMapV2(
     middleWallPath,
     middleGates,
     exitRoads,
-    // TODO PR 5 (remainder): dock hatching + rotated district labels
-    // ("BLUEGATE", "GLASS DOCKS", …).
-    districtLabels: [],
+    districtLabels: computeDistrictLabels(blocks, landmarks, polygons),
   };
 }

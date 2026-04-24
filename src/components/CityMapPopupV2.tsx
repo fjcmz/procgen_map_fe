@@ -14,6 +14,7 @@ interface CityMapPopupV2Props {
 export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [showIcons, setShowIcons] = useState(true);
+  const [showLabels, setShowLabels] = useState(true);
 
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
@@ -37,8 +38,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     ctx.scale(dpr, dpr);
 
     const data = generateCityMapV2(seed, cityName, environment);
-    renderCityMapV2(ctx, data, environment, seed, cityName, showIcons);
-  }, [isOpen, seed, cityName, environment, showIcons]);
+    renderCityMapV2(ctx, data, environment, seed, cityName, showIcons, showLabels);
+  }, [isOpen, seed, cityName, environment, showIcons, showLabels]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -69,6 +70,15 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
                 style={styles.checkbox}
               />
               <span style={styles.iconToggleText}>Icons</span>
+            </label>
+            <label style={styles.iconToggle}>
+              <input
+                type="checkbox"
+                checked={showLabels}
+                onChange={e => setShowLabels(e.target.checked)}
+                style={styles.checkbox}
+              />
+              <span style={styles.iconToggleText}>Labels</span>
             </label>
             <button style={styles.closeBtn} onClick={onClose} title="Close">&times;</button>
           </div>
