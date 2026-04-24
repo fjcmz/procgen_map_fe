@@ -22,6 +22,8 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   polarIceEnd: 0.94,
   polarNoiseAmplitude: 0.6,
   polarBlendWeight: 0.5,
+  polarLandSuppressStart: 0.70,
+  polarLandSuppressStrength: 0.80,
   thermalErosionIters: 3,
   thermalErosionTalus: 0.05,
 
@@ -161,6 +163,8 @@ export const PROFILES: Record<string, TerrainProfile> = {
     polarIceStart: 0.20,
     polarIceEnd: 0.50,
     polarBlendWeight: 0.7,
+    // Snowball earth: land at the poles is intentional — disable suppression
+    polarLandSuppressStrength: 0.0,
     latAmplitude: 0.10,
     globalMoistureOffset: -0.05,
     riverFlowThreshold: 25,

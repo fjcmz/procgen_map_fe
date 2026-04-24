@@ -353,6 +353,10 @@ export interface TerrainProfile {
   polarIceEnd: number;
   polarNoiseAmplitude: number;
   polarBlendWeight: number;
+  /** |ny| threshold where the polar land suppression begins (0 = equator, 1 = pole). */
+  polarLandSuppressStart: number;
+  /** Maximum elevation penalty applied at the pole; smoothstep-blended from 0 at start to this at |ny|=1. Set to 0 to disable. */
+  polarLandSuppressStrength: number;
   thermalErosionIters: number;
   thermalErosionTalus: number;
 

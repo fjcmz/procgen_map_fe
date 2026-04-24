@@ -522,6 +522,16 @@ export function assignElevation(
       elev += polarLand * profile.polarBlendWeight;
     }
 
+    // --- Polar land suppression ---
+    // Push elevation down in the top/bottom polar zones so the combined top+bottom
+    // 15% of the map holds less than ~10% of total land. Applied after the polar
+    // ice cap boost so the net effect is a clear elevation penalty at high latitudes.
+    if (profile.polarLandSuppressStrength > 0 && polarDist > profile.polarLandSuppressStart) {
+      const tSuppress = (polarDist - profile.polarLandSuppressStart) / (1.0 - profile.polarLandSuppressStart);
+      const suppressBlend = tSuppress * tSuppress * (3 - 2 * tSuppress);
+      elev -= suppressBlend * profile.polarLandSuppressStrength;
+    }
+
     cell.elevation = Math.max(0, Math.min(1, elev));
   }
 
