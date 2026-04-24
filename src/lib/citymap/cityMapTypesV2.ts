@@ -30,7 +30,8 @@ export type DistrictRole =
   | 'temple_quarter' | 'necropolis' | 'academia' | 'plague_ward' | 'archive_quarter'
   | 'barracks' | 'citadel' | 'arsenal' | 'watchmen_precinct'
   | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row'
-  | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds';
+  | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds'
+  | 'ghetto' | 'workhouse' | 'gallows_hill';
 
 export interface CityEnvironment {
   biome: BiomeType;
