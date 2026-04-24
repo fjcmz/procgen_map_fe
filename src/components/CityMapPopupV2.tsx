@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CityEnvironment, CityMapDataV2 } from '../lib/citymap';
+import type { CityEnvironment, CityMapDataV2, DistrictRole } from '../lib/citymap';
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
 
 interface CityMapPopupV2Props {
@@ -15,6 +15,42 @@ interface CityMapPopupV2Props {
 const NO_LABEL_ROLES = new Set([
   'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
 ]);
+
+// Emoji icon + human-readable label for every district role.
+const DISTRICT_ROLE_INFO: Record<DistrictRole, { icon: string; label: string }> = {
+  civic:              { icon: '🏛',  label: 'Civic Centre' },
+  residential:        { icon: '🏠',  label: 'Residential' },
+  harbor:             { icon: '⚓',  label: 'Harbour' },
+  market:             { icon: '🛒',  label: 'Market' },
+  agricultural:       { icon: '🌾',  label: 'Fields' },
+  slum:               { icon: '🏚',  label: 'Slums' },
+  dock:               { icon: '⚓',  label: 'Docks' },
+  forge:              { icon: '⚒️',  label: 'Forge Quarter' },
+  tannery:            { icon: '🐄',  label: 'Tannery' },
+  textile:            { icon: '🧵',  label: 'Textile Quarter' },
+  potters:            { icon: '🏺',  label: 'Potters Quarter' },
+  mill:               { icon: '⚙️',  label: 'Mill Quarter' },
+  temple_quarter:     { icon: '⛪',  label: 'Temple Quarter' },
+  necropolis:         { icon: '💀',  label: 'Necropolis' },
+  academia:           { icon: '📚',  label: 'Academia' },
+  plague_ward:        { icon: '☣️',  label: 'Plague Ward' },
+  archive_quarter:    { icon: '📜',  label: 'Archive Quarter' },
+  barracks:           { icon: '⚔️',  label: 'Barracks' },
+  citadel:            { icon: '🏰',  label: 'Citadel' },
+  arsenal:            { icon: '🗡️',  label: 'Arsenal' },
+  watchmen_precinct:  { icon: '👁️',  label: "Watchmen's Precinct" },
+  foreign_quarter:    { icon: '🌍',  label: 'Foreign Quarter' },
+  caravanserai:       { icon: '🐪',  label: 'Caravanserai' },
+  bankers_row:        { icon: '💰',  label: "Bankers' Row" },
+  warehouse_row:      { icon: '📦',  label: 'Warehouse Row' },
+  theater_district:   { icon: '🎭',  label: 'Theatre District' },
+  bathhouse_quarter:  { icon: '♨️',  label: 'Bathhouse Quarter' },
+  pleasure_quarter:   { icon: '🌹',  label: 'Pleasure Quarter' },
+  festival_grounds:   { icon: '🎪',  label: 'Festival Grounds' },
+  ghetto:             { icon: '🧱',  label: 'Ghetto' },
+  workhouse:          { icon: '🔨',  label: 'Workhouse' },
+  gallows_hill:       { icon: '⚖️',  label: 'Gallows Hill' },
+};
 
 // Ray-casting point-in-polygon (unclosed ring, matching CityPolygon contract).
 function pointInPolygon(px: number, py: number, verts: [number, number][]): boolean {
@@ -32,13 +68,12 @@ function pointInPolygon(px: number, py: number, verts: [number, number][]): bool
 
 export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Stored map data — used for hover hit-testing without re-generating.
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
-  // polygonId → district label text (only for labeled interior blocks).
-  const polygonToLabelRef = useRef(new Map<number, string>());
+  // polygonId → { name, role } for labeled blocks only.
+  const polygonToLabelRef = useRef(new Map<number, { name: string; role: DistrictRole }>());
   const [showIcons, setShowIcons] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
-  const [tooltip, setTooltip] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ name: string; role: DistrictRole; x: number; y: number } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Generate + render whenever inputs change.
@@ -63,13 +98,14 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     const data = generateCityMapV2(seed, cityName, environment);
     mapDataRef.current = data;
 
-    // Pre-index polygon → label name for O(polygons) hit-testing on hover.
-    const pMap = new Map<number, string>();
+    // Build polygon → { name, role } index for hover hit-testing.
+    const pMap = new Map<number, { name: string; role: DistrictRole }>();
     const landmarkPids = new Set(data.landmarks.map(lm => lm.polygonId));
     for (const block of data.blocks) {
       if (NO_LABEL_ROLES.has(block.role)) continue;
       if (block.polygonIds.some(pid => landmarkPids.has(pid))) continue;
-      for (const pid of block.polygonIds) pMap.set(pid, block.name);
+      const entry = { name: block.name, role: block.role };
+      for (const pid of block.polygonIds) pMap.set(pid, entry);
     }
     polygonToLabelRef.current = pMap;
 
@@ -106,8 +142,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     ];
   }, []);
 
-  // Return the district label text under the given client position, or null.
-  const hitTest = useCallback((clientX: number, clientY: number): string | null => {
+  // Return the district info under the given client position, or null.
+  const hitTest = useCallback((clientX: number, clientY: number): { name: string; role: DistrictRole } | null => {
     const coords = toCanvasCoords(clientX, clientY);
     if (!coords) return null;
     const data = mapDataRef.current;
@@ -123,9 +159,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (showLabels) return;
-    const name = hitTest(e.clientX, e.clientY);
-    // Center the tooltip above the cursor.
-    setTooltip(name ? { text: name, x: e.clientX, y: e.clientY - 36 } : null);
+    const hit = hitTest(e.clientX, e.clientY);
+    setTooltip(hit ? { ...hit, x: e.clientX, y: e.clientY - 44 } : null);
   }, [showLabels, hitTest]);
 
   const handleMouseLeave = useCallback(() => setTooltip(null), []);
@@ -136,8 +171,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     const touch = e.touches[0];
     if (!touch) return;
     if (tooltipTimerRef.current) { clearTimeout(tooltipTimerRef.current); tooltipTimerRef.current = null; }
-    const name = hitTest(touch.clientX, touch.clientY);
-    setTooltip(name ? { text: name, x: touch.clientX, y: touch.clientY - 60 } : null);
+    const hit = hitTest(touch.clientX, touch.clientY);
+    setTooltip(hit ? { ...hit, x: touch.clientX, y: touch.clientY - 68 } : null);
   }, [showLabels, hitTest]);
 
   const handleTouchEnd = useCallback(() => {
@@ -150,6 +185,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   }, [onClose]);
 
   if (!isOpen) return null;
+
+  const roleInfo = tooltip ? DISTRICT_ROLE_INFO[tooltip.role as DistrictRole] : null;
 
   return createPortal(
     <>
@@ -200,9 +237,10 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
           </div>
         </div>
       </div>
-      {!showLabels && tooltip && (
+      {!showLabels && tooltip && roleInfo && (
         <div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>
-          {tooltip.text}
+          <div style={styles.tooltipName}>{tooltip.name}</div>
+          <div style={styles.tooltipRole}>{roleInfo.icon} {roleInfo.label}</div>
         </div>
       )}
     </>,
@@ -331,18 +369,27 @@ const styles: Record<string, React.CSSProperties> = {
   tooltip: {
     position: 'fixed',
     transform: 'translateX(-50%)',
-    background: 'rgba(28, 18, 8, 0.92)',
+    background: 'rgba(28, 18, 8, 0.93)',
     color: '#f0e0b8',
     fontFamily: "Georgia, 'Times New Roman', serif",
-    fontSize: 12,
-    fontWeight: 'bold',
-    letterSpacing: 1,
-    padding: '5px 12px',
-    borderRadius: 4,
+    padding: '6px 14px 8px',
+    borderRadius: 5,
     border: '1px solid rgba(200, 155, 70, 0.55)',
-    boxShadow: '0 2px 10px rgba(0,0,0,0.5)',
+    boxShadow: '0 3px 12px rgba(0,0,0,0.55)',
     pointerEvents: 'none',
     zIndex: 10001,
     whiteSpace: 'nowrap',
+    textAlign: 'center',
+  },
+  tooltipName: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    letterSpacing: 1,
+    marginBottom: 3,
+  },
+  tooltipRole: {
+    fontSize: 11,
+    color: '#c8a462',
+    letterSpacing: 0.4,
   },
 };
