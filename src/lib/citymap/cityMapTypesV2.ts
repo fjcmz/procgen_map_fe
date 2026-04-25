@@ -151,6 +151,18 @@ export interface CityBlockV2 {
 }
 
 /**
+ * Phase 6 of specs/City_districts_redux.md — block cluster keyed on the
+ * coarse DistrictType union. Produced by `buildBlocksFromDistricts` in
+ * `cityMapBlocks.ts` and written to `_blocksNew`; Phase 7 promotes it over
+ * `blocks` and Phase 8 deletes `CityBlockV2` / `DistrictRole`.
+ */
+export interface CityBlockNewV2 {
+  polygonIds: number[];
+  role: DistrictType;
+  name: string;
+}
+
+/**
  * A building footprint polygon placed inside a specific lot polygon. Produced
  * by subdividing each block polygon into Voronoi lots and insetting each lot
  * by a uniform distance from its edges.
@@ -295,6 +307,14 @@ export interface CityMapDataV2 {
    * never reaches a renderer).
    */
   _districtsNew?: DistrictType[];
+  /**
+   * Phase 6 of specs/City_districts_redux.md — output of
+   * `buildBlocksFromDistricts` in `cityMapBlocks.ts`. Connected-component
+   * grouping of `_districtsNew` into named block clusters keyed on the coarse
+   * DistrictType union. Renderer ignores this field until Phase 7 promotes it
+   * over `blocks`.
+   */
+  _blocksNew?: CityBlockNewV2[];
   districtLabels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[];
 
   /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */

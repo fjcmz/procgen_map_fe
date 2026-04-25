@@ -42,20 +42,21 @@
 import { seededPRNG } from '../terrain/noise';
 import type { CitySize } from './cityMapTypesV2';
 import type {
-  CityBlockV2,
+  CityBlockNewV2,
   CityBuildingV2,
   CityEnvironment,
-  CityLandmarkV2,
-  CityMapDataV2,
+  LandmarkV2,
   CityPolygon,
-  DistrictRole,
+  DistrictType,
 } from './cityMapTypesV2';
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
+// Phase 6 — re-keyed to the DistrictType union. Only slum and agricultural
+// produce sprawl buildings; the local SprawlRole alias mirrors that subset.
 type SprawlRole = 'slum' | 'agricultural';
 
-const SPRAWL_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
+const SPRAWL_ROLES: ReadonlySet<DistrictType> = new Set<DistrictType>([
   'slum',
   'agricultural',
 ]);
@@ -104,6 +105,9 @@ const WALL_PROXIMITY_BONUS = 0.8;
 /**
  * Generate `sprawlBuildings: CityBuildingV2[]` for a V2 city map.
  *
+ * Phase 6: accepts `CityBlockNewV2[]` (role: DistrictType) and `LandmarkV2[]`
+ * instead of the legacy `CityBlockV2[]` / `openSpaces` / `CityLandmarkV2[]`.
+ *
  * Each building is a small polygon footprint produced by shrinking the parent
  * polygon toward its centroid and capping its radius.
  *
@@ -115,9 +119,8 @@ export function generateSprawl(
   cityName: string,
   env: CityEnvironment,
   polygons: CityPolygon[],
-  blocks: CityBlockV2[],
-  openSpaces: CityMapDataV2['openSpaces'],
-  landmarks: CityLandmarkV2[],
+  blocks: CityBlockNewV2[],
+  landmarksNew: LandmarkV2[],
   canvasSize: number,
   wallPath?: [number, number][],
 ): CityBuildingV2[] {
@@ -125,11 +128,15 @@ export function generateSprawl(
 
   if (polygons.length === 0 || blocks.length === 0) return [];
 
+  // Reserved polygon ids: unified landmark layer polygons (parks, plazas, etc.)
+  // must stay clear even when they happen to land on exterior polygons.
   const reservedPolygonIds = new Set<number>();
-  for (const entry of openSpaces) {
-    for (const id of entry.polygonIds) reservedPolygonIds.add(id);
+  for (const lm of landmarksNew) {
+    reservedPolygonIds.add(lm.polygonId);
+    if (lm.polygonIds) {
+      for (const pid of lm.polygonIds) reservedPolygonIds.add(pid);
+    }
   }
-  for (const lm of landmarks) reservedPolygonIds.add(lm.polygonId);
 
   const rng = seededPRNG(`${seed}_city_${cityName}_sprawl`);
   const tierScale = SPRAWL_TIER_SCALE[env.size];

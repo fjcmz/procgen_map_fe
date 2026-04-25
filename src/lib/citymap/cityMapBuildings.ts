@@ -44,217 +44,105 @@
 import { Delaunay } from 'd3-delaunay';
 import { seededPRNG } from '../terrain/noise';
 import type {
-  CityBlockV2,
+  CityBlockNewV2,
   CityBuildingV2,
   CityEnvironment,
-  CityLandmarkV2,
-  CityMapDataV2,
+  LandmarkV2,
   CityPolygon,
-  DistrictRole,
+  DistrictType,
 } from './cityMapTypesV2';
 
 // ─── Tunables ────────────────────────────────────────────────────────────────
 
-const PACKING_ROLES: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
+// Phase 6 — re-keyed to the coarse DistrictType union.
+// slum / agricultural / dock are excluded: exterior territory belongs to
+// cityMapSprawl.ts and dock polygons are water (rendered by drawDockBlocks).
+const PACKING_ROLES: ReadonlySet<DistrictType> = new Set<DistrictType>([
   'civic',
   'market',
   'harbor',
-  'residential',
-  // Craft & industry — larger sparse workshops (1–3 per polygon).
-  'forge',
-  'tannery',
-  'textile',
-  'potters',
-  'mill',
-  // Scholarship / faith / health — interior districts only.
-  // necropolis and plague_ward are exterior and appear as bare coloured fills.
-  'temple_quarter',
-  'academia',
-  'archive_quarter',
-  // Military & security — all four roles are interior.
-  'barracks',
-  'citadel',
-  'arsenal',
-  'watchmen_precinct',
-  // Trade & finance — all four roles are interior.
-  'foreign_quarter',
-  'caravanserai',
-  'bankers_row',
-  'warehouse_row',
-  // Entertainment & social — three of four roles are interior.
-  // festival_grounds is exterior (sourced from agricultural/slum) and appears
-  // as a bare coloured fill, mirroring the necropolis / plague_ward precedent.
-  'theater_district',
-  'bathhouse_quarter',
-  'pleasure_quarter',
-  // Excluded / outcast — two of three roles are interior.
-  // gallows_hill is exterior (sourced from agricultural/slum) and appears as
-  // a bare coloured fill, mirroring festival_grounds / necropolis / plague_ward.
-  'ghetto',
-  'workhouse',
+  'residential_high',
+  'residential_medium',
+  'residential_low',
+  'industry',
+  'education_faith',
+  'military',
+  'trade',
+  'entertainment',
+  'excluded',
 ]);
 
-const LOT_BASE: Record<DistrictRole, number> = {
-  civic: 2,
-  market: 3,
-  harbor: 2,
-  residential: 3,
-  slum: 0,
-  agricultural: 0,
-  dock: 0,
-  // Craft: sparse — 1–2 large workshop footprints per polygon.
-  forge:   1,
-  tannery: 1,
-  textile: 1,
-  potters: 2,
-  mill:    1,
-  // SFH interior: moderate civic-like density for religious/scholarly buildings.
-  // necropolis and plague_ward are exterior (not in PACKING_ROLES) — values unused.
-  temple_quarter:  2,
-  academia:        2,
-  archive_quarter: 2,
-  necropolis:      0,
-  plague_ward:     0,
-  // Military: barracks = many drill-row buildings; citadel = single keep-scale
-  // footprint; arsenal = few large magazines; watchmen = moderate.
-  barracks:          3,
-  citadel:           2,
-  arsenal:           2,
-  watchmen_precinct: 2,
-  // Trade & finance: foreign_quarter = enclave blocks (moderately dense);
-  // caravanserai = walled inn with stables (sparse central court);
-  // bankers_row = civic-scale counting houses (sparse); warehouse_row =
-  // long storage sheds packed densely like residential.
-  foreign_quarter:   3,
-  caravanserai:      2,
-  bankers_row:       2,
-  warehouse_row:     2,
-  // Entertainment & social: theater = a few large halls; bathhouse = civic-
-  // scale; pleasure_quarter packs denser like residential (taverns + shops);
-  // festival_grounds is exterior, value unused.
-  theater_district:  2,
-  bathhouse_quarter: 2,
-  pleasure_quarter:  3,
-  festival_grounds:  0,
-  // Excluded / outcast: ghetto packs dense like residential (tenement rows);
-  // workhouse is civic-scale (one or two large institutional halls);
-  // gallows_hill is exterior, value unused.
-  ghetto:            3,
-  workhouse:         2,
-  gallows_hill:      0,
+// Phase 6 — density tables keyed on DistrictType. Values derived by collapsing
+// the old fine-grained DistrictRole table (forge/tannery/… → industry,
+// barracks/citadel/… → military, etc.).
+const LOT_BASE: Record<DistrictType, number> = {
+  civic:              2,
+  market:             4,
+  harbor:             2,
+  residential_high:   4,  // densest residential — tenements / manor rows
+  residential_medium: 3,
+  residential_low:    2,  // sparser — cottages with gardens
+  industry:           2,  // large workshop footprints
+  education_faith:    2,  // notable civic-scale structures
+  military:           3,  // drill-rows / barracks blocks
+  trade:              3,  // enclave / warehouse density
+  entertainment:      2,  // larger halls / gardens
+  excluded:           2,  // tenements / workhouses
+  // unused by PACKING_ROLES — values kept for exhaustive Record<>
+  slum:               0,
+  agricultural:       0,
+  dock:               0,
 };
-const LOT_DIVISOR: Record<DistrictRole, number> = {
-  civic: 700,
-  market: 220,
-  harbor: 550,
-  residential: 280,
-  slum: 1,
-  agricultural: 1,
-  dock: 1,
-  // Craft: large divisor → fewer lots → bigger individual footprints.
-  forge:   800,
-  tannery: 800,
-  textile: 800,
-  potters: 600,
-  mill:    900,
-  // SFH interior: civic-scale spacing for larger, notable structures.
-  temple_quarter:  600,
-  academia:        700,
-  archive_quarter: 700,
-  necropolis:      1,
-  plague_ward:     1,
-  // Military: large divisors for citadel / arsenal (few big footprints),
-  // smaller for barracks (drill-rows pack more lots per polygon).
-  barracks:          400,
-  citadel:           900,
-  arsenal:           700,
-  watchmen_precinct: 500,
-  // Trade & finance: warehouse packs densely (small divisor) like residential;
-  // bankers_row sparser like civic; foreign_quarter and caravanserai
-  // moderately sparse — big enclave / courtyard footprints.
-  foreign_quarter:   400,
-  caravanserai:      500,
-  bankers_row:       600,
-  warehouse_row:     350,
-  // Entertainment & social: theater + bathhouse get civic-scale spacing for
-  // larger notable structures; pleasure_quarter packs denser like residential.
-  theater_district:  700,
-  bathhouse_quarter: 600,
-  pleasure_quarter:  300,
-  festival_grounds:  1,
-  // Excluded / outcast: ghetto packs dense like residential (cramped
-  // tenements); workhouse gets civic-scale spacing; gallows_hill exterior.
-  ghetto:            240,
-  workhouse:         600,
-  gallows_hill:      1,
+const LOT_DIVISOR: Record<DistrictType, number> = {
+  civic:              700,
+  market:             180,
+  harbor:             250,
+  residential_high:   200,
+  residential_medium: 280,
+  residential_low:    400,
+  industry:           350,  // large divisor → fewer lots → bigger footprints
+  education_faith:    500,
+  military:           300,
+  trade:              250,
+  entertainment:      350,
+  excluded:           500,
+  slum:               1,
+  agricultural:       1,
+  dock:               1,
 };
-const LOT_MIN: Record<DistrictRole, number> = {
-  civic: 1,
-  market: 2,
-  harbor: 1,
-  residential: 2,
-  slum: 0,
-  agricultural: 0,
-  dock: 0,
-  forge:   1,
-  tannery: 1,
-  textile: 1,
-  potters: 1,
-  mill:    1,
-  temple_quarter:  1,
-  academia:        1,
-  archive_quarter: 1,
-  necropolis:      0,
-  plague_ward:     0,
-  barracks:          2,
-  citadel:           1,
-  arsenal:           1,
-  watchmen_precinct: 1,
-  foreign_quarter:   1,
-  caravanserai:      1,
-  bankers_row:       1,
-  warehouse_row:     2,
-  theater_district:  1,
-  bathhouse_quarter: 1,
-  pleasure_quarter:  2,
-  festival_grounds:  0,
-  ghetto:            2,
-  workhouse:         1,
-  gallows_hill:      0,
+const LOT_MIN: Record<DistrictType, number> = {
+  civic:              1,
+  market:             2,
+  harbor:             1,
+  residential_high:   2,
+  residential_medium: 2,
+  residential_low:    1,
+  industry:           1,
+  education_faith:    1,
+  military:           2,
+  trade:              2,
+  entertainment:      1,
+  excluded:           1,
+  slum:               0,
+  agricultural:       0,
+  dock:               0,
 };
-const LOT_MAX: Record<DistrictRole, number> = {
-  civic: 4,
-  market: 6,
-  harbor: 4,
-  residential: 6,
-  slum: 0,
-  agricultural: 0,
-  dock: 0,
-  forge:   3,
-  tannery: 3,
-  textile: 3,
-  potters: 3,
-  mill:    2,
-  temple_quarter:  4,
-  academia:        4,
-  archive_quarter: 3,
-  necropolis:      0,
-  plague_ward:     0,
-  barracks:          6,
-  citadel:           2,
-  arsenal:           3,
-  watchmen_precinct: 4,
-  foreign_quarter:   4,
-  caravanserai:      3,
-  bankers_row:       3,
-  warehouse_row:     5,
-  theater_district:  3,
-  bathhouse_quarter: 3,
-  pleasure_quarter:  5,
-  festival_grounds:  0,
-  ghetto:            5,
-  workhouse:         3,
-  gallows_hill:      0,
+const LOT_MAX: Record<DistrictType, number> = {
+  civic:              3,
+  market:             6,
+  harbor:             4,
+  residential_high:   6,
+  residential_medium: 5,
+  residential_low:    4,
+  industry:           4,
+  education_faith:    3,
+  military:           4,
+  trade:              5,
+  entertainment:      4,
+  excluded:           3,
+  slum:               0,
+  agricultural:       0,
+  dock:               0,
 };
 
 // Setback in pixels from polygon boundary edges.
@@ -286,6 +174,10 @@ const VERTEX_PRECISION = 100;
 /**
  * Generate `buildings: CityBuildingV2[]` for a V2 city map.
  *
+ * Phase 6: accepts `CityBlockNewV2[]` (role: DistrictType) and `LandmarkV2[]`
+ * (the unified landmark layer) instead of the legacy `CityBlockV2[]` /
+ * `openSpaces` / `CityLandmarkV2[]` trio.
+ *
  * `roads` is used to identify road edges on the parent polygon boundary so
  * they receive a wider (4 px) setback than other boundary edges (2 px).
  */
@@ -294,9 +186,8 @@ export function generateBuildings(
   cityName: string,
   env: CityEnvironment,
   polygons: CityPolygon[],
-  blocks: CityBlockV2[],
-  openSpaces: CityMapDataV2['openSpaces'],
-  landmarks: CityLandmarkV2[],
+  blocks: CityBlockNewV2[],
+  landmarksNew: LandmarkV2[],
   roads: [number, number][][],
   canvasSize: number,
 ): CityBuildingV2[] {
@@ -305,11 +196,15 @@ export function generateBuildings(
 
   if (polygons.length === 0 || blocks.length === 0) return [];
 
+  // Reserved polygon ids: every polygon in the unified landmark layer (parks,
+  // civic squares, wonders, castles, temples, markets, …) must stay clear.
   const reservedPolygonIds = new Set<number>();
-  for (const entry of openSpaces) {
-    for (const id of entry.polygonIds) reservedPolygonIds.add(id);
+  for (const lm of landmarksNew) {
+    reservedPolygonIds.add(lm.polygonId);
+    if (lm.polygonIds) {
+      for (const pid of lm.polygonIds) reservedPolygonIds.add(pid);
+    }
   }
-  for (const lm of landmarks) reservedPolygonIds.add(lm.polygonId);
 
   // Build road-edge canonical-key set for 4 px setback detection.
   const roadEdgeKeys = buildRoadEdgeKeys(roads);
@@ -339,7 +234,7 @@ export function generateBuildings(
 
 function packBuildingsInPolygon(
   polygon: CityPolygon,
-  role: DistrictRole,
+  role: DistrictType,
   roadEdgeKeys: Set<string>,
   rng: () => number,
   out: CityBuildingV2[],
