@@ -33,6 +33,43 @@ export type DistrictRole =
   | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds'
   | 'ghetto' | 'workhouse' | 'gallows_hill';
 
+// Phase 1 of specs/City_districts_redux.md — coarse 13-value district
+// classification. Populated by Phase 5's classifier; Phase 7 promotes it over
+// `DistrictRole`. Coexists with `DistrictRole` until Phase 8 deletes the latter.
+export type DistrictType =
+  | 'civic'
+  | 'market'
+  | 'harbor'
+  | 'residential'
+  | 'agricultural'
+  | 'slum'
+  | 'dock'
+  | 'industry'
+  | 'education_faith'
+  | 'military'
+  | 'trade'
+  | 'entertainment'
+  | 'excluded';
+
+// Phase 1 — landmark kinds the unified placer (cityMapLandmarksUnified.ts in
+// Phase 2) will produce. Phase 3 implements the first 7 (user-named); Phase 4
+// implements the remaining 25 (quarter landmarks).
+export type LandmarkKind =
+  // Phase 3 — named (consume env.wonderNames + isCapital + religionCount)
+  | 'wonder' | 'palace' | 'castle' | 'civic_square' | 'temple' | 'market' | 'park'
+  // Phase 4 — industrial
+  | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill'
+  // Phase 4 — military
+  | 'barracks' | 'citadel' | 'arsenal' | 'watchmen'
+  // Phase 4 — faith aux
+  | 'temple_quarter' | 'necropolis' | 'plague_ward' | 'academia' | 'archive'
+  // Phase 4 — entertainment
+  | 'theater' | 'bathhouse' | 'pleasure' | 'festival'
+  // Phase 4 — trade
+  | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse'
+  // Phase 4 — excluded
+  | 'gallows' | 'workhouse' | 'ghetto_marker';
+
 export interface CityEnvironment {
   biome: BiomeType;
   isCoastal: boolean;
@@ -44,6 +81,10 @@ export interface CityEnvironment {
   isCapital: boolean;
   size: CitySize;
   wonderCount: number;
+  /** Names of wonders standing at this city's cell at the selected year — Phase
+   *  1 of City_districts_redux. Populated from WonderSnapshotEntry.name; same
+   *  length as wonderCount. Consumed by the named-landmark placer in Phase 3. */
+  wonderNames: string[];
   religionCount: number;
   isRuin: boolean;
   neighborBiomes: BiomeType[];

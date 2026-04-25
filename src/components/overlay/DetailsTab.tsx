@@ -520,14 +520,13 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
   const cityEnvironment = useMemo(() => {
     if (!city) return null;
-    const wonderCellIndices = wonderSnap.map(w => w.cellIndex);
     return deriveCityEnvironment(
       city,
       mapData.cells,
       mapData,
       citySizesAtYear,
       selectedYear,
-      wonderCellIndices,
+      wonderSnap,
       religionSnap,
     );
   }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);

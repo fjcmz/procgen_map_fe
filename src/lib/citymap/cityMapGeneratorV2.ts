@@ -17,7 +17,7 @@
 
 import { Delaunay } from 'd3-delaunay';
 import { seededPRNG } from '../terrain/noise';
-import type { Cell, City, MapData } from '../types';
+import type { Cell, City, MapData, WonderSnapshotEntry } from '../types';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
   CityBlockV2,
@@ -61,7 +61,7 @@ export function deriveCityEnvironment(
   mapData: MapData,
   citySizesAtYear?: Uint8Array,
   selectedYear?: number,
-  wonderCellIndices?: number[],
+  wonderEntries?: WonderSnapshotEntry[],
   religionCellIndices?: number[],
 ): CityEnvironment {
   const cell = cells[city.cellIndex];
@@ -110,7 +110,8 @@ export function deriveCityEnvironment(
     temperature: cell.temperature,
     isCapital: city.isCapital,
     size,
-    wonderCount: wonderCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
+    wonderCount: wonderEntries?.filter(e => e.cellIndex === city.cellIndex).length ?? 0,
+    wonderNames: wonderEntries?.filter(e => e.cellIndex === city.cellIndex).map(e => e.name) ?? [],
     religionCount: religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
     isRuin,
     neighborBiomes: neighborCells.map(n => n.biome),
