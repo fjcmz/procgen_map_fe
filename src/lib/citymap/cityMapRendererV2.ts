@@ -218,6 +218,7 @@ const LANDMARK_LABEL_TYPES: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
   'castle',
   'palace',
   'wonder',
+  'temple',
   'park',
   'market',
 ]);
