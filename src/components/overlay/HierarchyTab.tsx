@@ -182,7 +182,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       mapData,
       citySizesAtYear,
       selectedYear,
-      wonderSnap.map(w => w.cellIndex),
+      wonderSnap,
       religionSnap,
     );
     setCityMapState({ city, environment });
