@@ -33,14 +33,31 @@ export type DistrictRole =
   | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds'
   | 'ghetto' | 'workhouse' | 'gallows_hill';
 
-// Phase 1 of specs/City_districts_redux.md — coarse 13-value district
-// classification. Populated by Phase 5's classifier; Phase 7 promotes it over
-// `DistrictRole`. Coexists with `DistrictRole` until Phase 8 deletes the latter.
+// Phase 1 of specs/City_districts_redux.md — coarse district classification
+// driven by the unified landmark layer. Populated by Phase 5's classifier;
+// Phase 7 promotes it over `DistrictRole`. Coexists with `DistrictRole` until
+// Phase 8 deletes the latter.
+//
+// Phase 5 extends the original 13-value union with three residential wealth
+// tiers (high / medium / low) per spec line 59 ("composite wealth score
+// reclassifies residential into high/medium/low"). Net union: 15 values.
+//
+// Park is intentionally NOT a member: spec line 17 says "13 values, includes
+// park" but Phase 6 also says "13-district union" and the implemented Phase 1
+// list has always been 13 values without `park`. Phase 5 honors the no-park
+// reading — park-cluster polygons (`LandmarkV2.polygonIds` where
+// `kind === 'park'`) inherit whatever district their BFS / wealth pass
+// produces (typically a residential tier). Phase 7's renderer overlays park
+// glyphs by reading `LandmarkV2.kind === 'park'` directly, satisfying the
+// spec's "Park polygons stay park" at the landmark layer instead of the
+// district layer.
 export type DistrictType =
   | 'civic'
   | 'market'
   | 'harbor'
-  | 'residential'
+  | 'residential_high'
+  | 'residential_medium'
+  | 'residential_low'
   | 'agricultural'
   | 'slum'
   | 'dock'
@@ -267,6 +284,17 @@ export interface CityMapDataV2 {
    * renderer ignores this field until Phase 7 promotes it over `landmarks`.
    */
   _landmarksNew?: LandmarkV2[];
+  /**
+   * Phase 5 of specs/City_districts_redux.md — output of `assignDistricts` in
+   * `cityMapDistricts.ts`. Same length as `polygons`; `array[polygonId]` is
+   * that polygon's district type. Renderer ignores this field until Phase 7
+   * promotes `_districtsNew → districts` and Phase 8 deletes `blocks` /
+   * `DistrictRole`. Water and unabsorbed-mountain polygons carry the sentinel
+   * `'residential_medium'` (downstream Phase 6 PACKING_ROLES filters them via
+   * `waterPolygonIds` / `mountainPolygonIds` independently, so the sentinel
+   * never reaches a renderer).
+   */
+  _districtsNew?: DistrictType[];
   districtLabels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[];
 
   /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */

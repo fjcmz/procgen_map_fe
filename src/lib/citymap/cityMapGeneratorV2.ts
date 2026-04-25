@@ -54,6 +54,7 @@ import { generateWaterPolygons } from './cityMapWater';
 import { generateMountainPolygons } from './cityMapMountains';
 import { buildCandidatePool } from './cityMapCandidatePool';
 import { placeUnifiedLandmarks } from './cityMapLandmarksUnified';
+import { assignDistricts } from './cityMapDistricts';
 
 // ── Environment derivation ──
 
@@ -726,6 +727,28 @@ export function generateCityMapV2(
     river,
   });
 
+  // Phase 5 of specs/City_districts_redux.md — district classifier. Consumes
+  // `landmarksNew` to seed a multi-source BFS, plus geometric inputs (wall
+  // interior, water/mountain sets, env.waterSide). Output lives on the new
+  // `_districtsNew` field on the return literal; the renderer ignores it
+  // until Phase 7 promotes it over `blocks`. No new generator-level RNG sub-
+  // stream — `_districts_slums` lives inside `cityMapDistricts.ts` — so this
+  // wiring cannot perturb any pre-existing seed-stable output (walls, river,
+  // roads, streets, open-spaces, blocks, landmarks, buildings, sprawl).
+  const districtsNew = assignDistricts(
+    seed,
+    cityName,
+    env,
+    polygons,
+    wall,
+    landmarksNew,
+    waterPolygonIds,
+    mountainPolygonIds,
+    river,
+    CANVAS_SIZE,
+    cityPolygonCount,
+  );
+
   // Re-classify a seeded subset of `residential` blocks (interior) and
   // `agricultural`/`slum` blocks (exterior) as scholarship / faith / health
   // districts: temple_quarter / necropolis / academia / plague_ward /
@@ -848,6 +871,7 @@ export function generateCityMapV2(
     sprawlBuildings,
     landmarks,
     _landmarksNew: landmarksNew,
+    _districtsNew: districtsNew,
     wallTowers,
     innerWallPath,
     innerGates,
