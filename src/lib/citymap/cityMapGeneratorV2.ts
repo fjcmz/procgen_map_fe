@@ -723,6 +723,7 @@ export function generateCityMapV2(
     edgeGraph,
     waterPolygonIds,
     mountainPolygonIds,
+    river,
   });
 
   // Re-classify a seeded subset of `residential` blocks (interior) and
