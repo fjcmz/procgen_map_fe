@@ -24,33 +24,16 @@ import type { BiomeType } from '../types';
 
 export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
 
-export type DistrictRole =
-  | 'market' | 'residential' | 'civic' | 'harbor' | 'agricultural' | 'slum' | 'dock'
-  | 'forge' | 'tannery' | 'textile' | 'potters' | 'mill'
-  | 'temple_quarter' | 'necropolis' | 'academia' | 'plague_ward' | 'archive_quarter'
-  | 'barracks' | 'citadel' | 'arsenal' | 'watchmen_precinct'
-  | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row'
-  | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds'
-  | 'ghetto' | 'workhouse' | 'gallows_hill';
-
-// Phase 1 of specs/City_districts_redux.md — coarse district classification
-// driven by the unified landmark layer. Populated by Phase 5's classifier;
-// Phase 7 promotes it over `DistrictRole`. Coexists with `DistrictRole` until
-// Phase 8 deletes the latter.
+// Coarse district classification driven by the unified landmark layer.
+// Populated by the district classifier in `cityMapDistricts.ts`.
 //
-// Phase 5 extends the original 13-value union with three residential wealth
-// tiers (high / medium / low) per spec line 59 ("composite wealth score
-// reclassifies residential into high/medium/low"). Net union: 15 values.
+// Extends the original 13-value union with three residential wealth tiers
+// (high / medium / low) per spec line 59. Net union: 15 values.
 //
-// Park is intentionally NOT a member: spec line 17 says "13 values, includes
-// park" but Phase 6 also says "13-district union" and the implemented Phase 1
-// list has always been 13 values without `park`. Phase 5 honors the no-park
-// reading — park-cluster polygons (`LandmarkV2.polygonIds` where
-// `kind === 'park'`) inherit whatever district their BFS / wealth pass
-// produces (typically a residential tier). Phase 7's renderer overlays park
-// glyphs by reading `LandmarkV2.kind === 'park'` directly, satisfying the
-// spec's "Park polygons stay park" at the landmark layer instead of the
-// district layer.
+// Park is intentionally NOT a member — park-cluster polygons
+// (`LandmarkV2.polygonIds` where `kind === 'park'`) inherit whatever district
+// their BFS / wealth pass produces (typically a residential tier). The renderer
+// overlays park glyphs by reading `LandmarkV2.kind === 'park'` directly.
 export type DistrictType =
   | 'civic'
   | 'market'
@@ -141,20 +124,8 @@ export interface CityPolygon {
 }
 
 /**
- * A cluster of adjacent polygons acting as a single district. PR 4 will
- * populate these by flood-filling the polygon graph along non-road edges.
- */
-export interface CityBlockV2 {
-  polygonIds: number[];
-  role: DistrictRole;
-  name: string;
-}
-
-/**
- * Phase 6 of specs/City_districts_redux.md — block cluster keyed on the
- * coarse DistrictType union. Produced by `buildBlocksFromDistricts` in
- * `cityMapBlocks.ts` and written to `_blocksNew`; Phase 7 promotes it over
- * `blocks` and Phase 8 deletes `CityBlockV2` / `DistrictRole`.
+ * A cluster of adjacent polygons sharing the same district type.
+ * Produced by `buildBlocksFromDistricts` in `cityMapBlocks.ts`.
  */
 export interface CityBlockNewV2 {
   polygonIds: number[];
@@ -176,18 +147,9 @@ export interface CityBuildingV2 {
 }
 
 /**
- * A named landmark (castle / palace / temple / monument) anchored to one
- * polygon. PR 4 will place these on civic / market polygons.
- */
-export interface CityLandmarkV2 {
-  polygonId: number;
-  type: 'castle' | 'palace' | 'temple' | 'monument';
-}
-
-/**
- * Phase 2 of specs/City_districts_redux.md — unified landmark record produced
- * by `cityMapLandmarksUnified.ts`. Coexists with `CityLandmarkV2` until Phase
- * 7 promotes `_landmarksNew → landmarks` and Phase 8 deletes the legacy type.
+ * Unified landmark record produced by `cityMapLandmarksUnified.ts`.
+ * Anchors to one polygon and carries a 32-kind classification driving
+ * district BFS seeding, label rendering, and glyph drawing.
  */
 export interface LandmarkV2 {
   /** Anchor polygon (always present, used for label placement and BFS seeds). */

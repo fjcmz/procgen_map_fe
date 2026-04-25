@@ -22,7 +22,6 @@ import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
   CityBlockNewV2,
   CityEnvironment,
-  CityLandmarkV2,
   CityMapDataV2,
   CityPolygon,
   CitySize,
@@ -42,14 +41,7 @@ import {
 } from './cityMapEdgeGraph';
 import { generateRiver } from './cityMapRiver';
 import { generateNetwork } from './cityMapNetwork';
-import { generateOpenSpaces } from './cityMapOpenSpaces';
-import { generateBlocks, assignCraftRoles, buildBlocksFromDistricts } from './cityMapBlocks';
-import { assignSFHRoles } from './cityMapSFHQuarters';
-import { assignMilitaryRoles } from './cityMapMilitaryQuarters';
-import { assignTradeFinanceRoles } from './cityMapTradeFinanceQuarters';
-import { assignEntertainmentRoles } from './cityMapEntertainmentQuarters';
-import { assignExcludedRoles } from './cityMapExcludedQuarters';
-import { generateLandmarks } from './cityMapLandmarks';
+import { buildBlocksFromDistricts } from './cityMapBlocks';
 import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
 import { generateWaterPolygons } from './cityMapWater';
@@ -266,7 +258,7 @@ function findNearMountainPolygons(
 function generateMountainLandmarkStreets(
   polygons: CityPolygon[],
   graph: PolygonEdgeGraph,
-  landmarks: CityLandmarkV2[],
+  landmarks: LandmarkV2[],
   mountainPolygonIds: Set<number>,
   waterPolygonIds: Set<number>,
   canvasSize: number,
@@ -625,57 +617,6 @@ export function generateCityMapV2(
     obstaclePolygonIds,
   );
 
-  // PR 4 (open-spaces slice) — civic square + markets + parks. Polygon-based
-  // throughout: civic = polygon nearest canvas center; markets = polygons
-  // nearest each gate midpoint (with Lloyd-style spread for the rest);
-  // parks = BFS clusters over polygon.neighbors. Eligibility filters out
-  // polygons whose ring touches a wall / river / road edge so plazas never
-  // overlap infrastructure. The blocks slice below consumes the civic /
-  // market polygons from this result to stamp block roles; landmarks (the
-  // remaining piece of spec PR 4) still stay deferred.
-  const openSpaces = generateOpenSpaces(
-    seed,
-    cityName,
-    env,
-    polygons,
-    wall,
-    river,
-    roads,
-    CANVAS_SIZE,
-    obstaclePolygonIds,
-  );
-
-  // PR 4 (blocks slice) — polygon-graph flood bounded by wall / river / road /
-  // street edges. Every polygon lands in exactly one block. Role is assigned
-  // from the already-computed open-space anchors (civic square → civic block,
-  // market polygon → market block), `env.waterSide` proximity (harbor),
-  // `polygon.isEdge` membership (slum / agricultural for the outside-walls
-  // clusters PR 5 will render as sprawl), otherwise `residential`. Medieval
-  // names via the V1 prefix+suffix combiner on a dedicated RNG sub-stream.
-  // See `cityMapBlocks.ts` for the full algorithm + semantic-inversion note
-  // (streets ARE block barriers, unlike open-space eligibility).
-  const blocks = generateBlocks(
-    seed,
-    cityName,
-    env,
-    polygons,
-    wall,
-    river,
-    roads,
-    streets,
-    openSpaces,
-    CANVAS_SIZE,
-    waterPolygonIds,
-    cityPolygonCount,
-    mountainPolygonIds,
-  );
-
-  // Re-classify a seeded subset of `residential` blocks as craft / industry
-  // districts (forge / tannery / textile / potters / mill). Mutates
-  // `block.role` and `block.name` in-place so all downstream consumers
-  // (landmarks, buildings, sprawl, renderer) see the updated roles.
-  assignCraftRoles(blocks, env, polygons, river, seed, cityName);
-
   // Filter mountain polygons for landmark eligibility: only those within
   // MOUNTAIN_LANDMARK_MAX_DISTANCE polygon hops of the city footprint
   // boundary are candidates. Distant peaks that the city cannot plausibly
@@ -687,32 +628,6 @@ export function generateCityMapV2(
     MOUNTAIN_LANDMARK_MAX_DISTANCE,
   );
 
-  // PR 4 (landmarks slice) — capital castle/palace + temple-per-religion +
-  // monument-per-wonder. Every landmark anchors to one `polygon.id`, sourced
-  // from civic / market blocks with a shared `used` set enforcing de-dup
-  // (spec line 66). Three ordered passes fan off dedicated RNG sub-streams
-  // (`_landmarks_capitals` / `_landmarks_temples` / `_landmarks_monuments`)
-  // so future landmark kinds can be inserted without shifting existing
-  // seeds. See `cityMapLandmarks.ts` for the full polygon-graph algorithm.
-  const landmarks = generateLandmarks(
-    seed,
-    cityName,
-    env,
-    polygons,
-    blocks,
-    openSpaces,
-    CANVAS_SIZE,
-    nearMountainPolygonIds,
-    innerWallPath as [number, number][],
-    middleWallPath as [number, number][],
-    wallPath as [number, number][],
-  );
-
-  // Phase 2 of specs/City_districts_redux.md — write-only scaffold. Builds
-  // the interior ∪ 5-hop boundary band candidate pool and runs the unified
-  // landmark placer (empty stubs in Phase 2). Result lands in `_landmarksNew`
-  // on the return literal; the renderer ignores it. Phase 7 promotes the
-  // field over `landmarks` and Phase 8 deletes the legacy path.
   const candidatePool = buildCandidatePool(wall, polygons, edgeGraph, {
     waterPolygonIds,
     mountainPolygonIds,
@@ -730,14 +645,12 @@ export function generateCityMapV2(
     river,
   });
 
-  // Phase 5 of specs/City_districts_redux.md — district classifier. Consumes
+  // District classifier (specs/City_districts_redux.md). Consumes
   // `landmarksNew` to seed a multi-source BFS, plus geometric inputs (wall
-  // interior, water/mountain sets, env.waterSide). Output lives on the new
-  // `_districtsNew` field on the return literal; the renderer ignores it
-  // until Phase 7 promotes it over `blocks`. No new generator-level RNG sub-
-  // stream — `_districts_slums` lives inside `cityMapDistricts.ts` — so this
+  // interior, water/mountain sets, env.waterSide). No new generator-level
+  // RNG sub-stream — `_districts_slums` lives inside `cityMapDistricts.ts`.
   // wiring cannot perturb any pre-existing seed-stable output (walls, river,
-  // roads, streets, open-spaces, blocks, landmarks, buildings, sprawl).
+  // roads, streets, blocks, landmarks, buildings, sprawl).
   const districtsNew = assignDistricts(
     seed,
     cityName,
@@ -752,14 +665,12 @@ export function generateCityMapV2(
     cityPolygonCount,
   );
 
-  // Phase 6 of specs/City_districts_redux.md — build coarse block clusters
-  // from the district classifier output. Groups polygons with the same
-  // DistrictType into connected components via BFS; each component becomes
-  // one CityBlockNewV2 with a procedural medieval name. Water and unabsorbed-
-  // mountain polygon ids are excluded (they carry the sentinel district
-  // 'residential_medium' and must not appear in any named block).
-  // RNG stream: `_blocks_districts_names` — independent from `_blocks_names`
-  // so the new blocks don't shift existing block-name output.
+  // Build coarse block clusters from the district classifier output. Groups
+  // polygons with the same DistrictType into connected components via BFS;
+  // each component becomes one CityBlockNewV2 with a procedural medieval name.
+  // Water and mountain polygon ids are excluded (they carry the sentinel
+  // district 'residential_medium' and must not appear in any named block).
+  // RNG stream: `_blocks_districts_names`.
   const blocksNew = buildBlocksFromDistricts(
     seed,
     cityName,
@@ -769,51 +680,6 @@ export function generateCityMapV2(
     mountainPolygonIds,
   );
 
-  // Re-classify a seeded subset of `residential` blocks (interior) and
-  // `agricultural`/`slum` blocks (exterior) as scholarship / faith / health
-  // districts: temple_quarter / necropolis / academia / plague_ward /
-  // archive_quarter. Called AFTER generateLandmarks so temple polygon sites
-  // are available for temple_quarter placement bias, and BEFORE
-  // generateBuildings so the packer sees the updated roles.
-  assignSFHRoles(blocks, env, polygons, landmarks, seed, cityName);
-
-  // Re-classify a seeded subset of `residential` blocks as military & security
-  // districts: barracks / citadel / arsenal / watchmen_precinct. Called AFTER
-  // assignSFHRoles so both temple landmark sites AND temple_quarter blocks are
-  // visible for placement bias, and BEFORE generateBuildings so the packer
-  // sees the updated roles (all four are interior and in PACKING_ROLES).
-  // `gates` is destructured from `wall` above and passed for barracks' wall/
-  // gate adjacency bias.
-  assignMilitaryRoles(blocks, env, polygons, landmarks, gates, seed, cityName);
-
-  // Re-classify a seeded subset of `residential` blocks as trade & finance
-  // districts: foreign_quarter / caravanserai / bankers_row / warehouse_row.
-  // Called AFTER assignMilitaryRoles so citadel / arsenal polygons have
-  // already been reserved, and BEFORE generateBuildings so the packer sees
-  // the updated roles (all four are interior and in PACKING_ROLES).
-  // `landmarks` is passed for bankers_row's monument/wonder bias, `openSpaces`
-  // for foreign_quarter + warehouse_row market bias, `gates` for caravanserai
-  // gate-adjacency bias.
-  assignTradeFinanceRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
-
-  // Re-classify a seeded subset of `residential` blocks (interior 3) and
-  // `agricultural`/`slum` blocks (festival_grounds only) as entertainment &
-  // social districts: theater_district / bathhouse_quarter / pleasure_quarter
-  // / festival_grounds. `landmarks` is passed for theater_district's
-  // monument/wonder bias, `openSpaces` for marketBoost, `gates` for
-  // pleasure_quarter gate-adjacency bias. Counts per env.size are
-  // small:0 / medium:0-1 / large:1-2 / metropolis:1-3 / megalopolis:2-5.
-  assignEntertainmentRoles(blocks, env, polygons, landmarks, openSpaces, gates, seed, cityName);
-
-  // Re-classify a seeded subset of `residential` blocks (interior 2) and
-  // `agricultural`/`slum` blocks (gallows_hill only) as excluded & outcast
-  // districts: ghetto / workhouse / gallows_hill. Called LAST among the
-  // assigners so it does not steal civic / market / military / trade /
-  // entertainment picks. `landmarks` is passed for workhouse's monument/
-  // wonder bias, `openSpaces` for ghetto's market bias. Counts per env.size
-  // are small:0 / medium:0-1 / large:1-2 / metropolis:1-3 / megalopolis:2-5.
-  assignExcludedRoles(blocks, env, polygons, landmarks, openSpaces, seed, cityName);
-
   // Spec: "if a landmark is set on mountains, there must be a street from
   // the city to that landmark." For each landmark placed on a mountain
   // polygon, A* a path from the city center through the polygon edge graph
@@ -822,20 +688,18 @@ export function generateCityMapV2(
   const mountainStreets = generateMountainLandmarkStreets(
     polygons,
     edgeGraph,
-    landmarks,
+    landmarksNew,
     nearMountainPolygonIds,
     waterPolygonIds,
     CANVAS_SIZE,
   );
 
-  // Phase 6 (buildings slice) — polygon-interior Voronoi-subdivision packer.
-  // Now driven by `blocksNew` (DistrictType) + `landmarksNew` (LandmarkV2[])
-  // instead of the legacy `blocks` / `openSpaces` / `landmarks` trio. Reserved
-  // set = all polygon ids in `landmarksNew` (single-polygon anchors + park
-  // cluster polygons). PACKING_ROLES is re-keyed to the 12-type interior union
-  // (civic / market / harbor / residential_{high,medium,low} / industry /
-  // education_faith / military / trade / entertainment / excluded). RNG stream
-  // `_buildings` is unchanged so seed-stable snapshots remain consistent.
+  // Polygon-interior Voronoi-subdivision packer. Driven by `blocksNew`
+  // (DistrictType) + `landmarksNew` (LandmarkV2[]). Reserved set = all polygon
+  // ids in `landmarksNew` (single-polygon anchors + park cluster polygons).
+  // PACKING_ROLES covers the interior union (civic / market / harbor /
+  // residential_{high,medium,low} / industry / education_faith / military /
+  // trade / entertainment / excluded). RNG stream `_buildings`.
   const buildings = generateBuildings(
     seed,
     cityName,
@@ -847,10 +711,9 @@ export function generateCityMapV2(
     CANVAS_SIZE,
   );
 
-  // Phase 6 (sprawl slice) — outside-walls sparse fringe buildings. Now driven
-  // by `blocksNew` + `landmarksNew`. SPRAWL_ROLES stays {slum, agricultural}
-  // so only exterior blocks produce sprawl, unchanged from Phase 5. RNG stream
-  // `_sprawl` is unchanged.
+  // Outside-walls sparse fringe buildings. Driven by `blocksNew` +
+  // `landmarksNew`. SPRAWL_ROLES stays {slum, agricultural} so only exterior
+  // blocks produce sprawl. RNG stream `_sprawl`.
   const sprawlBuildings = generateSprawl(
     seed,
     cityName,

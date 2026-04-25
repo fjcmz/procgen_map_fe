@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CityEnvironment, CityMapDataV2, DistrictRole } from '../lib/citymap';
+import type { CityEnvironment, CityMapDataV2, DistrictType } from '../lib/citymap';
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
 
 interface CityMapPopupV2Props {
@@ -16,40 +16,23 @@ const NO_LABEL_ROLES = new Set<string>([
   'slum', 'agricultural', 'dock', 'excluded',
 ]);
 
-// Emoji icon + human-readable label for every district role.
-const DISTRICT_ROLE_INFO: Record<DistrictRole, { icon: string; label: string }> = {
-  civic:              { icon: '🏛',  label: 'Civic Centre' },
-  residential:        { icon: '🏠',  label: 'Residential' },
-  harbor:             { icon: '⚓',  label: 'Harbour' },
-  market:             { icon: '🛒',  label: 'Market' },
-  agricultural:       { icon: '🌾',  label: 'Fields' },
-  slum:               { icon: '🏚',  label: 'Slums' },
-  dock:               { icon: '⚓',  label: 'Docks' },
-  forge:              { icon: '⚒️',  label: 'Forge Quarter' },
-  tannery:            { icon: '🐄',  label: 'Tannery' },
-  textile:            { icon: '🧵',  label: 'Textile Quarter' },
-  potters:            { icon: '🏺',  label: 'Potters Quarter' },
-  mill:               { icon: '⚙️',  label: 'Mill Quarter' },
-  temple_quarter:     { icon: '⛪',  label: 'Temple Quarter' },
-  necropolis:         { icon: '💀',  label: 'Necropolis' },
-  academia:           { icon: '📚',  label: 'Academia' },
-  plague_ward:        { icon: '☣️',  label: 'Plague Ward' },
-  archive_quarter:    { icon: '📜',  label: 'Archive Quarter' },
-  barracks:           { icon: '⚔️',  label: 'Barracks' },
-  citadel:            { icon: '🏰',  label: 'Citadel' },
-  arsenal:            { icon: '🗡️',  label: 'Arsenal' },
-  watchmen_precinct:  { icon: '👁️',  label: "Watchmen's Precinct" },
-  foreign_quarter:    { icon: '🌍',  label: 'Foreign Quarter' },
-  caravanserai:       { icon: '🐪',  label: 'Caravanserai' },
-  bankers_row:        { icon: '💰',  label: "Bankers' Row" },
-  warehouse_row:      { icon: '📦',  label: 'Warehouse Row' },
-  theater_district:   { icon: '🎭',  label: 'Theatre District' },
-  bathhouse_quarter:  { icon: '♨️',  label: 'Bathhouse Quarter' },
-  pleasure_quarter:   { icon: '🌹',  label: 'Pleasure Quarter' },
-  festival_grounds:   { icon: '🎪',  label: 'Festival Grounds' },
-  ghetto:             { icon: '🧱',  label: 'Ghetto' },
-  workhouse:          { icon: '🔨',  label: 'Workhouse' },
-  gallows_hill:       { icon: '⚖️',  label: 'Gallows Hill' },
+// Emoji icon + human-readable label for every coarse district type.
+const DISTRICT_ROLE_INFO: Partial<Record<DistrictType, { icon: string; label: string }>> = {
+  civic:               { icon: '🏛',  label: 'Civic Centre' },
+  market:              { icon: '🛒',  label: 'Market' },
+  harbor:              { icon: '⚓',  label: 'Harbour' },
+  residential_high:    { icon: '🏘',  label: 'Wealthy Residential' },
+  residential_medium:  { icon: '🏠',  label: 'Residential' },
+  residential_low:     { icon: '🏚',  label: 'Poor Residential' },
+  agricultural:        { icon: '🌾',  label: 'Fields' },
+  slum:                { icon: '🏚',  label: 'Slums' },
+  dock:                { icon: '⚓',  label: 'Docks' },
+  industry:            { icon: '⚒️',  label: 'Industry Quarter' },
+  education_faith:     { icon: '⛪',  label: 'Education & Faith' },
+  military:            { icon: '⚔️',  label: 'Military Quarter' },
+  trade:               { icon: '💰',  label: 'Trade Quarter' },
+  entertainment:       { icon: '🎭',  label: 'Entertainment Quarter' },
+  excluded:            { icon: '⚖️',  label: 'Excluded Zone' },
 };
 
 // Ray-casting point-in-polygon (unclosed ring, matching CityPolygon contract).
@@ -186,7 +169,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   if (!isOpen) return null;
 
-  const roleInfo = tooltip ? (DISTRICT_ROLE_INFO[tooltip.role as DistrictRole] ?? null) : null;
+  const roleInfo = tooltip ? (DISTRICT_ROLE_INFO[tooltip.role as DistrictType] ?? null) : null;
 
   return createPortal(
     <>
