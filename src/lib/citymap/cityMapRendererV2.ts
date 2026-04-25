@@ -1242,12 +1242,16 @@ function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
 }
 
 // [Voronoi-polygon] Phase 7 cutover: render all LandmarkV2 entries — glyphs
-// (castle/palace/temple/monument/wonder), scatter decorations (market stalls,
+// (castle/palace/temple/monument/wonder), Phase 4 quarter glyphs (forge,
+// barracks, temple_quarter, foreign_quarter, …) anchored to each landmark's
+// polygon site via `drawDistrictGlyph`, scatter decorations (market stalls,
 // park trees), and name labels (castle/palace/wonder/park/market).
 //
-// Phase 4 quarter kinds (forge, barracks, etc.) are skipped here — they are
-// shown via district-icon glyphs from `drawDistrictIcons`. Phase 8 will wire
-// dedicated quarter glyphs if desired.
+// Quarters reuse the white-disc + role-icon style of `drawDistrictGlyph` so
+// they read the same as the block-level fallback that `drawDistrictIcons`
+// would otherwise draw — `drawDistrictIcons` skips any block whose polygons
+// host a landmark, so the quarter glyph stands in for the block icon at the
+// landmark's specific polygon.
 //
 // RNG sub-streams `_landmarks_render_markets` and `_landmarks_render_parks`
 // are distinct from the old `_openspaces_render_*` streams (iteration order
@@ -1276,8 +1280,15 @@ function drawLandmarks(
       case 'wonder':   drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
       // park/market/civic_square fills were already drawn in drawLandmarkFills;
       // glyphs and scatter are handled in the passes below.
-      // Phase 4 quarter kinds: no dedicated glyph in Phase 7.
-      default: break;
+      case 'park':
+      case 'market':
+      case 'civic_square':
+        break;
+      // Phase 4 quarter kinds: dispatch through the shared role-icon helper
+      // so each quarter gets its own white-disc + role glyph at its polygon.
+      default:
+        drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, lm.kind, fill, ink);
+        break;
     }
   }
 
@@ -1640,7 +1651,7 @@ function drawDistrictGlyph(
     case 'military':          drawBarracksIcon(ctx, s, fill, ink); break;
     case 'trade':             drawCaravanseraiIcon(ctx, s, fill, ink); break;
     case 'entertainment':     drawTheaterIcon(ctx, s, fill, ink); break;
-    case 'forge':             drawForgeIcon(ctx, s, fill, ink); break;
+    case 'forge':            drawForgeIcon(ctx, s, fill, ink); break;
     case 'tannery':          drawTanneryIcon(ctx, s, fill, ink); break;
     case 'textile':          drawTextileIcon(ctx, s, fill, ink); break;
     case 'potters':          drawPottersIcon(ctx, s, fill, ink); break;
@@ -1649,20 +1660,22 @@ function drawDistrictGlyph(
     case 'necropolis':       drawNecropolisIcon(ctx, s, fill, ink); break;
     case 'academia':         drawAcademiaIcon(ctx, s, fill, ink); break;
     case 'plague_ward':      drawPlagueWardIcon(ctx, s, fill, ink); break;
-    case 'archive_quarter':  drawArchiveIcon(ctx, s, fill, ink); break;
+    case 'archive':          drawArchiveIcon(ctx, s, fill, ink); break;
     case 'barracks':         drawBarracksIcon(ctx, s, fill, ink); break;
     case 'citadel':          drawCitadelIcon(ctx, s, fill, ink); break;
     case 'arsenal':          drawArsenalIcon(ctx, s, fill, ink); break;
-    case 'watchmen_precinct': drawWatchmenIcon(ctx, s, fill, ink); break;
+    case 'watchmen':         drawWatchmenIcon(ctx, s, fill, ink); break;
     case 'foreign_quarter':  drawForeignQuarterIcon(ctx, s, fill, ink); break;
     case 'caravanserai':     drawCaravanseraiIcon(ctx, s, fill, ink); break;
     case 'bankers_row':      drawBankersRowIcon(ctx, s, fill, ink); break;
-    case 'warehouse_row':    drawWarehouseRowIcon(ctx, s, fill, ink); break;
-    case 'theater_district':  drawTheaterIcon(ctx, s, fill, ink); break;
-    case 'bathhouse_quarter': drawBathhouseIcon(ctx, s, fill, ink); break;
-    case 'pleasure_quarter':  drawPleasureQuarterIcon(ctx, s, fill, ink); break;
-    case 'ghetto':            drawGhettoIcon(ctx, s, fill, ink); break;
-    case 'workhouse':         drawWorkhouseIcon(ctx, s, fill, ink); break;
+    case 'warehouse':        drawWarehouseRowIcon(ctx, s, fill, ink); break;
+    case 'theater':          drawTheaterIcon(ctx, s, fill, ink); break;
+    case 'bathhouse':        drawBathhouseIcon(ctx, s, fill, ink); break;
+    case 'pleasure':         drawPleasureQuarterIcon(ctx, s, fill, ink); break;
+    case 'festival':         drawTheaterIcon(ctx, s, fill, ink); break;
+    case 'ghetto_marker':    drawGhettoIcon(ctx, s, fill, ink); break;
+    case 'workhouse':        drawWorkhouseIcon(ctx, s, fill, ink); break;
+    case 'gallows':          drawWorkhouseIcon(ctx, s, fill, ink); break;
   }
 
   ctx.restore();
