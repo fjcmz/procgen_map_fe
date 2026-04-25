@@ -77,12 +77,14 @@
 
 import type {
   CityBuildingV2,
-  CityBlockV2,
+  CityBlockNewV2,
   CityEnvironment,
-  CityLandmarkV2,
   CityMapDataV2,
   CityPolygon,
   DistrictRole,
+  DistrictType,
+  LandmarkKind,
+  LandmarkV2,
 } from './cityMapTypesV2';
 import type { BiomeType } from '../types';
 import { seededPRNG } from '../terrain/noise';
@@ -168,20 +170,60 @@ const PARK_TREE_RADIUS = 3;
 const PARK_TREES_PER_POLYGON_MIN = 4;
 const PARK_TREES_PER_POLYGON_MAX = 10;
 
-// Layer 12 — landmark styling (PR 4 slice). Lighter palette per spec:
-// body fills are medium-light tones; detail ink is dark for contrast.
-const LANDMARK_COLORS: Record<CityLandmarkV2['type'], { fill: string; ink: string }> = {
-  castle:   { fill: '#6e9cc8', ink: '#0e1e3c' }, // light steel blue, dark ink
-  palace:   { fill: '#6e9cc8', ink: '#0e1e3c' }, // light steel blue, dark ink
-  temple:   { fill: '#a870c8', ink: '#2c0844' }, // light purple, dark ink
-  monument: { fill: '#dca030', ink: '#3c2400' }, // light gold, dark ink
+// Layer 12 — landmark styling (Phase 7 cutover). Covers all 32 LandmarkKind
+// values. Body fills are medium-light tones; detail ink is dark for contrast.
+const LANDMARK_COLORS: Partial<Record<LandmarkKind, { fill: string; ink: string }>> = {
+  // Named structural landmarks (Phase 3)
+  castle:          { fill: '#6e9cc8', ink: '#0e1e3c' },
+  palace:          { fill: '#6e9cc8', ink: '#0e1e3c' },
+  temple:          { fill: '#a870c8', ink: '#2c0844' },
+  wonder:          { fill: '#dca030', ink: '#3c2400' },
+  civic_square:    { fill: '#efe7cb', ink: '#8a8070' },
+  market:          { fill: '#f8eebc', ink: '#5a3000' },
+  park:            { fill: '#d8dcbf', ink: '#6a7a4a' },
+  // Industrial (Phase 4)
+  forge:           { fill: '#dcc8a8', ink: '#2a1a0a' },
+  tannery:         { fill: '#dcc8a8', ink: '#2a1a0a' },
+  textile:         { fill: '#dcc8a8', ink: '#2a1a0a' },
+  potters:         { fill: '#dcc8a8', ink: '#2a1a0a' },
+  mill:            { fill: '#dcc8a8', ink: '#2a1a0a' },
+  // Military (Phase 4)
+  barracks:        { fill: '#b0c078', ink: '#20280a' },
+  citadel:         { fill: '#b0c078', ink: '#20280a' },
+  arsenal:         { fill: '#b0c078', ink: '#20280a' },
+  watchmen:        { fill: '#b0c078', ink: '#20280a' },
+  // Faith aux (Phase 4)
+  temple_quarter:  { fill: '#e8cce8', ink: '#280838' },
+  necropolis:      { fill: '#e8cce8', ink: '#280838' },
+  plague_ward:     { fill: '#e8cce8', ink: '#280838' },
+  academia:        { fill: '#e8cce8', ink: '#280838' },
+  archive:         { fill: '#e8cce8', ink: '#280838' },
+  // Entertainment (Phase 4)
+  theater:         { fill: '#f8c890', ink: '#3a1a00' },
+  bathhouse:       { fill: '#f8c890', ink: '#3a1a00' },
+  pleasure:        { fill: '#f8c890', ink: '#3a1a00' },
+  festival:        { fill: '#f8c890', ink: '#3a1a00' },
+  // Trade (Phase 4)
+  foreign_quarter: { fill: '#f4e4ac', ink: '#3a2a08' },
+  caravanserai:    { fill: '#f4e4ac', ink: '#3a2a08' },
+  bankers_row:     { fill: '#f4e4ac', ink: '#3a2a08' },
+  warehouse:       { fill: '#f4e4ac', ink: '#3a2a08' },
+  // Excluded (Phase 4)
+  gallows:         { fill: '#c8ccd4', ink: '#1a1c22' },
+  workhouse:       { fill: '#c8ccd4', ink: '#1a1c22' },
+  ghetto_marker:   { fill: '#c8ccd4', ink: '#1a1c22' },
 };
+const LANDMARK_FALLBACK_COLORS = { fill: '#f5f0e8', ink: '#2a241c' };
 const LANDMARK_SIZE_MIN = 20;
 const LANDMARK_SIZE_MAX = 36;
 const LANDMARK_SIZE_COEFF = 0.7; // multiplies √polygon.area before clamping
-const LANDMARK_LABEL_TYPES: ReadonlySet<CityLandmarkV2['type']> = new Set<CityLandmarkV2['type']>([
+// Landmark kinds that get a text label below their glyph.
+const LANDMARK_LABEL_TYPES: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
   'castle',
   'palace',
+  'wonder',
+  'park',
+  'market',
 ]);
 
 // Light pastel block fills keyed by city biome — used for both slum and
@@ -281,9 +323,11 @@ export function renderCityMapV2(
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
   drawSprawl(ctx, data, ruinRng);
 
-  // ── Layer 9: open spaces (PR 4 slice — squares + markets + parks) ──────
-  // Area fills always drawn; stall dots + park trees only when showIcons=true.
-  drawOpenSpaces(ctx, data, seed, cityName, showIcons);
+  // ── Layer 9: landmark area fills (Phase 7) ──────────────────────────────
+  // park / market / civic_square polygon fills sit below streets, buildings,
+  // and walls. drawOpenSpaces() is kept but no longer called — Phase 8 deletes
+  // it along with the legacy openSpaces field.
+  drawLandmarkFills(ctx, data);
 
   // ── Layer 6: streets (PR 3) ────────────────────────────────────────────
   if (ruinRng) {
@@ -295,8 +339,10 @@ export function renderCityMapV2(
   // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
   drawBuildings(ctx, data, seed, cityName, ruinRng);
 
-  // ── Layer 12: landmarks (PR 4 slice) ────────────────────────────────────
-  if (showIcons) drawLandmarks(ctx, data);
+  // ── Layer 12: landmark glyphs + scatter + labels (Phase 7) ─────────────
+  // Glyphs (castle/palace/temple/monument/wonder) + market-stall/park-tree
+  // scatter + name labels. Drawn after buildings so glyphs sit on top.
+  if (showIcons) drawLandmarks(ctx, data, seed, cityName);
 
   // ── Layer 12.5: district icons — small role glyphs at block centroids ──
   if (showIcons) drawDistrictIcons(ctx, data);
@@ -504,69 +550,41 @@ function drawBlockBackgrounds(
 ): void {
   if (data.blocks.length === 0) return;
   const biomeFill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
-  for (const block of data.blocks) {
-    const sfhFill = SFH_BG_FILL[block.role];
-    const craftFill = CRAFT_BG_FILL[block.role];
-    const militaryFill = MILITARY_BG_FILL[block.role];
-    const tradeFill = TRADE_BG_FILL[block.role];
-    const entertainmentFill = ENTERTAINMENT_BG_FILL[block.role];
-    const excludedFill = EXCLUDED_BG_FILL[block.role];
-    if (sfhFill) {
-      // Scholarship / faith / health district — light reddish/pink/violet fill.
-      ctx.fillStyle = sfhFill;
+  for (const block of data.blocks as CityBlockNewV2[]) {
+    // Phase 7: coarse DistrictType check — handles new block roles from _blocksNew.
+    // Fine-grained DistrictRole lookups below return undefined for these keys.
+    const coarseFill = COARSE_DISTRICT_BG_FILL[block.role as DistrictType];
+    if (coarseFill) {
+      ctx.fillStyle = coarseFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
         tracePolygonRing(ctx, polygon);
         ctx.fill();
       }
-    } else if (craftFill) {
-      // Craft & industry district — distinctive industrial background.
-      ctx.fillStyle = craftFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-    } else if (militaryFill) {
-      // Military & security district — army-green / camouflage fill.
-      ctx.fillStyle = militaryFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-    } else if (tradeFill) {
-      // Trade & finance district — light yellow / golden fill.
-      ctx.fillStyle = tradeFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-    } else if (entertainmentFill) {
-      // Entertainment & social district — light orange / pumpkin fill.
-      ctx.fillStyle = entertainmentFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-    } else if (excludedFill) {
-      // Excluded / outcast district — deep grey / silver fill.
-      ctx.fillStyle = excludedFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-    } else if (block.role === 'slum' || block.role === 'agricultural') {
+      continue;
+    }
+    if (block.role === 'slum' || block.role === 'agricultural') {
       ctx.fillStyle = biomeFill;
+      for (const pid of block.polygonIds) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+      }
+      continue;
+    }
+    // Legacy DistrictRole fine-grained fills — deleted in Phase 8.
+    const role = block.role as DistrictRole;
+    const sfhFill = SFH_BG_FILL[role];
+    const craftFill = CRAFT_BG_FILL[role];
+    const militaryFill = MILITARY_BG_FILL[role];
+    const tradeFill = TRADE_BG_FILL[role];
+    const entertainmentFill = ENTERTAINMENT_BG_FILL[role];
+    const excludedFill = EXCLUDED_BG_FILL[role];
+    const specificFill = sfhFill ?? craftFill ?? militaryFill ?? tradeFill ?? entertainmentFill ?? excludedFill;
+    if (specificFill) {
+      ctx.fillStyle = specificFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -908,9 +926,22 @@ const BUILDING_FILLS = ['#e6e6e4', '#d6d6d4', '#c6c6c4'] as const;
 const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
+// Phase 7: coarse DistrictType background fills. Checked first in
+// drawBlockBackgrounds before the fine-grained DistrictRole tables (which
+// return undefined for the new coarse keys and are deleted in Phase 8).
+const COARSE_DISTRICT_BG_FILL: Partial<Record<DistrictType, string>> = {
+  industry:        '#c8b498', // warm brown, like old craft
+  education_faith: '#e8cce8', // lavender, like old SFH
+  military:        '#b0c880', // army green
+  trade:           '#f0dc98', // gold-yellow
+  entertainment:   '#f8c890', // orange
+  excluded:        '#d8dce4', // silver-grey
+};
+
 // Craft & industry district background fills (Layer 2.5) and building ink
 // (Layer 10).  Browns, greys, and dark tones to read as industrial / pre-
 // modern manufacturing zones distinct from the cream residential core.
+// Legacy DistrictRole-keyed — kept until Phase 8 deletes them.
 const CRAFT_BG_FILL: Partial<Record<DistrictRole, string>> = {
   forge:   '#c8b498', // warm cinder ash
   tannery: '#c0a070', // tanned leather
@@ -1110,8 +1141,11 @@ function drawBuildings(
   if (data.buildings.length === 0) return;
 
   // Build a polygon-id → block role map so we can apply per-craft-role ink.
-  const polygonRole = new Map<number, DistrictRole>();
-  for (const block of data.blocks) {
+  // Phase 7: role is now DistrictType (coarse); fine-grained CRAFT_BUILDING_FILLS
+  // lookups return undefined for the new keys — buildings fall back to the
+  // default cream fill. Phase 8 adds DistrictType-specific building palettes.
+  const polygonRole = new Map<number, string>();
+  for (const block of data.blocks as CityBlockNewV2[]) {
     for (const pid of block.polygonIds) polygonRole.set(pid, block.role);
   }
 
@@ -1127,10 +1161,11 @@ function drawBuildings(
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
     // Resolve per-role colors — craft & industry first, then SFH, then
-    // military, then trade & finance. Variable names kept as `craftFills` /
-    // `craftInk` for minimal churn; they hold whichever family's palette
-    // the role belongs to.
-    const role = polygonRole.get(b.polygonId);
+    // military, then trade & finance. Phase 7: `role` is now a coarse
+    // DistrictType string; these Partial<Record<DistrictRole,...>> tables
+    // return undefined for the new keys so buildings fall back to cream.
+    // Phase 8 adds DistrictType-keyed palettes.
+    const role = polygonRole.get(b.polygonId) as DistrictRole | undefined;
     const craftFills = role
       ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role] ?? ENTERTAINMENT_BUILDING_FILLS[role] ?? EXCLUDED_BUILDING_FILLS[role])
       : undefined;
@@ -1295,118 +1330,14 @@ function drawRuinOvergrowth(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PR 4 (slice) — open spaces (squares + markets + parks) on Layer 9
-// ─────────────────────────────────────────────────────────────────────────────
-
-// [Voronoi-polygon] Render every entry in `data.openSpaces`. Each entry's
-// `polygonIds` indexes into `data.polygons`; we fill the union of those
-// polygons' vertex rings (UNCLOSED — `CityPolygon.vertices` is unclosed by
-// the contract documented in `cityMapTypesV2.ts`). On top of the fill we
-// scatter market stalls (small dark dots) or park trees (filled green
-// circles) using a seeded RNG keyed off the city, so re-rendering the same
-// city produces identical scatter positions.
-//
-// Sub-streams: `_openspaces_render_markets` and `_openspaces_render_parks`,
-// matching the generator's `_openspaces_markets` / `_openspaces_parks`
-// sub-stream pattern. Render-side streams are kept distinct from generation
-// streams so re-rendering without re-generating doesn't perturb generation
-// output (and vice versa).
-function drawOpenSpaces(
-  ctx: CanvasRenderingContext2D,
-  data: CityMapDataV2,
-  seed: string,
-  cityName: string,
-  showIcons = true,
-): void {
-  if (data.openSpaces.length === 0) return;
-
-  // Pass 1 — fill polygon rings (always, regardless of showIcons).
-  fillOpenSpaceKind(ctx, data, ['square'], OPEN_SPACE_SQUARE_FILL, OPEN_SPACE_SQUARE_STROKE);
-  fillOpenSpaceKind(ctx, data, ['market'], OPEN_SPACE_MARKET_FILL, OPEN_SPACE_MARKET_STROKE);
-  fillOpenSpaceKind(ctx, data, ['park'], OPEN_SPACE_PARK_FILL, OPEN_SPACE_PARK_STROKE);
-
-  if (!showIcons) return;
-
-  // Pass 2 — market stall dots scattered inside each market polygon.
-  const stallRng = seededPRNG(`${seed}_city_${cityName}_openspaces_render_markets`);
-  ctx.fillStyle = MARKET_STALL_INK;
-  for (const entry of data.openSpaces) {
-    if (entry.kind !== 'market') continue;
-    for (const pid of entry.polygonIds) {
-      const polygon = data.polygons[pid];
-      if (!polygon || polygon.vertices.length < 3) continue;
-      const stallCount = randIntInclusive(
-        stallRng,
-        MARKET_STALLS_PER_POLYGON_MIN,
-        MARKET_STALLS_PER_POLYGON_MAX,
-      );
-      // [Voronoi-polygon] Bias scatter around `polygon.site` with a
-      // bounded radius so dots stay inside the polygon ring even on
-      // elongated cells. The polygon's shoelace area informs how wide
-      // we let the scatter spread.
-      const spread = Math.sqrt(polygon.area) * 0.32;
-      for (let i = 0; i < stallCount; i++) {
-        const [px, py] = scatterInsidePolygon(polygon, stallRng, spread);
-        ctx.beginPath();
-        ctx.arc(px, py, MARKET_STALL_RADIUS, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }
-
-  // Pass 3 — park trees. Same scatter pattern as stalls but greener and
-  // bigger; outlined so dense clusters still read as individual trees.
-  const treeRng = seededPRNG(`${seed}_city_${cityName}_openspaces_render_parks`);
-  ctx.fillStyle = PARK_TREE_FILL;
-  ctx.strokeStyle = PARK_TREE_STROKE;
-  ctx.lineWidth = 0.75;
-  for (const entry of data.openSpaces) {
-    if (entry.kind !== 'park') continue;
-    for (const pid of entry.polygonIds) {
-      const polygon = data.polygons[pid];
-      if (!polygon || polygon.vertices.length < 3) continue;
-      const treeCount = randIntInclusive(
-        treeRng,
-        PARK_TREES_PER_POLYGON_MIN,
-        PARK_TREES_PER_POLYGON_MAX,
-      );
-      const spread = Math.sqrt(polygon.area) * 0.36;
-      for (let i = 0; i < treeCount; i++) {
-        const [px, py] = scatterInsidePolygon(polygon, treeRng, spread);
-        ctx.beginPath();
-        ctx.arc(px, py, PARK_TREE_RADIUS, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-      }
-    }
-  }
-}
-
-// [Voronoi-polygon] Stroke + fill every polygon listed under any of the
-// requested `kinds`. Keeps the canvas style switches batched per kind.
-function fillOpenSpaceKind(
-  ctx: CanvasRenderingContext2D,
-  data: CityMapDataV2,
-  kinds: ('square' | 'market' | 'park')[],
-  fillStyle: string,
-  strokeStyle: string,
-): void {
-  ctx.fillStyle = fillStyle;
-  ctx.strokeStyle = strokeStyle;
-  ctx.lineWidth = 1;
-  ctx.lineJoin = 'round';
-  for (const entry of data.openSpaces) {
-    if (!kinds.includes(entry.kind)) continue;
-    for (const pid of entry.polygonIds) {
-      const polygon = data.polygons[pid];
-      if (!polygon || polygon.vertices.length < 3) continue;
-      tracePolygonRing(ctx, polygon);
-      ctx.fill();
-      ctx.stroke();
-    }
-  }
-}
+// Phase 7: drawOpenSpaces and fillOpenSpaceKind are deleted here — park /
+// market / civic_square fills are now rendered by drawLandmarkFills() using
+// the unified LandmarkV2 data. Phase 8 was the original schedule for this
+// deletion, but since the functions reference data.openSpaces (which was
+// removed from the type in Phase 7), they were removed here to avoid a
+// compile error. The generation-side openSpaces variable (in
+// cityMapGeneratorV2.ts) is kept internally for the legacy craft-role
+// assignment functions until Phase 8.
 
 // [Voronoi-polygon] Trace a raw vertex array as a closed ring. Used for
 // building / sprawl footprints whose vertices come directly from the
@@ -1476,47 +1407,142 @@ function drawOutlinedText(
 // PR 4 (slice) — landmarks (castle / palace / temple / monument) on Layer 12
 // ─────────────────────────────────────────────────────────────────────────────
 
-// [Voronoi-polygon] Render every entry in `data.landmarks`. Each entry's
-// `polygonId` indexes into `data.polygons`; we center the glyph on
-// `polygon.site` and size it from `√polygon.area` (clamped to a legibility
-// window — V2 has NO tileSize concept). All glyphs are "ink on white" per
-// spec line 67: a pale plaque rect + dark silhouette details. Labels for
-// CASTLE / PALACE mirror V1 `cityMapRenderer.ts:398-409` so major capital
-// landmarks remain readable at a glance.
+// [Voronoi-polygon] Phase 7: fill the polygon areas for park / market /
+// civic_square landmarks. Drawn at Layer 9 depth (before streets/buildings)
+// so infrastructure ink sits on top of the area fills. No RNG — purely
+// geometric. Area fills for glyphed kinds (castle/palace/etc.) are skipped;
+// those polygons get the cream base and the glyph drawn on top.
+function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.landmarks.length === 0) return;
+  for (const lm of data.landmarks as LandmarkV2[]) {
+    if (lm.kind === 'civic_square') {
+      const polygon = data.polygons[lm.polygonId];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      ctx.fillStyle = OPEN_SPACE_SQUARE_FILL;
+      ctx.strokeStyle = OPEN_SPACE_SQUARE_STROKE;
+      ctx.lineWidth = 1;
+      tracePolygonRing(ctx, polygon);
+      ctx.fill();
+      ctx.stroke();
+    } else if (lm.kind === 'market') {
+      const polygon = data.polygons[lm.polygonId];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      ctx.fillStyle = OPEN_SPACE_MARKET_FILL;
+      ctx.strokeStyle = OPEN_SPACE_MARKET_STROKE;
+      ctx.lineWidth = 1;
+      tracePolygonRing(ctx, polygon);
+      ctx.fill();
+      ctx.stroke();
+    } else if (lm.kind === 'park') {
+      ctx.fillStyle = OPEN_SPACE_PARK_FILL;
+      ctx.strokeStyle = OPEN_SPACE_PARK_STROKE;
+      ctx.lineWidth = 1;
+      ctx.lineJoin = 'round';
+      const pids = lm.polygonIds ?? [lm.polygonId];
+      for (const pid of pids) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        tracePolygonRing(ctx, polygon);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+// [Voronoi-polygon] Phase 7 cutover: render all LandmarkV2 entries — glyphs
+// (castle/palace/temple/monument/wonder), scatter decorations (market stalls,
+// park trees), and name labels (castle/palace/wonder/park/market).
 //
-// No RNG — every dimension derives from `polygon.area` + `polygon.site`
-// so re-rendering the same city is byte-stable without needing a dedicated
-// render-side seed stream.
-function drawLandmarks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+// Phase 4 quarter kinds (forge, barracks, etc.) are skipped here — they are
+// shown via district-icon glyphs from `drawDistrictIcons`. Phase 8 will wire
+// dedicated quarter glyphs if desired.
+//
+// RNG sub-streams `_landmarks_render_markets` and `_landmarks_render_parks`
+// are distinct from the old `_openspaces_render_*` streams (iteration order
+// may differ after Phase 7 promotion) so re-rendering is byte-stable per
+// city without re-running the generator.
+function drawLandmarks(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  seed: string,
+  cityName: string,
+): void {
   if (data.landmarks.length === 0) return;
 
-  for (const lm of data.landmarks) {
+  // ── Glyph pass ────────────────────────────────────────────────────────────
+  for (const lm of data.landmarks as LandmarkV2[]) {
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
     const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
-    const { fill, ink } = LANDMARK_COLORS[lm.type];
-    switch (lm.type) {
+    const colors = LANDMARK_COLORS[lm.kind] ?? LANDMARK_FALLBACK_COLORS;
+    const { fill, ink } = colors;
+    switch (lm.kind) {
       case 'castle':   drawCastleGlyph(ctx, cx, cy, sz, fill, ink); break;
       case 'palace':   drawPalaceGlyph(ctx, cx, cy, sz, fill, ink); break;
       case 'temple':   drawTempleGlyph(ctx, cx, cy, sz, fill, ink); break;
-      case 'monument': drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
+      case 'wonder':   drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
+      // park/market/civic_square fills were already drawn in drawLandmarkFills;
+      // glyphs and scatter are handled in the passes below.
+      // Phase 4 quarter kinds: no dedicated glyph in Phase 7.
+      default: break;
     }
   }
 
-  // Labels below castle / palace (mirrors V1 label pass) — centered on the
-  // polygon site, placed just below the glyph bounding box.
+  // ── Scatter pass: market stalls ──────────────────────────────────────────
+  const stallRng = seededPRNG(`${seed}_city_${cityName}_landmarks_render_markets`);
+  ctx.fillStyle = MARKET_STALL_INK;
+  for (const lm of data.landmarks as LandmarkV2[]) {
+    if (lm.kind !== 'market') continue;
+    const polygon = data.polygons[lm.polygonId];
+    if (!polygon || polygon.vertices.length < 3) continue;
+    const stallCount = randIntInclusive(stallRng, MARKET_STALLS_PER_POLYGON_MIN, MARKET_STALLS_PER_POLYGON_MAX);
+    const spread = Math.sqrt(polygon.area) * 0.32;
+    for (let i = 0; i < stallCount; i++) {
+      const [px, py] = scatterInsidePolygon(polygon, stallRng, spread);
+      ctx.beginPath();
+      ctx.arc(px, py, MARKET_STALL_RADIUS, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // ── Scatter pass: park trees ─────────────────────────────────────────────
+  const treeRng = seededPRNG(`${seed}_city_${cityName}_landmarks_render_parks`);
+  ctx.fillStyle = PARK_TREE_FILL;
+  ctx.strokeStyle = PARK_TREE_STROKE;
+  ctx.lineWidth = 0.75;
+  for (const lm of data.landmarks as LandmarkV2[]) {
+    if (lm.kind !== 'park') continue;
+    const pids = lm.polygonIds ?? [lm.polygonId];
+    for (const pid of pids) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      const treeCount = randIntInclusive(treeRng, PARK_TREES_PER_POLYGON_MIN, PARK_TREES_PER_POLYGON_MAX);
+      const spread = Math.sqrt(polygon.area) * 0.36;
+      for (let i = 0; i < treeCount; i++) {
+        const [px, py] = scatterInsidePolygon(polygon, treeRng, spread);
+        ctx.beginPath();
+        ctx.arc(px, py, PARK_TREE_RADIUS, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+
+  // ── Label pass ────────────────────────────────────────────────────────────
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (const lm of data.landmarks) {
-    if (!LANDMARK_LABEL_TYPES.has(lm.type)) continue;
+  for (const lm of data.landmarks as LandmarkV2[]) {
+    if (!LANDMARK_LABEL_TYPES.has(lm.kind)) continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
     const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
     const fontPx = Math.max(8, Math.round(sz * 0.35));
     ctx.font = `bold ${fontPx}px Georgia, 'Times New Roman', serif`;
-    drawOutlinedText(ctx, lm.type.toUpperCase(), cx, cy + sz / 2 + 1, 2.5);
+    const label = lm.name ?? lm.kind.replace(/_/g, ' ').toUpperCase();
+    drawOutlinedText(ctx, label, cx, cy + sz / 2 + 1, 2.5);
   }
 }
 
@@ -1708,45 +1734,55 @@ const DISTRICT_ICON_SIZE = 16;
 const DISTRICT_ICON_BG_ALPHA = 0.85;
 
 // Icon palette: slightly lighter/brighter than the block background fills.
-const DISTRICT_ICON_PALETTE: Partial<Record<DistrictRole, [fill: string, ink: string]>> = {
-  civic:             ['#f0e8d8', '#3a2810'],
-  residential:       ['#ece4d4', '#3a2810'],
-  harbor:            ['#b8d4e8', '#1a3858'],
-  market:            ['#f8eebc', '#5a3000'],
-  forge:             ['#dcc8a8', '#2a1a0a'],
-  tannery:           ['#d0b888', '#3a1808'],
-  textile:           ['#dcc898', '#382010'],
-  potters:           ['#e0b090', '#3a1808'],
-  mill:              ['#ccc8b8', '#202018'],
-  temple_quarter:    ['#e8cce8', '#280838'],
-  necropolis:        ['#d8cce0', '#201828'],
-  academia:          ['#ccd0f0', '#080830'],
-  plague_ward:       ['#f4ccd0', '#380820'],
-  archive_quarter:   ['#e8cce4', '#250825'],
-  barracks:          ['#b0c078', '#20280a'],
-  citadel:           ['#7a9060', '#101808'],
-  arsenal:           ['#98b070', '#181c08'],
-  watchmen_precinct: ['#ccd8a8', '#2a2e18'],
-  // Trade & finance — lighter gold / yellow fills with darker gold-brown ink.
-  foreign_quarter:   ['#f4e4ac', '#3a2a08'],
-  caravanserai:      ['#ecd488', '#3a2808'],
-  bankers_row:       ['#f0c850', '#3a2000'],
-  warehouse_row:     ['#f4e8b0', '#3a2a08'],
-  // Entertainment & social — light orange / pumpkin fills with dark warm ink.
-  theater_district:  ['#f8c890', '#3a1a00'],
-  bathhouse_quarter: ['#f8d8b8', '#3a2208'],
-  pleasure_quarter:  ['#f09058', '#3a1000'],
-  // Excluded / outcast — light silver fills with near-black cool ink.
-  ghetto:            ['#c8ccd4', '#1a1c22'],
-  workhouse:         ['#d8dce4', '#1a1c22'],
+// Phase 7: includes both legacy DistrictRole keys (kept for Phase 8 cleanup)
+// and new coarse DistrictType keys introduced by the Phase 7 block promotion.
+const DISTRICT_ICON_PALETTE: Partial<Record<string, [fill: string, ink: string]>> = {
+  // DistrictType keys (Phase 7) — coarse roles from CityBlockNewV2
+  civic:              ['#f0e8d8', '#3a2810'],
+  market:             ['#f8eebc', '#5a3000'],
+  harbor:             ['#b8d4e8', '#1a3858'],
+  residential_high:   ['#ece4d4', '#3a2810'],
+  residential_medium: ['#e8e0d0', '#3a2810'],
+  residential_low:    ['#e4dccc', '#3a2810'],
+  industry:           ['#dcc8a8', '#2a1a0a'],
+  education_faith:    ['#e8cce8', '#280838'],
+  military:           ['#b0c078', '#20280a'],
+  trade:              ['#f4e4ac', '#3a2a08'],
+  entertainment:      ['#f8c890', '#3a1a00'],
+  // Legacy DistrictRole keys — still present until Phase 8 deletes them.
+  residential:        ['#ece4d4', '#3a2810'],
+  forge:              ['#dcc8a8', '#2a1a0a'],
+  tannery:            ['#d0b888', '#3a1808'],
+  textile:            ['#dcc898', '#382010'],
+  potters:            ['#e0b090', '#3a1808'],
+  mill:               ['#ccc8b8', '#202018'],
+  temple_quarter:     ['#e8cce8', '#280838'],
+  necropolis:         ['#d8cce0', '#201828'],
+  academia:           ['#ccd0f0', '#080830'],
+  plague_ward:        ['#f4ccd0', '#380820'],
+  archive_quarter:    ['#e8cce4', '#250825'],
+  barracks:           ['#b0c078', '#20280a'],
+  citadel:            ['#7a9060', '#101808'],
+  arsenal:            ['#98b070', '#181c08'],
+  watchmen_precinct:  ['#ccd8a8', '#2a2e18'],
+  foreign_quarter:    ['#f4e4ac', '#3a2a08'],
+  caravanserai:       ['#ecd488', '#3a2808'],
+  bankers_row:        ['#f0c850', '#3a2000'],
+  warehouse_row:      ['#f4e8b0', '#3a2a08'],
+  theater_district:   ['#f8c890', '#3a1a00'],
+  bathhouse_quarter:  ['#f8d8b8', '#3a2208'],
+  pleasure_quarter:   ['#f09058', '#3a1000'],
+  ghetto:             ['#c8ccd4', '#1a1c22'],
+  workhouse:          ['#d8dce4', '#1a1c22'],
 };
 
-// Roles that do not receive a district icon. festival_grounds is exterior
-// (an open fairground field) and reads better as a bare coloured polygon —
-// matches the slum / agricultural / dock convention. gallows_hill is
-// exterior-only and follows the same precedent.
-const NO_DISTRICT_ICON: ReadonlySet<DistrictRole> = new Set<DistrictRole>([
-  'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
+// Roles that do not receive a district icon (exterior / outcast ground).
+// Phase 7: broadened to string so both DistrictRole and DistrictType values
+// can be compared; Phase 8 removes the DistrictRole side.
+const NO_DISTRICT_ICON: ReadonlySet<string> = new Set([
+  'slum', 'agricultural', 'dock', 'excluded',
+  // Legacy DistrictRole equivalents kept until Phase 8:
+  'festival_grounds', 'gallows_hill',
 ]);
 
 // [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
@@ -1768,9 +1804,9 @@ function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
   if (data.blocks.length === 0) return;
 
   // Set of polygons that host a landmark — skip those blocks.
-  const landmarkPolygons = new Set(data.landmarks.map(lm => lm.polygonId));
+  const landmarkPolygons = new Set((data.landmarks as LandmarkV2[]).map(lm => lm.polygonId));
 
-  for (const block of data.blocks as CityBlockV2[]) {
+  for (const block of data.blocks as CityBlockNewV2[]) {
     if (NO_DISTRICT_ICON.has(block.role)) continue;
     const palette = DISTRICT_ICON_PALETTE[block.role];
     if (!palette) continue;
@@ -1815,7 +1851,7 @@ function drawDistrictGlyph(
   cx: number,
   cy: number,
   size: number,
-  role: DistrictRole,
+  role: string,
   fill: string,
   ink: string,
 ): void {

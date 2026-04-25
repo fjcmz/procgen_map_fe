@@ -53,14 +53,13 @@ import type {
   CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
-  CityMapDataV2,
   CityPolygon,
   CitySize,
 } from './cityMapTypesV2';
 
 type TradeFinanceRole = 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse_row';
 
-type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+import type { OpenSpaceEntry } from './cityMapOpenSpaces';
 
 // Local structural type so this file does not depend on `cityMapWalls.ts`
 // internals. Matches the shape produced by `generateWallsAndGates`.

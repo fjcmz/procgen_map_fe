@@ -60,7 +60,6 @@ import type {
   CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
-  CityMapDataV2,
   CityPolygon,
   CitySize,
 } from './cityMapTypesV2';
@@ -68,7 +67,7 @@ import type {
 type EntertainmentRole =
   | 'theater_district' | 'bathhouse_quarter' | 'pleasure_quarter' | 'festival_grounds';
 
-type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+import type { OpenSpaceEntry } from './cityMapOpenSpaces';
 
 // Local structural type so this file does not depend on `cityMapWalls.ts`
 // internals. Matches the shape produced by `generateWallsAndGates`.

@@ -230,7 +230,7 @@ export interface CityMapDataV2 {
    * `cityMapGeneratorV2.ts`. The actual interior set may end up slightly
    * smaller after BFS-prune / hole-fill (see `cityMapShape.ts`); the
    * authoritative interior is `wall.interiorPolygonIds` which is echoed
-   * into the renderer / blocks / openSpaces consumers.
+   * into the renderer / blocks consumers.
    */
   cityPolygonCount: number;
   /** Voronoi polygon foundation — the primary data contract for PR 2-5. */
@@ -274,10 +274,13 @@ export interface CityMapDataV2 {
   roads: [number, number][][];
   // TODO PR 3: space-filling streets (thin) along polygon edges.
   streets: [number, number][][];
-  // TODO PR 4: district clusters with roles and medieval names.
-  blocks: CityBlockV2[];
-  // TODO PR 4: reserved squares, markets, and parks (polygon-keyed).
-  openSpaces: { kind: 'square' | 'market' | 'park'; polygonIds: number[] }[];
+  /**
+   * Phase 7 of specs/City_districts_redux.md — promoted from `_blocksNew`.
+   * Connected-component grouping of `districts` into named block clusters
+   * keyed on the coarse DistrictType union. Phase 8 deletes `CityBlockV2` /
+   * `DistrictRole`.
+   */
+  blocks: CityBlockNewV2[];
   // PR 5: per-lot building footprint polygons — Voronoi-subdivided lots inset
   // from their edges, one footprint per lot.
   buildings: CityBuildingV2[];
@@ -288,33 +291,20 @@ export interface CityMapDataV2 {
   // "Renderer layers 3, 4, 10, 13 wired in" (line 76). Same CityBuildingV2
   // shape — only the owning polygon's role + isEdge differ.
   sprawlBuildings: CityBuildingV2[];
-  // TODO PR 4: castle / palace / temple / monument placements.
-  landmarks: CityLandmarkV2[];
   /**
-   * Phase 2 of specs/City_districts_redux.md — output of the unified landmark
-   * placer (`cityMapLandmarksUnified.ts`). Empty in Phase 2 (stubs only). The
-   * renderer ignores this field until Phase 7 promotes it over `landmarks`.
+   * Phase 7 of specs/City_districts_redux.md — promoted from `_landmarksNew`.
+   * Unified 32-kind landmark list produced by `cityMapLandmarksUnified.ts`.
+   * Drives district BFS seeds, label rendering, and glyph placement.
+   * Phase 8 deletes `CityLandmarkV2`.
    */
-  _landmarksNew?: LandmarkV2[];
+  landmarks: LandmarkV2[];
   /**
-   * Phase 5 of specs/City_districts_redux.md — output of `assignDistricts` in
-   * `cityMapDistricts.ts`. Same length as `polygons`; `array[polygonId]` is
-   * that polygon's district type. Renderer ignores this field until Phase 7
-   * promotes `_districtsNew → districts` and Phase 8 deletes `blocks` /
-   * `DistrictRole`. Water and unabsorbed-mountain polygons carry the sentinel
-   * `'residential_medium'` (downstream Phase 6 PACKING_ROLES filters them via
-   * `waterPolygonIds` / `mountainPolygonIds` independently, so the sentinel
-   * never reaches a renderer).
+   * Phase 7 of specs/City_districts_redux.md — promoted from `_districtsNew`.
+   * Per-polygon district classification from `assignDistricts`. Same length as
+   * `polygons`; `array[polygonId]` is that polygon's DistrictType. Water and
+   * unabsorbed-mountain polygons carry the sentinel `'residential_medium'`.
    */
-  _districtsNew?: DistrictType[];
-  /**
-   * Phase 6 of specs/City_districts_redux.md — output of
-   * `buildBlocksFromDistricts` in `cityMapBlocks.ts`. Connected-component
-   * grouping of `_districtsNew` into named block clusters keyed on the coarse
-   * DistrictType union. Renderer ignores this field until Phase 7 promotes it
-   * over `blocks`.
-   */
-  _blocksNew?: CityBlockNewV2[];
+  districts: DistrictType[];
   districtLabels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[];
 
   /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */

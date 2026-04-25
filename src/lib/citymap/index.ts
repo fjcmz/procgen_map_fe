@@ -4,10 +4,14 @@ export type {
   CityMapDataV2,
   CityPolygon,
   CityBlockV2,
+  CityBlockNewV2,
   CityBuildingV2,
   CityLandmarkV2,
+  LandmarkV2,
   CitySize,
   DistrictRole,
+  DistrictType,
+  LandmarkKind,
 } from './cityMapTypesV2';
 export {
   deriveCityEnvironment,

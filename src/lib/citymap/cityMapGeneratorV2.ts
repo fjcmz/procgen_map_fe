@@ -20,12 +20,14 @@ import { seededPRNG } from '../terrain/noise';
 import type { Cell, City, MapData, WonderSnapshotEntry } from '../types';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
-  CityBlockV2,
+  CityBlockNewV2,
   CityEnvironment,
   CityLandmarkV2,
   CityMapDataV2,
   CityPolygon,
   CitySize,
+  DistrictType,
+  LandmarkV2,
 } from './cityMapTypesV2';
 import { generateWallsAndGates, type WallConfig } from './cityMapWalls';
 import { selectCityFootprint } from './cityMapShape';
@@ -417,9 +419,10 @@ function buildCityPolygonGraph(
  */
 
 // Roles that don't get district labels (exterior / docks / special ground).
-// Mirrors the NO_DISTRICT_ICON set in the renderer.
-const NO_LABEL_ROLES: ReadonlySet<string> = new Set([
-  'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
+// Mirrors the NO_DISTRICT_ICON set in the renderer. Uses DistrictType values
+// after Phase 7 promotes _blocksNew → blocks.
+const NO_LABEL_ROLES: ReadonlySet<string> = new Set<DistrictType>([
+  'slum', 'agricultural', 'dock', 'excluded',
 ]);
 
 // [Voronoi-polygon] Compute `districtLabels` from the block list. For each
@@ -429,8 +432,8 @@ const NO_LABEL_ROLES: ReadonlySet<string> = new Set([
 // in small cities get slightly bigger text; clamped to [8, 13] px).
 // Blocks hosting a landmark glyph are omitted to avoid overlap.
 function computeDistrictLabels(
-  blocks: CityBlockV2[],
-  landmarks: CityLandmarkV2[],
+  blocks: CityBlockNewV2[],
+  landmarks: LandmarkV2[],
   polygons: CityPolygon[],
 ): { text: string; cx: number; cy: number; angle: number; fontSize: number }[] {
   const landmarkPids = new Set(landmarks.map(lm => lm.polygonId));
@@ -873,20 +876,17 @@ export function generateCityMapV2(
     bridges,
     roads,
     streets: mountainStreets.length > 0 ? [...streets, ...mountainStreets] : streets,
-    blocks,
-    openSpaces,
+    blocks: blocksNew,
     buildings,
     sprawlBuildings,
-    landmarks,
-    _landmarksNew: landmarksNew,
-    _districtsNew: districtsNew,
-    _blocksNew: blocksNew,
+    landmarks: landmarksNew,
+    districts: districtsNew,
     wallTowers,
     innerWallPath,
     innerGates,
     middleWallPath,
     middleGates,
     exitRoads,
-    districtLabels: computeDistrictLabels(blocks, landmarks, polygons),
+    districtLabels: computeDistrictLabels(blocksNew, landmarksNew, polygons),
   };
 }

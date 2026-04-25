@@ -69,14 +69,13 @@ import type {
   CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
-  CityMapDataV2,
   CityPolygon,
   CitySize,
 } from './cityMapTypesV2';
 
 type ExcludedRole = 'ghetto' | 'workhouse' | 'gallows_hill';
 
-type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+import type { OpenSpaceEntry } from './cityMapOpenSpaces';
 
 // ── Count ranges by city size (user spec) ──────────────────────────────────
 const EXCLUDED_COUNT_RANGE: Record<CitySize, [number, number]> = {

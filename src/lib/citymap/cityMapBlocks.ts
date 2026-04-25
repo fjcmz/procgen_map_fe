@@ -53,7 +53,6 @@ import type {
   CityBlockV2,
   CityBlockNewV2,
   CityEnvironment,
-  CityMapDataV2,
   CityPolygon,
   DistrictRole,
   DistrictType,
@@ -63,7 +62,7 @@ import { buildEdgeOwnership, canonicalEdgeKey, type Point } from './cityMapEdgeG
 import type { WallGenerationResult } from './cityMapWalls';
 import type { RiverGenerationResult } from './cityMapRiver';
 
-type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+import type { OpenSpaceEntry } from './cityMapOpenSpaces';
 
 // ─── Per-tier block tuning ──────────────────────────────────────────────────
 
