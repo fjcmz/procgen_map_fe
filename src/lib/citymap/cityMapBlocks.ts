@@ -18,6 +18,7 @@ import { seededPRNG } from '../terrain/noise';
 import type {
   CityBlockNewV2,
   CityPolygon,
+  CitySize,
   DistrictType,
 } from './cityMapTypesV2';
 
@@ -25,6 +26,28 @@ import type {
 const NAME_MAX_ATTEMPTS = 12;
 // Probability of inserting a space between prefix + suffix (else concatenate).
 const NAME_SPACE_JOINER_PROB = 0.35;
+
+// Per-tier polygon-count cap for any DistrictType that is NOT a residential
+// tier (i.e. not residential_high/medium/low). When a same-role connected
+// component would exceed this, the BFS truncates and the leftover polygons
+// are picked up by the outer loop as additional same-role blocks — so a city
+// can still have several civic / market / industry / etc. blocks, just no
+// single one larger than the cap.
+const NON_RES_BLOCK_SIZE_LIMIT: Record<CitySize, number> = {
+  small: 2,
+  medium: 4,
+  large: 6,
+  metropolis: 8,
+  megalopolis: 10,
+};
+
+function isResidentialDistrict(role: DistrictType): boolean {
+  return (
+    role === 'residential_high' ||
+    role === 'residential_medium' ||
+    role === 'residential_low'
+  );
+}
 
 // ─── Medieval name combiner ────────────────────────────────────────────────
 // Ported verbatim from V1 `cityMapGenerator.ts:956-969`. Pure text flavor
@@ -131,6 +154,7 @@ export function buildBlocksFromDistricts(
   districtsNew: DistrictType[],
   waterPolygonIds: Set<number>,
   mountainPolygonIds: Set<number>,
+  citySize: CitySize,
 ): CityBlockNewV2[] {
   if (polygons.length < 4 || districtsNew.length === 0) return [];
 
@@ -138,6 +162,7 @@ export function buildBlocksFromDistricts(
   const usedNames = new Set<string>();
   const visited = new Set<number>();
   const blocks: CityBlockNewV2[] = [];
+  const nonResLimit = NON_RES_BLOCK_SIZE_LIMIT[citySize];
 
   for (let startId = 0; startId < polygons.length; startId++) {
     if (visited.has(startId)) continue;
@@ -147,6 +172,7 @@ export function buildBlocksFromDistricts(
     }
 
     const role = districtsNew[startId];
+    const sizeCap = isResidentialDistrict(role) ? Infinity : nonResLimit;
     const component: number[] = [];
     const queue: number[] = [startId];
     visited.add(startId);
@@ -154,6 +180,16 @@ export function buildBlocksFromDistricts(
     while (queue.length > 0) {
       const curr = queue.shift()!;
       component.push(curr);
+      if (component.length >= sizeCap) {
+        // Hit the non-residential block-size cap. Release any same-role
+        // polygons still waiting in the queue (already marked visited but
+        // not yet placed in this component) so the outer loop picks them
+        // up as the seed of a new same-role block. The component remains
+        // BFS-connected; the released polygons form their own connected
+        // sub-components when restarted.
+        for (const q of queue) visited.delete(q);
+        break;
+      }
       for (const nb of polygons[curr].neighbors) {
         if (visited.has(nb)) continue;
         if (waterPolygonIds.has(nb) || mountainPolygonIds.has(nb)) {
