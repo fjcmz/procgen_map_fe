@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { CityEnvironment, CityMapDataV2, DistrictType } from '../lib/citymap';
+import type { CityEnvironment, CityMapDataV2, DistrictType, LandmarkKind } from '../lib/citymap';
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
 
 interface CityMapPopupV2Props {
@@ -74,6 +74,57 @@ const DISTRICT_ROLE_INFO: Record<DistrictType, { icon: string; label: string }> 
   excluded:            { icon: '⚖️',  label: 'Excluded Zone' },
 };
 
+// Emoji icon + human-readable label for every LandmarkKind. Exhaustive so
+// hovering a polygon that hosts a specific quarter (forge, barracks, etc.)
+// shows the landmark-specific identity instead of the coarser parent block.
+const LANDMARK_KIND_INFO: Record<LandmarkKind, { icon: string; label: string }> = {
+  // Phase 3 — named structural
+  wonder:          { icon: '🗿', label: 'Wonder' },
+  palace:          { icon: '👑', label: 'Palace' },
+  castle:          { icon: '🏰', label: 'Castle' },
+  civic_square:    { icon: '🏛', label: 'Civic Square' },
+  temple:          { icon: '⛪', label: 'Temple' },
+  market:          { icon: '🛒', label: 'Market' },
+  park:            { icon: '🌳', label: 'Park' },
+  // Phase 4 — industrial
+  forge:           { icon: '🔨', label: 'Forge' },
+  tannery:         { icon: '🛡', label: 'Tannery' },
+  textile:         { icon: '🧵', label: 'Textile Quarter' },
+  potters:         { icon: '🏺', label: 'Potters Quarter' },
+  mill:            { icon: '⚙',  label: 'Mill' },
+  // Phase 4 — military
+  barracks:        { icon: '⚔',  label: 'Barracks' },
+  citadel:         { icon: '🏯', label: 'Citadel' },
+  arsenal:         { icon: '⚒',  label: 'Arsenal' },
+  watchmen:        { icon: '👁', label: 'Watchmen Precinct' },
+  // Phase 4 — faith / scholarship
+  temple_quarter:  { icon: '⛩',  label: 'Temple Quarter' },
+  necropolis:      { icon: '⚰',  label: 'Necropolis' },
+  plague_ward:     { icon: '⚕',  label: 'Plague Ward' },
+  academia:        { icon: '📚', label: 'Academia' },
+  archive:         { icon: '📜', label: 'Archive' },
+  // Phase 4 — entertainment
+  theater:         { icon: '🎭', label: 'Theatre District' },
+  bathhouse:       { icon: '🛁', label: 'Bathhouse Quarter' },
+  pleasure:        { icon: '🎪', label: 'Pleasure Quarter' },
+  festival:        { icon: '🎊', label: 'Festival Grounds' },
+  // Phase 4 — trade & finance
+  foreign_quarter: { icon: '🏴', label: 'Foreign Quarter' },
+  caravanserai:    { icon: '🐪', label: 'Caravanserai' },
+  bankers_row:     { icon: '💰', label: "Bankers' Row" },
+  warehouse:       { icon: '📦', label: 'Warehouse Row' },
+  // Phase 4 — excluded
+  gallows:         { icon: '☠',  label: 'Gallows Hill' },
+  workhouse:       { icon: '⛓',  label: 'Workhouse' },
+  ghetto_marker:   { icon: '🔒', label: 'Ghetto' },
+};
+
+interface PolygonHit {
+  name: string;
+  icon: string;
+  label: string;
+}
+
 // Ray-casting point-in-polygon (unclosed ring, matching CityPolygon contract).
 function pointInPolygon(px: number, py: number, verts: [number, number][]): boolean {
   let inside = false;
@@ -91,11 +142,13 @@ function pointInPolygon(px: number, py: number, verts: [number, number][]): bool
 export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
-  // polygonId → { name, role } for labeled blocks only.
-  const polygonToLabelRef = useRef(new Map<number, { name: string; role: string }>());
+  // polygonId → resolved tooltip info. Landmarks (forge, barracks, …) take
+  // priority over the parent block so each special-quarter polygon shows its
+  // own name + icon + type instead of the coarser block role.
+  const polygonToHitRef = useRef(new Map<number, PolygonHit>());
   const [showIcons, setShowIcons] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
-  const [tooltip, setTooltip] = useState<{ name: string; role: string; x: number; y: number } | null>(null);
+  const [tooltip, setTooltip] = useState<(PolygonHit & { x: number; y: number }) | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
@@ -131,16 +184,38 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     const data = generateCityMapV2(seed, cityName, environment);
     mapDataRef.current = data;
 
-    // Build polygon → { name, role } index for hover hit-testing.
-    // Index every block (including slum / agricultural / dock / excluded and
-    // landmark-hosting blocks) so the tooltip can describe any quarter the
-    // user hovers — independent of which roles get on-canvas labels.
-    const pMap = new Map<number, { name: string; role: string }>();
+    // Build polygon → tooltip-info index. Two passes:
+    //   1. Block fallback for every interior polygon (any DistrictType, no
+    //      role filter) so non-landmark polygons still get a tooltip.
+    //   2. Landmark overlay — overwrites the block entry on each polygon a
+    //      LandmarkV2 covers (single polygon, or every id in `polygonIds`
+    //      for park clusters) so the user sees the specific landmark's name,
+    //      icon, and quarter type instead of the coarser parent block role.
+    //      Unnamed Phase 4 quarters (forge / barracks / …) inherit the
+    //      parent block's procedural name; named landmarks (castle /
+    //      palace / wonder / …) keep their own `lm.name`.
+    const polygonToBlock = new Map<number, { name: string; role: DistrictType }>();
     for (const block of data.blocks) {
       const entry = { name: block.name, role: block.role };
-      for (const pid of block.polygonIds) pMap.set(pid, entry);
+      for (const pid of block.polygonIds) polygonToBlock.set(pid, entry);
     }
-    polygonToLabelRef.current = pMap;
+
+    const pMap = new Map<number, PolygonHit>();
+    for (const [pid, block] of polygonToBlock) {
+      const info = DISTRICT_ROLE_INFO[block.role];
+      pMap.set(pid, { name: block.name, icon: info.icon, label: info.label });
+    }
+    for (const lm of data.landmarks) {
+      const kindInfo = LANDMARK_KIND_INFO[lm.kind];
+      if (!kindInfo) continue;
+      const pids = lm.polygonIds ?? [lm.polygonId];
+      for (const pid of pids) {
+        const block = polygonToBlock.get(pid);
+        const name = lm.name ?? block?.name ?? kindInfo.label;
+        pMap.set(pid, { name, icon: kindInfo.icon, label: kindInfo.label });
+      }
+    }
+    polygonToHitRef.current = pMap;
 
     // Reset zoom whenever a fresh map is generated.
     setTransform(prev =>
@@ -194,8 +269,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     return [(naturalX - t.x) / t.scale, (naturalY - t.y) / t.scale];
   }, []);
 
-  // Return the district info under the given client position, or null.
-  const hitTest = useCallback((clientX: number, clientY: number): { name: string; role: string } | null => {
+  // Return the resolved tooltip info under the given client position, or null.
+  const hitTest = useCallback((clientX: number, clientY: number): PolygonHit | null => {
     const coords = toMapCoords(clientX, clientY);
     if (!coords) return null;
     const data = mapDataRef.current;
@@ -203,7 +278,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     const [cx, cy] = coords;
     for (const polygon of data.polygons) {
       if (pointInPolygon(cx, cy, polygon.vertices)) {
-        return polygonToLabelRef.current.get(polygon.id) ?? null;
+        return polygonToHitRef.current.get(polygon.id) ?? null;
       }
     }
     return null;
@@ -411,8 +486,6 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   if (!isOpen) return null;
 
-  const roleInfo = tooltip ? (DISTRICT_ROLE_INFO[tooltip.role as DistrictType] ?? null) : null;
-
   return createPortal(
     <>
       <div style={styles.backdrop} onClick={handleBackdropClick}>
@@ -490,10 +563,10 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
           </div>
         </div>
       </div>
-      {!showLabels && tooltip && roleInfo && (
+      {!showLabels && tooltip && (
         <div style={{ ...styles.tooltip, left: tooltip.x, top: tooltip.y }}>
           <div style={styles.tooltipName}>{tooltip.name}</div>
-          <div style={styles.tooltipRole}>{roleInfo.icon} {roleInfo.label}</div>
+          <div style={styles.tooltipRole}>{tooltip.icon} {tooltip.label}</div>
         </div>
       )}
     </>,
