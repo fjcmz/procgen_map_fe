@@ -1628,11 +1628,19 @@ function drawDistrictGlyph(
   ctx.lineCap = 'round';
 
   switch (role) {
-    case 'civic':            drawCivicIcon(ctx, s, fill, ink); break;
-    case 'residential':      drawResidentialIcon(ctx, s, fill, ink); break;
-    case 'harbor':           drawHarborIcon(ctx, s, fill, ink); break;
-    case 'market':           drawMarketIcon(ctx, s, fill, ink); break;
-    case 'forge':            drawForgeIcon(ctx, s, fill, ink); break;
+    case 'civic':             drawCivicIcon(ctx, s, fill, ink); break;
+    case 'residential':
+    case 'residential_high':
+    case 'residential_medium':
+    case 'residential_low':   drawResidentialIcon(ctx, s, fill, ink); break;
+    case 'harbor':            drawHarborIcon(ctx, s, fill, ink); break;
+    case 'market':            drawMarketIcon(ctx, s, fill, ink); break;
+    case 'industry':          drawForgeIcon(ctx, s, fill, ink); break;
+    case 'education_faith':   drawAcademiaIcon(ctx, s, fill, ink); break;
+    case 'military':          drawBarracksIcon(ctx, s, fill, ink); break;
+    case 'trade':             drawCaravanseraiIcon(ctx, s, fill, ink); break;
+    case 'entertainment':     drawTheaterIcon(ctx, s, fill, ink); break;
+    case 'forge':             drawForgeIcon(ctx, s, fill, ink); break;
     case 'tannery':          drawTanneryIcon(ctx, s, fill, ink); break;
     case 'textile':          drawTextileIcon(ctx, s, fill, ink); break;
     case 'potters':          drawPottersIcon(ctx, s, fill, ink); break;
