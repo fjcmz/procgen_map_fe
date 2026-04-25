@@ -76,15 +76,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type {
-  CityBuildingV2,
-  CityBlockNewV2,
   CityEnvironment,
   CityMapDataV2,
   CityPolygon,
-  DistrictRole,
   DistrictType,
   LandmarkKind,
-  LandmarkV2,
 } from './cityMapTypesV2';
 import type { BiomeType } from '../types';
 import { seededPRNG } from '../terrain/noise';
@@ -550,10 +546,8 @@ function drawBlockBackgrounds(
 ): void {
   if (data.blocks.length === 0) return;
   const biomeFill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
-  for (const block of data.blocks as CityBlockNewV2[]) {
-    // Phase 7: coarse DistrictType check — handles new block roles from _blocksNew.
-    // Fine-grained DistrictRole lookups below return undefined for these keys.
-    const coarseFill = COARSE_DISTRICT_BG_FILL[block.role as DistrictType];
+  for (const block of data.blocks) {
+    const coarseFill = COARSE_DISTRICT_BG_FILL[block.role];
     if (coarseFill) {
       ctx.fillStyle = coarseFill;
       for (const pid of block.polygonIds) {
@@ -566,25 +560,6 @@ function drawBlockBackgrounds(
     }
     if (block.role === 'slum' || block.role === 'agricultural') {
       ctx.fillStyle = biomeFill;
-      for (const pid of block.polygonIds) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        tracePolygonRing(ctx, polygon);
-        ctx.fill();
-      }
-      continue;
-    }
-    // Legacy DistrictRole fine-grained fills — deleted in Phase 8.
-    const role = block.role as DistrictRole;
-    const sfhFill = SFH_BG_FILL[role];
-    const craftFill = CRAFT_BG_FILL[role];
-    const militaryFill = MILITARY_BG_FILL[role];
-    const tradeFill = TRADE_BG_FILL[role];
-    const entertainmentFill = ENTERTAINMENT_BG_FILL[role];
-    const excludedFill = EXCLUDED_BG_FILL[role];
-    const specificFill = sfhFill ?? craftFill ?? militaryFill ?? tradeFill ?? entertainmentFill ?? excludedFill;
-    if (specificFill) {
-      ctx.fillStyle = specificFill;
       for (const pid of block.polygonIds) {
         const polygon = data.polygons[pid];
         if (!polygon || polygon.vertices.length < 3) continue;
@@ -926,9 +901,7 @@ const BUILDING_FILLS = ['#e6e6e4', '#d6d6d4', '#c6c6c4'] as const;
 const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
-// Phase 7: coarse DistrictType background fills. Checked first in
-// drawBlockBackgrounds before the fine-grained DistrictRole tables (which
-// return undefined for the new coarse keys and are deleted in Phase 8).
+// Coarse DistrictType background fills for named interior district kinds.
 const COARSE_DISTRICT_BG_FILL: Partial<Record<DistrictType, string>> = {
   industry:        '#c8b498', // warm brown, like old craft
   education_faith: '#e8cce8', // lavender, like old SFH
@@ -936,154 +909,6 @@ const COARSE_DISTRICT_BG_FILL: Partial<Record<DistrictType, string>> = {
   trade:           '#f0dc98', // gold-yellow
   entertainment:   '#f8c890', // orange
   excluded:        '#d8dce4', // silver-grey
-};
-
-// Craft & industry district background fills (Layer 2.5) and building ink
-// (Layer 10).  Browns, greys, and dark tones to read as industrial / pre-
-// modern manufacturing zones distinct from the cream residential core.
-// Legacy DistrictRole-keyed — kept until Phase 8 deletes them.
-const CRAFT_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  forge:   '#c8b498', // warm cinder ash
-  tannery: '#c0a070', // tanned leather
-  textile: '#cca870', // undyed linen
-  potters: '#c8906a', // terracotta clay
-  mill:    '#b8b0a0', // millstone grey
-};
-// Per-role building fill palettes (three shades, cycled like standard grey).
-const CRAFT_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  forge:   ['#d8c8a0', '#c8b890', '#b8a880'],
-  tannery: ['#d0b080', '#c0a070', '#b09060'],
-  textile: ['#d8b888', '#c8a878', '#b89868'],
-  potters: ['#d8a888', '#c89878', '#b88868'],
-  mill:    ['#c8c0b0', '#b8b0a0', '#a8a090'],
-};
-// Per-role building outline ink (darker / role-tinted).
-const CRAFT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  forge:   '#2a1a0a',
-  tannery: '#3a1808',
-  textile: '#382010',
-  potters: '#3a1808',
-  mill:    '#202018',
-};
-
-// ── Scholarship / Faith / Health district colours ───────────────────────────
-// Light reddish, pink, and violet palette — distinct from the warm earthy
-// craft palette. necropolis and plague_ward are exterior-only (not in
-// PACKING_ROLES), so they appear only as block background fills with no
-// building packing on top.
-const SFH_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  temple_quarter:  '#d4b4d8', // soft lavender   — faith
-  necropolis:      '#c4b8d0', // muted grey-violet — solemn burial ground
-  academia:        '#bcc0e4', // periwinkle        — scholarly
-  plague_ward:     '#e8b8bc', // rose pink         — medical / quarantine
-  archive_quarter: '#d4b4d4', // dusty rose-violet — archival
-};
-// Per-role building fill palettes for interior SFH districts.
-const SFH_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  temple_quarter:  ['#d0acd4', '#c09cc4', '#b08cb4'],
-  academia:        ['#b8bce0', '#a8acd0', '#989cc0'],
-  archive_quarter: ['#d0acd0', '#c09cc0', '#b08cb0'],
-};
-// Per-role building outline ink (darker / role-tinted).
-const SFH_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  temple_quarter:  '#280838',
-  academia:        '#080830',
-  archive_quarter: '#250825',
-};
-
-// ── Military & security district colours ────────────────────────────────────
-// Army-green / camouflage family, visually distinct from the SFH lavender/
-// periwinkle/rose palette and the craft warm-earth palette. Each of the four
-// roles gets a distinct hue inside the green-khaki-olive-drab band so adjacent
-// military blocks still read as separate districts.
-const MILITARY_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  barracks:          '#8a9a5a', // olive drab        — infantry quarters
-  citadel:           '#4a5a3a', // deep forest green — fortified inner keep
-  arsenal:           '#6a7a4a', // field green       — powder magazines
-  watchmen_precinct: '#a8b088', // khaki / light camo — utility watch posts
-};
-const MILITARY_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  barracks:          ['#7a8a4a', '#6a7a3a', '#5a6a2a'],
-  citadel:           ['#3e4e30', '#324228', '#263620'],
-  arsenal:           ['#5a6a3a', '#4a5a2a', '#3a4a1a'],
-  watchmen_precinct: ['#98a078', '#889068', '#788058'],
-};
-const MILITARY_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  barracks:          '#20280a',
-  citadel:           '#101808',
-  arsenal:           '#181c08',
-  watchmen_precinct: '#2a2e18',
-};
-
-// ── Trade & finance district colours ────────────────────────────────────────
-// Light-yellow / golden family — visually distinct from craft browns, SFH
-// violets/pinks, and military greens. Foreign quarter leans exotic gold,
-// caravanserai leans sand/tan, bankers_row is the richest deep gold
-// (counting houses flaunt wealth), warehouse_row is the palest wheat yellow.
-const TRADE_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  foreign_quarter: '#ecd898', // pale exotic gold
-  caravanserai:    '#e4c878', // sand / tan gold
-  bankers_row:     '#d4ae40', // rich deep gold
-  warehouse_row:   '#ecdca0', // pale wheat yellow
-};
-const TRADE_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  foreign_quarter: ['#e8d088', '#d8c078', '#c8b068'],
-  caravanserai:    ['#dcc070', '#ccb060', '#bca050'],
-  bankers_row:     ['#d0a838', '#c09828', '#b08818'],
-  warehouse_row:   ['#e8d490', '#d8c480', '#c8b470'],
-};
-const TRADE_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  foreign_quarter: '#3a2a08',
-  caravanserai:    '#3a2808',
-  bankers_row:     '#3a2000',
-  warehouse_row:   '#3a2a08',
-};
-
-// ── Entertainment & social district colours ─────────────────────────────────
-// Light orange and pumpkin family — visually distinct from craft browns, SFH
-// violets/pinks, military greens, and trade golds. Theater is the brightest
-// light orange (theatrical), bathhouse leans pale peach (mild / aquatic),
-// pleasure_quarter is vivid pumpkin (sin-quarter), festival_grounds is a warm
-// orange-tan (earthy fairground). festival_grounds is exterior-only (not in
-// PACKING_ROLES), so it appears only as a block background fill with no
-// building packing on top — same precedent as necropolis / plague_ward.
-const ENTERTAINMENT_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  theater_district:  '#f4b878',
-  bathhouse_quarter: '#f4c8a4',
-  pleasure_quarter:  '#e08540',
-  festival_grounds:  '#e8a868',
-};
-const ENTERTAINMENT_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  theater_district:  ['#f0a868', '#e09858', '#d08848'],
-  bathhouse_quarter: ['#f0bc94', '#e0ac84', '#d09c74'],
-  pleasure_quarter:  ['#d87838', '#c86828', '#b85818'],
-};
-const ENTERTAINMENT_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  theater_district:  '#3a1a00',
-  bathhouse_quarter: '#3a2208',
-  pleasure_quarter:  '#3a1000',
-};
-
-// ── Excluded / outcast district colours ─────────────────────────────────────
-// Deep grey / silver family — visually distinct from every other family
-// (craft browns, SFH violets/pinks, military greens, trade golds, entertainment
-// oranges). Ghetto leans cool slate (walled enclave), workhouse leans light
-// silver (institutional stone), gallows_hill is deep charcoal (somber
-// execution ground). gallows_hill is exterior-only (not in PACKING_ROLES),
-// so it appears only as a block background fill with no building packing on
-// top — same precedent as necropolis / plague_ward / festival_grounds.
-const EXCLUDED_BG_FILL: Partial<Record<DistrictRole, string>> = {
-  ghetto:       '#9098a4',
-  workhouse:    '#b0b4bc',
-  gallows_hill: '#5c5e68',
-};
-const EXCLUDED_BUILDING_FILLS: Partial<Record<DistrictRole, readonly string[]>> = {
-  ghetto:    ['#b8bcc4', '#a8acb4', '#989ca4'],
-  workhouse: ['#c8ccd4', '#b8bcc4', '#a8acb0'],
-};
-const EXCLUDED_BUILDING_INK: Partial<Record<DistrictRole, string>> = {
-  ghetto:    '#1a1c22',
-  workhouse: '#1a1c22',
 };
 
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
@@ -1140,46 +965,21 @@ function drawBuildings(
 ): void {
   if (data.buildings.length === 0) return;
 
-  // Build a polygon-id → block role map so we can apply per-craft-role ink.
-  // Phase 7: role is now DistrictType (coarse); fine-grained CRAFT_BUILDING_FILLS
-  // lookups return undefined for the new keys — buildings fall back to the
-  // default cream fill. Phase 8 adds DistrictType-specific building palettes.
-  const polygonRole = new Map<number, string>();
-  for (const block of data.blocks as CityBlockNewV2[]) {
-    for (const pid of block.polygonIds) polygonRole.set(pid, block.role);
-  }
-
   const fillRng = seededPRNG(`${seed}_city_${cityName}_buildings_render`);
   ctx.lineWidth = BUILDING_STROKE_WIDTH;
   ctx.lineJoin = 'round';
 
-  for (const b of data.buildings as CityBuildingV2[]) {
+  for (const b of data.buildings) {
     if (b.vertices.length < 3) continue;
     // Advance the non-ruin fill stream even when collapsing so the stream
     // position matches non-ruin runs up to any survivor.
     const fillIdx = Math.floor(fillRng() * BUILDING_FILLS.length);
     if (ruinRng && ruinRng() < RUIN_BUILDING_COLLAPSE_PROB) continue;
 
-    // Resolve per-role colors — craft & industry first, then SFH, then
-    // military, then trade & finance. Phase 7: `role` is now a coarse
-    // DistrictType string; these Partial<Record<DistrictRole,...>> tables
-    // return undefined for the new keys so buildings fall back to cream.
-    // Phase 8 adds DistrictType-keyed palettes.
-    const role = polygonRole.get(b.polygonId) as DistrictRole | undefined;
-    const craftFills = role
-      ? (CRAFT_BUILDING_FILLS[role] ?? SFH_BUILDING_FILLS[role] ?? MILITARY_BUILDING_FILLS[role] ?? TRADE_BUILDING_FILLS[role] ?? ENTERTAINMENT_BUILDING_FILLS[role] ?? EXCLUDED_BUILDING_FILLS[role])
-      : undefined;
-    const craftInk   = role
-      ? (CRAFT_BUILDING_INK[role]   ?? SFH_BUILDING_INK[role]   ?? MILITARY_BUILDING_INK[role]   ?? TRADE_BUILDING_INK[role]   ?? ENTERTAINMENT_BUILDING_INK[role]   ?? EXCLUDED_BUILDING_INK[role])
-      : undefined;
-
     traceClosedRing(ctx, b.vertices);
     if (ruinRng) {
       ctx.fillStyle   = RUIN_BUILDING_FILL;
       ctx.strokeStyle = RUIN_BUILDING_OUTLINE;
-    } else if (craftFills && craftInk) {
-      ctx.fillStyle   = craftFills[fillIdx % craftFills.length];
-      ctx.strokeStyle = craftInk;
     } else {
       ctx.fillStyle   = BUILDING_FILLS[fillIdx];
       ctx.strokeStyle = BUILDING_OUTLINE;
@@ -1210,7 +1010,7 @@ function drawSprawl(
   ctx.lineWidth = SPRAWL_STROKE_WIDTH;
   ctx.lineJoin = 'round';
 
-  for (const b of data.sprawlBuildings as CityBuildingV2[]) {
+  for (const b of data.sprawlBuildings) {
     if (b.vertices.length < 3) continue;
     if (ruinRng && ruinRng() < RUIN_SPRAWL_COLLAPSE_PROB) continue;
     traceClosedRing(ctx, b.vertices);
@@ -1330,15 +1130,6 @@ function drawRuinOvergrowth(
   }
 }
 
-// Phase 7: drawOpenSpaces and fillOpenSpaceKind are deleted here — park /
-// market / civic_square fills are now rendered by drawLandmarkFills() using
-// the unified LandmarkV2 data. Phase 8 was the original schedule for this
-// deletion, but since the functions reference data.openSpaces (which was
-// removed from the type in Phase 7), they were removed here to avoid a
-// compile error. The generation-side openSpaces variable (in
-// cityMapGeneratorV2.ts) is kept internally for the legacy craft-role
-// assignment functions until Phase 8.
-
 // [Voronoi-polygon] Trace a raw vertex array as a closed ring. Used for
 // building / sprawl footprints whose vertices come directly from the
 // generator (not wrapped in a CityPolygon).
@@ -1414,7 +1205,7 @@ function drawOutlinedText(
 // those polygons get the cream base and the glyph drawn on top.
 function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.landmarks.length === 0) return;
-  for (const lm of data.landmarks as LandmarkV2[]) {
+  for (const lm of data.landmarks) {
     if (lm.kind === 'civic_square') {
       const polygon = data.polygons[lm.polygonId];
       if (!polygon || polygon.vertices.length < 3) continue;
@@ -1471,7 +1262,7 @@ function drawLandmarks(
   if (data.landmarks.length === 0) return;
 
   // ── Glyph pass ────────────────────────────────────────────────────────────
-  for (const lm of data.landmarks as LandmarkV2[]) {
+  for (const lm of data.landmarks) {
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
     const sz = landmarkGlyphSize(polygon);
@@ -1493,7 +1284,7 @@ function drawLandmarks(
   // ── Scatter pass: market stalls ──────────────────────────────────────────
   const stallRng = seededPRNG(`${seed}_city_${cityName}_landmarks_render_markets`);
   ctx.fillStyle = MARKET_STALL_INK;
-  for (const lm of data.landmarks as LandmarkV2[]) {
+  for (const lm of data.landmarks) {
     if (lm.kind !== 'market') continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon || polygon.vertices.length < 3) continue;
@@ -1512,7 +1303,7 @@ function drawLandmarks(
   ctx.fillStyle = PARK_TREE_FILL;
   ctx.strokeStyle = PARK_TREE_STROKE;
   ctx.lineWidth = 0.75;
-  for (const lm of data.landmarks as LandmarkV2[]) {
+  for (const lm of data.landmarks) {
     if (lm.kind !== 'park') continue;
     const pids = lm.polygonIds ?? [lm.polygonId];
     for (const pid of pids) {
@@ -1533,7 +1324,7 @@ function drawLandmarks(
   // ── Label pass ────────────────────────────────────────────────────────────
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (const lm of data.landmarks as LandmarkV2[]) {
+  for (const lm of data.landmarks) {
     if (!LANDMARK_LABEL_TYPES.has(lm.kind)) continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
@@ -1734,10 +1525,7 @@ const DISTRICT_ICON_SIZE = 16;
 const DISTRICT_ICON_BG_ALPHA = 0.85;
 
 // Icon palette: slightly lighter/brighter than the block background fills.
-// Phase 7: includes both legacy DistrictRole keys (kept for Phase 8 cleanup)
-// and new coarse DistrictType keys introduced by the Phase 7 block promotion.
-const DISTRICT_ICON_PALETTE: Partial<Record<string, [fill: string, ink: string]>> = {
-  // DistrictType keys (Phase 7) — coarse roles from CityBlockNewV2
+const DISTRICT_ICON_PALETTE: Partial<Record<DistrictType, [fill: string, ink: string]>> = {
   civic:              ['#f0e8d8', '#3a2810'],
   market:             ['#f8eebc', '#5a3000'],
   harbor:             ['#b8d4e8', '#1a3858'],
@@ -1749,40 +1537,11 @@ const DISTRICT_ICON_PALETTE: Partial<Record<string, [fill: string, ink: string]>
   military:           ['#b0c078', '#20280a'],
   trade:              ['#f4e4ac', '#3a2a08'],
   entertainment:      ['#f8c890', '#3a1a00'],
-  // Legacy DistrictRole keys — still present until Phase 8 deletes them.
-  residential:        ['#ece4d4', '#3a2810'],
-  forge:              ['#dcc8a8', '#2a1a0a'],
-  tannery:            ['#d0b888', '#3a1808'],
-  textile:            ['#dcc898', '#382010'],
-  potters:            ['#e0b090', '#3a1808'],
-  mill:               ['#ccc8b8', '#202018'],
-  temple_quarter:     ['#e8cce8', '#280838'],
-  necropolis:         ['#d8cce0', '#201828'],
-  academia:           ['#ccd0f0', '#080830'],
-  plague_ward:        ['#f4ccd0', '#380820'],
-  archive_quarter:    ['#e8cce4', '#250825'],
-  barracks:           ['#b0c078', '#20280a'],
-  citadel:            ['#7a9060', '#101808'],
-  arsenal:            ['#98b070', '#181c08'],
-  watchmen_precinct:  ['#ccd8a8', '#2a2e18'],
-  foreign_quarter:    ['#f4e4ac', '#3a2a08'],
-  caravanserai:       ['#ecd488', '#3a2808'],
-  bankers_row:        ['#f0c850', '#3a2000'],
-  warehouse_row:      ['#f4e8b0', '#3a2a08'],
-  theater_district:   ['#f8c890', '#3a1a00'],
-  bathhouse_quarter:  ['#f8d8b8', '#3a2208'],
-  pleasure_quarter:   ['#f09058', '#3a1000'],
-  ghetto:             ['#c8ccd4', '#1a1c22'],
-  workhouse:          ['#d8dce4', '#1a1c22'],
 };
 
 // Roles that do not receive a district icon (exterior / outcast ground).
-// Phase 7: broadened to string so both DistrictRole and DistrictType values
-// can be compared; Phase 8 removes the DistrictRole side.
-const NO_DISTRICT_ICON: ReadonlySet<string> = new Set([
+const NO_DISTRICT_ICON: ReadonlySet<DistrictType> = new Set<DistrictType>([
   'slum', 'agricultural', 'dock', 'excluded',
-  // Legacy DistrictRole equivalents kept until Phase 8:
-  'festival_grounds', 'gallows_hill',
 ]);
 
 // [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
@@ -1804,9 +1563,9 @@ function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
   if (data.blocks.length === 0) return;
 
   // Set of polygons that host a landmark — skip those blocks.
-  const landmarkPolygons = new Set((data.landmarks as LandmarkV2[]).map(lm => lm.polygonId));
+  const landmarkPolygons = new Set((data.landmarks).map(lm => lm.polygonId));
 
-  for (const block of data.blocks as CityBlockNewV2[]) {
+  for (const block of data.blocks) {
     if (NO_DISTRICT_ICON.has(block.role)) continue;
     const palette = DISTRICT_ICON_PALETTE[block.role];
     if (!palette) continue;
