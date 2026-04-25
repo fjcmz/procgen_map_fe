@@ -28,6 +28,7 @@ import type {
 } from './cityMapTypesV2';
 import type { WallGenerationResult } from './cityMapWalls';
 import type { PolygonEdgeGraph } from './cityMapEdgeGraph';
+import { placeNamedLandmarks as placeNamedLandmarksImpl } from './cityMapLandmarksNamed';
 
 export type AlignmentGroup =
   | 'named'
@@ -101,8 +102,11 @@ export interface PlacerContext {
 // Each placer is responsible for adding its own polygon ids to `used` before
 // returning so later passes don't double-claim.
 
-function placeNamedLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
+// Phase 3 of specs/City_districts_redux.md — wonder/palace/castle/civic_square/
+// temple/market/park placers, anchored geometrically to the candidate pool with
+// no block-role dependency. Implementation lives in `cityMapLandmarksNamed.ts`.
+function placeNamedLandmarks(ctx: PlacerContext, used: Set<number>): LandmarkV2[] {
+  return placeNamedLandmarksImpl(ctx, used);
 }
 
 function placeIndustrialLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
