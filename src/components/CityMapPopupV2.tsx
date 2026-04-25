@@ -12,8 +12,8 @@ interface CityMapPopupV2Props {
 }
 
 // Mirrors NO_LABEL_ROLES in cityMapGeneratorV2.ts — roles excluded from labels.
-const NO_LABEL_ROLES = new Set([
-  'slum', 'agricultural', 'dock', 'festival_grounds', 'gallows_hill',
+const NO_LABEL_ROLES = new Set<string>([
+  'slum', 'agricultural', 'dock', 'excluded',
 ]);
 
 // Emoji icon + human-readable label for every district role.
@@ -70,10 +70,10 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
   // polygonId → { name, role } for labeled blocks only.
-  const polygonToLabelRef = useRef(new Map<number, { name: string; role: DistrictRole }>());
+  const polygonToLabelRef = useRef(new Map<number, { name: string; role: string }>());
   const [showIcons, setShowIcons] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
-  const [tooltip, setTooltip] = useState<{ name: string; role: DistrictRole; x: number; y: number } | null>(null);
+  const [tooltip, setTooltip] = useState<{ name: string; role: string; x: number; y: number } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Generate + render whenever inputs change.
@@ -99,7 +99,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     mapDataRef.current = data;
 
     // Build polygon → { name, role } index for hover hit-testing.
-    const pMap = new Map<number, { name: string; role: DistrictRole }>();
+    const pMap = new Map<number, { name: string; role: string }>();
     const landmarkPids = new Set(data.landmarks.map(lm => lm.polygonId));
     for (const block of data.blocks) {
       if (NO_LABEL_ROLES.has(block.role)) continue;
@@ -143,7 +143,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   }, []);
 
   // Return the district info under the given client position, or null.
-  const hitTest = useCallback((clientX: number, clientY: number): { name: string; role: DistrictRole } | null => {
+  const hitTest = useCallback((clientX: number, clientY: number): { name: string; role: string } | null => {
     const coords = toCanvasCoords(clientX, clientY);
     if (!coords) return null;
     const data = mapDataRef.current;
@@ -186,7 +186,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   if (!isOpen) return null;
 
-  const roleInfo = tooltip ? DISTRICT_ROLE_INFO[tooltip.role as DistrictRole] : null;
+  const roleInfo = tooltip ? (DISTRICT_ROLE_INFO[tooltip.role as DistrictRole] ?? null) : null;
 
   return createPortal(
     <>

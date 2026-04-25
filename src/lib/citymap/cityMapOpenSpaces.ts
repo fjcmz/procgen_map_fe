@@ -51,7 +51,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { seededPRNG } from '../terrain/noise';
-import type { CityEnvironment, CityMapDataV2, CityPolygon } from './cityMapTypesV2';
+import type { CityEnvironment, CityPolygon } from './cityMapTypesV2';
 import type { CitySize } from './cityMapTypesV2';
 import { canonicalEdgeKey, type Point } from './cityMapEdgeGraph';
 import type { WallGenerationResult } from './cityMapWalls';
@@ -87,7 +87,7 @@ const PARK_MAX_POLYGONS: Record<CitySize, number> = {
   megalopolis: 3,
 };
 
-export type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+export type OpenSpaceEntry = { kind: 'square' | 'market' | 'park'; polygonIds: number[] };
 
 /**
  * Generate the city's open spaces (squares + markets + parks).

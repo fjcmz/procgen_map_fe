@@ -54,12 +54,11 @@ import type {
   CityBlockV2,
   CityEnvironment,
   CityLandmarkV2,
-  CityMapDataV2,
   CityPolygon,
 } from './cityMapTypesV2';
 import type { CitySize } from './cityMapTypesV2';
 
-type OpenSpaceEntry = CityMapDataV2['openSpaces'][number];
+import type { OpenSpaceEntry } from './cityMapOpenSpaces';
 
 // Which size tiers receive BOTH castle and palace on capital cities.
 const CAPITAL_LARGE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
