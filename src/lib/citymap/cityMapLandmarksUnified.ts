@@ -28,7 +28,16 @@ import type {
 } from './cityMapTypesV2';
 import type { WallGenerationResult } from './cityMapWalls';
 import type { PolygonEdgeGraph } from './cityMapEdgeGraph';
+import type { RiverGenerationResult } from './cityMapRiver';
 import { placeNamedLandmarks as placeNamedLandmarksImpl } from './cityMapLandmarksNamed';
+import {
+  placeIndustrialLandmarks as placeIndustrialLandmarksImpl,
+  placeMilitaryLandmarks as placeMilitaryLandmarksImpl,
+  placeFaithAuxLandmarks as placeFaithAuxLandmarksImpl,
+  placeEntertainmentLandmarks as placeEntertainmentLandmarksImpl,
+  placeTradeLandmarks as placeTradeLandmarksImpl,
+  placeExcludedLandmarks as placeExcludedLandmarksImpl,
+} from './cityMapLandmarksQuarters';
 
 export type AlignmentGroup =
   | 'named'
@@ -96,47 +105,26 @@ export interface PlacerContext {
   edgeGraph: PolygonEdgeGraph;
   waterPolygonIds: Set<number>;
   mountainPolygonIds: Set<number>;
+  /**
+   * River strand consumed by Phase 4's industrial placer for mill / tannery /
+   * textile river-adjacency. `null` when `!env.hasRiver` or the river graph
+   * was too small to route. Phase 3's named placers do not need this field —
+   * they only consult the candidate pool and the wall geometry.
+   */
+  river: RiverGenerationResult | null;
 }
 
-// Phase 2 placer stubs — empty arrays, no RNG, no candidate-pool reads.
-// Each placer is responsible for adding its own polygon ids to `used` before
-// returning so later passes don't double-claim.
-
-// Phase 3 of specs/City_districts_redux.md — wonder/palace/castle/civic_square/
-// temple/market/park placers, anchored geometrically to the candidate pool with
-// no block-role dependency. Implementation lives in `cityMapLandmarksNamed.ts`.
+// Phase 3 named placer dispatch — implementation in `cityMapLandmarksNamed.ts`.
 function placeNamedLandmarks(ctx: PlacerContext, used: Set<number>): LandmarkV2[] {
   return placeNamedLandmarksImpl(ctx, used);
 }
 
-function placeIndustrialLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
-function placeMilitaryLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
-function placeFaithAuxLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
-function placeEntertainmentLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
-function placeTradeLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
-function placeExcludedLandmarks(_ctx: PlacerContext, _used: Set<number>): LandmarkV2[] {
-  return [];
-}
-
 /**
- * Phase 2 entry point. Calls every group placer in fixed order, threading a
- * shared `used: Set<number>` for cross-placer de-duplication. Returns the
- * concatenation of all placer outputs — always `[]` in Phase 2.
+ * Phase 4 entry point. Calls every group placer in fixed order, threading a
+ * shared `used: Set<number>` for cross-placer de-duplication. Phase 3's named
+ * output is captured first and forwarded to every Phase 4 group placer as
+ * `placedNamed` so they can compute templeBoost / marketBoost / monumentBoost
+ * against the actual Phase 3 picks (not legacy `openSpaces` / `landmarks`).
  *
  * Order: named → industrial → military → faith_aux → entertainment → trade
  *        → excluded.
@@ -147,13 +135,14 @@ function placeExcludedLandmarks(_ctx: PlacerContext, _used: Set<number>): Landma
  */
 export function placeUnifiedLandmarks(ctx: PlacerContext): LandmarkV2[] {
   const used = new Set<number>();
+  const named = placeNamedLandmarks(ctx, used);
   return [
-    ...placeNamedLandmarks(ctx, used),
-    ...placeIndustrialLandmarks(ctx, used),
-    ...placeMilitaryLandmarks(ctx, used),
-    ...placeFaithAuxLandmarks(ctx, used),
-    ...placeEntertainmentLandmarks(ctx, used),
-    ...placeTradeLandmarks(ctx, used),
-    ...placeExcludedLandmarks(ctx, used),
+    ...named,
+    ...placeIndustrialLandmarksImpl(ctx, used, named),
+    ...placeMilitaryLandmarksImpl(ctx, used, named),
+    ...placeFaithAuxLandmarksImpl(ctx, used, named),
+    ...placeEntertainmentLandmarksImpl(ctx, used, named),
+    ...placeTradeLandmarksImpl(ctx, used, named),
+    ...placeExcludedLandmarksImpl(ctx, used, named),
   ];
 }
