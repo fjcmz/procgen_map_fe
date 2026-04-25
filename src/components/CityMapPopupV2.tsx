@@ -11,13 +11,9 @@ interface CityMapPopupV2Props {
   seed: string;
 }
 
-// Mirrors NO_LABEL_ROLES in cityMapGeneratorV2.ts — roles excluded from labels.
-const NO_LABEL_ROLES = new Set<string>([
-  'slum', 'agricultural', 'dock', 'excluded',
-]);
-
-// Emoji icon + human-readable label for every coarse district type.
-const DISTRICT_ROLE_INFO: Partial<Record<DistrictType, { icon: string; label: string }>> = {
+// Emoji icon + human-readable label for every DistrictType. Exhaustive so
+// the tooltip always has something to show for any block the user hovers.
+const DISTRICT_ROLE_INFO: Record<DistrictType, { icon: string; label: string }> = {
   civic:               { icon: '🏛',  label: 'Civic Centre' },
   market:              { icon: '🛒',  label: 'Market' },
   harbor:              { icon: '⚓',  label: 'Harbour' },
@@ -26,7 +22,7 @@ const DISTRICT_ROLE_INFO: Partial<Record<DistrictType, { icon: string; label: st
   residential_low:     { icon: '🏚',  label: 'Poor Residential' },
   agricultural:        { icon: '🌾',  label: 'Fields' },
   slum:                { icon: '🏚',  label: 'Slums' },
-  dock:                { icon: '⚓',  label: 'Docks' },
+  dock:                { icon: '⛵',  label: 'Docks' },
   industry:            { icon: '⚒️',  label: 'Industry Quarter' },
   education_faith:     { icon: '⛪',  label: 'Education & Faith' },
   military:            { icon: '⚔️',  label: 'Military Quarter' },
@@ -82,11 +78,11 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     mapDataRef.current = data;
 
     // Build polygon → { name, role } index for hover hit-testing.
+    // Index every block (including slum / agricultural / dock / excluded and
+    // landmark-hosting blocks) so the tooltip can describe any quarter the
+    // user hovers — independent of which roles get on-canvas labels.
     const pMap = new Map<number, { name: string; role: string }>();
-    const landmarkPids = new Set(data.landmarks.map(lm => lm.polygonId));
     for (const block of data.blocks) {
-      if (NO_LABEL_ROLES.has(block.role)) continue;
-      if (block.polygonIds.some(pid => landmarkPids.has(pid))) continue;
       const entry = { name: block.name, role: block.role };
       for (const pid of block.polygonIds) pMap.set(pid, entry);
     }

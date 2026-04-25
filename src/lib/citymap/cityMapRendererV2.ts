@@ -335,10 +335,12 @@ export function renderCityMapV2(
   // ── Layer 10: buildings (PR 5 slice) ───────────────────────────────────
   drawBuildings(ctx, data, seed, cityName, ruinRng);
 
-  // ── Layer 12: landmark glyphs + scatter + labels (Phase 7) ─────────────
+  // ── Layer 12: landmark glyphs + scatter (Phase 7) ──────────────────────
   // Glyphs (castle/palace/temple/monument/wonder) + market-stall/park-tree
-  // scatter + name labels. Drawn after buildings so glyphs sit on top.
-  if (showIcons) drawLandmarks(ctx, data, seed, cityName);
+  // scatter. Drawn after buildings so glyphs sit on top. Landmark name
+  // labels are drawn later under `showLabels` (Layer 13.5) so the Icons /
+  // Labels checkboxes are independent.
+  if (showIcons) drawLandmarkGlyphs(ctx, data, seed, cityName);
 
   // ── Layer 12.5: district icons — small role glyphs at block centroids ──
   if (showIcons) drawDistrictIcons(ctx, data);
@@ -381,20 +383,25 @@ export function renderCityMapV2(
     drawRuinOvergrowth(ctx, data, env, ruinRng);
   }
 
-  // ── Layer 13: district labels (PR 5 slice) ───────────────────────────────
-  // Drawn after all infrastructure so labels sit on top and remain readable.
-  if (showLabels) drawDistrictLabels(ctx, data);
+  // ── Layer 13: district labels + landmark labels + city name ────────────
+  // All text labels (district names, landmark names, city name, V2 tag) are
+  // gated together by `showLabels` so the Labels checkbox in the popup hides
+  // every label at once — independent of the Icons checkbox above.
+  if (showLabels) {
+    drawDistrictLabels(ctx, data);
+    drawLandmarkLabels(ctx, data);
 
-  // ── Layer 14: city name + V2 QA tag ─────────────────────────────────────
-  ctx.font = 'bold 22px Georgia, serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  drawOutlinedText(ctx, cityName, size / 2, 16, 3);
+    // ── Layer 14: city name + V2 QA tag ──────────────────────────────────
+    ctx.font = 'bold 22px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    drawOutlinedText(ctx, cityName, size / 2, 16, 3);
 
-  ctx.font = '10px Georgia, serif';
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  drawOutlinedText(ctx, 'V2', size - 8, size - 8, 2);
+    ctx.font = '10px Georgia, serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    drawOutlinedText(ctx, 'V2', size - 8, size - 8, 2);
+  }
 }
 
 // [Voronoi-polygon] Fill every water polygon with a light-blue sea colour
@@ -1241,11 +1248,11 @@ function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
   }
 }
 
-// [Voronoi-polygon] Phase 7 cutover: render all LandmarkV2 entries — glyphs
-// (castle/palace/temple/monument/wonder), Phase 4 quarter glyphs (forge,
-// barracks, temple_quarter, foreign_quarter, …) anchored to each landmark's
-// polygon site via `drawDistrictGlyph`, scatter decorations (market stalls,
-// park trees), and name labels (castle/palace/wonder/park/market).
+// [Voronoi-polygon] Phase 7 cutover: render LandmarkV2 glyphs and scatter —
+// glyphs (castle/palace/temple/monument/wonder), Phase 4 quarter glyphs
+// (forge, barracks, temple_quarter, foreign_quarter, …) anchored to each
+// landmark's polygon site via `drawDistrictGlyph`, plus scatter decorations
+// (market stalls, park trees).
 //
 // Quarters reuse the white-disc + role-icon style of `drawDistrictGlyph` so
 // they read the same as the block-level fallback that `drawDistrictIcons`
@@ -1253,11 +1260,14 @@ function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
 // host a landmark, so the quarter glyph stands in for the block icon at the
 // landmark's specific polygon.
 //
+// Name labels are split into `drawLandmarkLabels` so the popup's `Icons` and
+// `Labels` checkboxes can toggle them independently.
+//
 // RNG sub-streams `_landmarks_render_markets` and `_landmarks_render_parks`
 // are distinct from the old `_openspaces_render_*` streams (iteration order
 // may differ after Phase 7 promotion) so re-rendering is byte-stable per
 // city without re-running the generator.
-function drawLandmarks(
+function drawLandmarkGlyphs(
   ctx: CanvasRenderingContext2D,
   data: CityMapDataV2,
   seed: string,
@@ -1331,8 +1341,14 @@ function drawLandmarks(
       }
     }
   }
+}
 
-  // ── Label pass ────────────────────────────────────────────────────────────
+// [Voronoi-polygon] Render the name label below each labelled landmark
+// (castle / palace / wonder / park / market — see `LANDMARK_LABEL_TYPES`).
+// Split out from `drawLandmarkGlyphs` so the popup's Labels checkbox can
+// toggle these independently of the icon glyphs.
+function drawLandmarkLabels(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (data.landmarks.length === 0) return;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   for (const lm of data.landmarks) {

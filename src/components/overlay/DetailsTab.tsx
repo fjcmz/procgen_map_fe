@@ -1164,75 +1164,46 @@ function EventRow({ event, startOfTime, convertYears }: { event: HistoryEvent; s
 }
 
 // ── Quarters List ──
+//
+// Block roles emitted by `cityMapBlocks.ts` are exactly the 15 `DistrictType`
+// values from `cityMapTypesV2.ts`. The two maps below cover all of them so
+// every quarter in the Details tab gets an icon and a readable label —
+// matching the tooltip mapping in `CityMapPopupV2.tsx::DISTRICT_ROLE_INFO`.
 
 const QUARTER_ICONS: Record<string, string> = {
-  civic: '\u{1F3DB}',           // 🏛 classical building
-  market: '⚖',             // ⚖ balance scales
-  harbor: '⚓',             // ⚓ anchor
-  residential: '\u{1F3E0}',     // 🏠 house
-  agricultural: '\u{1F33E}',    // 🌾 sheaf
-  slum: '\u{1F3DA}',            // 🏚 derelict house
-  dock: '⛵',               // ⛵ sailboat
-  forge: '\u{1F528}',           // 🔨 hammer
-  tannery: '\u{1F6E1}',         // 🛡 shield (leather)
-  textile: '\u{1F9F5}',         // 🧵 thread
-  potters: '\u{1F3FA}',         // 🏺 amphora
-  mill: '⚙',               // ⚙ gear
-  temple_quarter: '⛩',     // ⛩ shinto shrine
-  necropolis: '⚰',         // ⚰ coffin
-  academia: '\u{1F4DA}',        // 📚 books
-  plague_ward: '⚕',        // ⚕ medical
-  archive_quarter: '\u{1F4DC}', // 📜 scroll
-  foreign_quarter: '\u{1F3F4}', // 🏴 flag (foreign banner)
-  caravanserai: '\u{1F42A}',    // 🐪 camel
-  bankers_row: '\u{1F4B0}',     // 💰 money bag
-  warehouse_row: '\u{1F4E6}',   // 📦 package
-  barracks: '⚔',           // ⚔ crossed swords
-  citadel: '\u{1F3F0}',         // 🏰 castle
-  arsenal: '⚒',            // ⚒ hammer and pick
-  watchmen_precinct: '\u{1F441}', // 👁 eye
-  theater_district: '\u{1F3AD}',  // 🎭 performing arts
-  bathhouse_quarter: '\u{1F6C1}', // 🛁 bathtub
-  pleasure_quarter: '\u{1F3AA}',  // 🎪 circus tent
-  festival_grounds: '\u{1F38A}',  // 🎊 confetti
-  ghetto: '\u{1F512}',          // 🔒 lock
-  workhouse: '⚒',          // ⚒ hammer and pick
-  gallows_hill: '☠',       // ☠ skull and crossbones
+  civic:              '\u{1F3DB}', // 🏛 classical building
+  market:             '\u{1F6D2}', // 🛒 shopping trolley
+  harbor:             '⚓',          // ⚓ anchor
+  residential_high:   '\u{1F3D8}', // 🏘 wealthy houses
+  residential_medium: '\u{1F3E0}', // 🏠 house
+  residential_low:    '\u{1F3DA}', // 🏚 derelict house
+  agricultural:       '\u{1F33E}', // 🌾 sheaf
+  slum:               '\u{1F3DA}', // 🏚 derelict house
+  dock:               '⛵',          // ⛵ sailboat
+  industry:           '⚒\u{FE0F}',  // ⚒️ hammer and pick
+  education_faith:    '⛪',          // ⛪ church
+  military:           '⚔\u{FE0F}',  // ⚔️ crossed swords
+  trade:              '\u{1F4B0}', // 💰 money bag
+  entertainment:      '\u{1F3AD}', // 🎭 performing arts
+  excluded:           '⚖\u{FE0F}',  // ⚖️ scales
 };
 
 const QUARTER_LABELS: Record<string, string> = {
-  civic: 'Civic',
-  market: 'Market',
-  harbor: 'Harbor',
-  residential: 'Residential',
-  agricultural: 'Agricultural',
-  slum: 'Slum',
-  dock: 'Dock',
-  forge: 'Forge',
-  tannery: 'Tannery',
-  textile: 'Textile',
-  potters: 'Potters',
-  mill: 'Mill',
-  temple_quarter: 'Temple',
-  necropolis: 'Necropolis',
-  academia: 'Academia',
-  plague_ward: 'Plague Ward',
-  archive_quarter: 'Archive',
-  foreign_quarter: 'Foreign Quarter',
-  caravanserai: 'Caravanserai',
-  bankers_row: 'Bankers Row',
-  warehouse_row: 'Warehouse Row',
-  barracks: 'Barracks',
-  citadel: 'Citadel',
-  arsenal: 'Arsenal',
-  watchmen_precinct: 'Watchmen',
-  theater_district: 'Theater',
-  bathhouse_quarter: 'Bathhouse',
-  pleasure_quarter: 'Pleasure',
-  festival_grounds: 'Festival Grounds',
-  ghetto: 'Ghetto',
-  workhouse: 'Workhouse',
-  gallows_hill: 'Gallows Hill',
+  civic:              'Civic Centre',
+  market:             'Market',
+  harbor:             'Harbour',
+  residential_high:   'Wealthy Residential',
+  residential_medium: 'Residential',
+  residential_low:    'Poor Residential',
+  agricultural:       'Fields',
+  slum:               'Slums',
+  dock:               'Docks',
+  industry:           'Industry Quarter',
+  education_faith:    'Education & Faith',
+  military:           'Military Quarter',
+  trade:              'Trade Quarter',
+  entertainment:      'Entertainment Quarter',
+  excluded:           'Excluded Zone',
 };
 
 function QuartersList({ counts }: { counts: Record<string, number> }) {
