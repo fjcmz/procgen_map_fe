@@ -366,6 +366,19 @@ export function placeNamedLandmarks(
   const usedNames = new Set<string>();
   const namesRng = seededPRNG(`${seed}_city_${cityName}_unified_named_names`);
 
+  // [Voronoi-polygon] Interior-only subset of the candidate pool. Parks,
+  // markets, temples, castles, and palaces must always land inside the city
+  // footprint (`wall.interiorPolygonIds`) — the 5-hop boundary band is
+  // reserved for civic_square / wonder (which don't restrict here, the
+  // center-bias keeps them interior-leaning) and the Phase 4 quarter placers.
+  // Falls back to the full candidate pool if the footprint is degenerate so
+  // we don't silently produce zero named landmarks.
+  const interiorPool = new Set<number>();
+  for (const pid of candidatePool) {
+    if (wall.interiorPolygonIds.has(pid)) interiorPool.add(pid);
+  }
+  const insidePool = interiorPool.size > 0 ? interiorPool : candidatePool;
+
   // Tracks polygons placed in this group, by kind, for amenity-adjacency
   // bonuses (palace prefers neighbors of civic_square/wonder/castle/palace).
   const placedByKind: Partial<Record<LandmarkKind, number[]>> = {};
@@ -476,7 +489,7 @@ export function placeNamedLandmarks(
     const placedCastleSites: [number, number][] = [];
 
     for (let c = 0; c < castleCount; c++) {
-      const pool = eligible(candidatePool, used);
+      const pool = eligible(insidePool, used);
       if (pool.length === 0) break;
 
       let chosen = -1;
@@ -547,7 +560,7 @@ export function placeNamedLandmarks(
 
     const placedPalaceIds: number[] = [];
     for (let p = 0; p < palaceCount; p++) {
-      const pool = eligible(candidatePool, used);
+      const pool = eligible(insidePool, used);
       if (pool.length === 0) break;
 
       // Build amenity preference set: civic_square + wonder + castle + palace,
@@ -591,7 +604,7 @@ export function placeNamedLandmarks(
   if (env.religionCount > 0) {
     const templeRng = seededPRNG(`${seed}_city_${cityName}_unified_named_temples`);
     for (let i = 0; i < env.religionCount; i++) {
-      const pool = eligible(candidatePool, used);
+      const pool = eligible(insidePool, used);
       if (pool.length === 0) break;
       const pid = pool[Math.floor(templeRng() * pool.length)];
       out.push({
@@ -617,7 +630,7 @@ export function placeNamedLandmarks(
     // Gate-anchored picks first.
     for (const gate of wall.gates) {
       if (placed >= target) break;
-      const pool = eligible(candidatePool, used);
+      const pool = eligible(insidePool, used);
       if (pool.length === 0) break;
       const [ga, gb] = gate.edge;
       const mid: [number, number] = [(ga[0] + gb[0]) / 2, (ga[1] + gb[1]) / 2];
@@ -636,7 +649,7 @@ export function placeNamedLandmarks(
 
     // Spread fallback for the remainder.
     while (placed < target) {
-      const pool = eligible(candidatePool, used);
+      const pool = eligible(insidePool, used);
       if (pool.length === 0) break;
       const pid = farthestPolygonBySite(pool, polygons, placedMarketSites, marketRng);
       if (pid === -1) break;
@@ -659,10 +672,10 @@ export function placeNamedLandmarks(
     const parkMaxSize = PARK_MAX_POLYGONS[env.size];
 
     for (let i = 0; i < parkTarget; i++) {
-      const seedId = pickParkSeed(candidatePool, used, polygons, parkRng);
+      const seedId = pickParkSeed(insidePool, used, polygons, parkRng);
       if (seedId === -1) break;
       const targetSize = 1 + Math.floor(parkRng() * parkMaxSize);
-      const cluster = bfsParkCluster(candidatePool, used, polygons, seedId, targetSize);
+      const cluster = bfsParkCluster(insidePool, used, polygons, seedId, targetSize);
       out.push({
         polygonId: seedId,
         kind: 'park',
