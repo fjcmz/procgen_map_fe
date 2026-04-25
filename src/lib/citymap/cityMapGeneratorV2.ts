@@ -52,6 +52,8 @@ import { generateBuildings } from './cityMapBuildings';
 import { generateSprawl } from './cityMapSprawl';
 import { generateWaterPolygons } from './cityMapWater';
 import { generateMountainPolygons } from './cityMapMountains';
+import { buildCandidatePool } from './cityMapCandidatePool';
+import { placeUnifiedLandmarks } from './cityMapLandmarksUnified';
 
 // ── Environment derivation ──
 
@@ -702,6 +704,27 @@ export function generateCityMapV2(
     wallPath as [number, number][],
   );
 
+  // Phase 2 of specs/City_districts_redux.md — write-only scaffold. Builds
+  // the interior ∪ 5-hop boundary band candidate pool and runs the unified
+  // landmark placer (empty stubs in Phase 2). Result lands in `_landmarksNew`
+  // on the return literal; the renderer ignores it. Phase 7 promotes the
+  // field over `landmarks` and Phase 8 deletes the legacy path.
+  const candidatePool = buildCandidatePool(wall, polygons, edgeGraph, {
+    waterPolygonIds,
+    mountainPolygonIds,
+  });
+  const landmarksNew = placeUnifiedLandmarks({
+    seed,
+    cityName,
+    env,
+    polygons,
+    candidatePool,
+    wall,
+    edgeGraph,
+    waterPolygonIds,
+    mountainPolygonIds,
+  });
+
   // Re-classify a seeded subset of `residential` blocks (interior) and
   // `agricultural`/`slum` blocks (exterior) as scholarship / faith / health
   // districts: temple_quarter / necropolis / academia / plague_ward /
@@ -823,6 +846,7 @@ export function generateCityMapV2(
     buildings,
     sprawlBuildings,
     landmarks,
+    _landmarksNew: landmarksNew,
     wallTowers,
     innerWallPath,
     innerGates,

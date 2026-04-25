@@ -156,6 +156,31 @@ export interface CityLandmarkV2 {
 }
 
 /**
+ * Phase 2 of specs/City_districts_redux.md — unified landmark record produced
+ * by `cityMapLandmarksUnified.ts`. Coexists with `CityLandmarkV2` until Phase
+ * 7 promotes `_landmarksNew → landmarks` and Phase 8 deletes the legacy type.
+ */
+export interface LandmarkV2 {
+  /** Anchor polygon (always present, used for label placement and BFS seeds). */
+  polygonId: number;
+  /** Full 32-kind classification — drives Phase 5 district BFS + Phase 7 labels. */
+  kind: LandmarkKind;
+  /**
+   * Display name — set by the named placers in Phase 3 (`wonder` from
+   * `env.wonderNames[i]`, others from procedural lists). Optional because
+   * Phase 4 alignment kinds (forge, barracks, etc.) get their names from
+   * the block layer in Phase 6, not from the landmark itself.
+   */
+  name?: string;
+  /**
+   * Cluster polygons for kinds that span multiple polygons (parks). Single-
+   * polygon kinds leave this undefined; consumers should treat absence as
+   * `[polygonId]`. Phase 3's park placer sets it to the BFS cluster.
+   */
+  polygonIds?: number[];
+}
+
+/**
  * Top-level V2 city-map payload. PR 1 populates ONLY `canvasSize`,
  * `polygonCount`, and `polygons` — every other field is an empty array (or
  * `null` for `river`) and will be filled in by the PR marked on each field.
@@ -236,6 +261,12 @@ export interface CityMapDataV2 {
   sprawlBuildings: CityBuildingV2[];
   // TODO PR 4: castle / palace / temple / monument placements.
   landmarks: CityLandmarkV2[];
+  /**
+   * Phase 2 of specs/City_districts_redux.md — output of the unified landmark
+   * placer (`cityMapLandmarksUnified.ts`). Empty in Phase 2 (stubs only). The
+   * renderer ignores this field until Phase 7 promotes it over `landmarks`.
+   */
+  _landmarksNew?: LandmarkV2[];
   districtLabels: { text: string; cx: number; cy: number; angle: number; fontSize: number }[];
 
   /** Vertex positions along the outer wall where towers are placed (every ~3 edges + sharp bends). */
