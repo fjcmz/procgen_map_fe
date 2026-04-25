@@ -1485,9 +1485,25 @@ function drawLandmarks(
       case 'wonder':   drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
       // park/market/civic_square fills were already drawn in drawLandmarkFills;
       // glyphs and scatter are handled in the passes below.
-      // Phase 4 quarter kinds: no dedicated glyph in Phase 7.
       default: break;
     }
+  }
+
+  // ── Quarter landmark icons ────────────────────────────────────────────────
+  // Phase 4 quarter landmark kinds (forge, barracks, temple_quarter, etc.)
+  // have no dedicated glyph shape. Draw the district-role icon at the
+  // landmark's own polygon site so each named quarter is visually marked.
+  // drawDistrictIcons skips blocks that contain landmark polygons, so this
+  // is the only place these icons are drawn.
+  for (const lm of data.landmarks as LandmarkV2[]) {
+    if (!QUARTER_LANDMARK_KINDS.has(lm.kind)) continue;
+    const polygon = data.polygons[lm.polygonId];
+    if (!polygon) continue;
+    const palette = DISTRICT_ICON_PALETTE[lm.kind];
+    if (!palette) continue;
+    const [cx, cy] = polygon.site;
+    const [fill, ink] = palette;
+    drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, lm.kind, fill, ink);
   }
 
   // ── Scatter pass: market stalls ──────────────────────────────────────────
@@ -1774,6 +1790,16 @@ const DISTRICT_ICON_PALETTE: Partial<Record<string, [fill: string, ink: string]>
   pleasure_quarter:   ['#f09058', '#3a1000'],
   ghetto:             ['#c8ccd4', '#1a1c22'],
   workhouse:          ['#d8dce4', '#1a1c22'],
+  // LandmarkKind aliases — new short names used by Phase 4 quarter landmarks.
+  // Values mirror their legacy counterparts above so DISTRICT_ICON_PALETTE can
+  // be indexed directly by lm.kind without a separate name-mapping table.
+  watchmen:           ['#ccd8a8', '#2a2e18'],
+  archive:            ['#e8cce4', '#250825'],
+  theater:            ['#f8c890', '#3a1a00'],
+  bathhouse:          ['#f8d8b8', '#3a2208'],
+  pleasure:           ['#f09058', '#3a1000'],
+  warehouse:          ['#f4e8b0', '#3a2a08'],
+  ghetto_marker:      ['#c8ccd4', '#1a1c22'],
 };
 
 // Roles that do not receive a district icon (exterior / outcast ground).
@@ -1783,6 +1809,17 @@ const NO_DISTRICT_ICON: ReadonlySet<string> = new Set([
   'slum', 'agricultural', 'dock', 'excluded',
   // Legacy DistrictRole equivalents kept until Phase 8:
   'festival_grounds', 'gallows_hill',
+]);
+
+// Phase 4 quarter landmark kinds: drawn by the quarter-icon pass in
+// drawLandmarks, NOT by drawDistrictIcons (which skips landmark-hosting blocks).
+const QUARTER_LANDMARK_KINDS: ReadonlySet<LandmarkKind> = new Set([
+  'forge', 'tannery', 'textile', 'potters', 'mill',
+  'barracks', 'citadel', 'arsenal', 'watchmen',
+  'temple_quarter', 'necropolis', 'plague_ward', 'academia', 'archive',
+  'theater', 'bathhouse', 'pleasure', 'festival',
+  'foreign_quarter', 'caravanserai', 'bankers_row', 'warehouse',
+  'gallows', 'workhouse', 'ghetto_marker',
 ]);
 
 // [Voronoi-polygon] Compute the arithmetic mean of `site` positions across
@@ -1882,20 +1919,37 @@ function drawDistrictGlyph(
     case 'necropolis':       drawNecropolisIcon(ctx, s, fill, ink); break;
     case 'academia':         drawAcademiaIcon(ctx, s, fill, ink); break;
     case 'plague_ward':      drawPlagueWardIcon(ctx, s, fill, ink); break;
-    case 'archive_quarter':  drawArchiveIcon(ctx, s, fill, ink); break;
     case 'barracks':         drawBarracksIcon(ctx, s, fill, ink); break;
     case 'citadel':          drawCitadelIcon(ctx, s, fill, ink); break;
     case 'arsenal':          drawArsenalIcon(ctx, s, fill, ink); break;
+    case 'watchmen':
     case 'watchmen_precinct': drawWatchmenIcon(ctx, s, fill, ink); break;
     case 'foreign_quarter':  drawForeignQuarterIcon(ctx, s, fill, ink); break;
     case 'caravanserai':     drawCaravanseraiIcon(ctx, s, fill, ink); break;
     case 'bankers_row':      drawBankersRowIcon(ctx, s, fill, ink); break;
+    case 'warehouse':
     case 'warehouse_row':    drawWarehouseRowIcon(ctx, s, fill, ink); break;
+    case 'theater':
     case 'theater_district':  drawTheaterIcon(ctx, s, fill, ink); break;
+    case 'bathhouse':
     case 'bathhouse_quarter': drawBathhouseIcon(ctx, s, fill, ink); break;
+    case 'pleasure':
     case 'pleasure_quarter':  drawPleasureQuarterIcon(ctx, s, fill, ink); break;
+    case 'ghetto_marker':
     case 'ghetto':            drawGhettoIcon(ctx, s, fill, ink); break;
     case 'workhouse':         drawWorkhouseIcon(ctx, s, fill, ink); break;
+    case 'archive':
+    case 'archive_quarter':  drawArchiveIcon(ctx, s, fill, ink); break;
+    // Coarse DistrictType roles — used by CityBlockNewV2 when no quarter
+    // landmark is present in the block (e.g. small cities below landmark tier).
+    case 'residential_high':
+    case 'residential_medium':
+    case 'residential_low':  drawResidentialIcon(ctx, s, fill, ink); break;
+    case 'industry':         drawForgeIcon(ctx, s, fill, ink); break;
+    case 'education_faith':  drawTempleQuarterIcon(ctx, s, fill, ink); break;
+    case 'military':         drawBarracksIcon(ctx, s, fill, ink); break;
+    case 'trade':            drawCaravanseraiIcon(ctx, s, fill, ink); break;
+    case 'entertainment':    drawTheaterIcon(ctx, s, fill, ink); break;
   }
 
   ctx.restore();
