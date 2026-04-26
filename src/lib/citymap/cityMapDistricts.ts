@@ -208,8 +208,10 @@ const DOCK_BFS_MAX_DEPTH = 2;
  * propagate. Without a cap, a single landmark in a tightly-connected interior
  * would paint every polygon in the city; the cap leaves "background"
  * polygons for the wealth-scoring tertile to handle.
+ * Set to 2 (halved from 4) so non-residential districts stay compact and
+ * roughly twice as many interior polygons flow into the residential tertile.
  */
-const LANDMARK_BFS_MAX_HOPS = 4;
+const LANDMARK_BFS_MAX_HOPS = 2;
 
 // ─── Wealth-score weights ───────────────────────────────────────────────────
 // Composite-score coefficients used in step 8. Tertile bucketing only cares
