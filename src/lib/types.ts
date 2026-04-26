@@ -507,6 +507,8 @@ export interface LayerVisibility {
   hillshading: boolean;
   /** Seasonal ice/snow variation and permafrost overlay. */
   seasonalIce: boolean;
+  /** House icons on city cells. */
+  cityIcons: boolean;
 }
 
 export interface BiomeInfo {

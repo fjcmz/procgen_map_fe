@@ -83,6 +83,7 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   minimap: 'Minimap',
   hillshading: 'Relief',
   seasonalIce: 'Seasons',
+  cityIcons: 'City Icons',
 };
 
 export function GenerationTab({
