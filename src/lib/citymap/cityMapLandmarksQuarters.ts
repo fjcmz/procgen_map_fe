@@ -56,6 +56,7 @@ import type {
 } from './cityMapTypesV2';
 import type { PlacerContext } from './cityMapLandmarksUnified';
 import { canonicalEdgeKey } from './cityMapEdgeGraph';
+import { placeSlumClusters } from './cityMapDistricts';
 
 // ─── Canvas geometry (ports CANVAS_CX/CY/SIZE from each legacy quarter file) ─
 
@@ -933,10 +934,15 @@ export function placeTradeLandmarks(
 //   workhouse     → size >= large
 //   gallows       → size >= medium  (exterior pool)
 //
-// Bias:
-//   ghetto_marker → centerScore + marketBoost + 0.5 × waterBoost
-//   workhouse     → centerScore + 0.3 × monumentBoost + 0.5 × waterBoost
-//   gallows       → centerScore (exterior pool)
+// Bias: excluded quarters must NOT cluster around the city center. They
+// gravitate toward poor residential areas (slum clusters) and the city border
+// (wall-adjacent interior polygons; the fringe band for gallows). Slum sites
+// are computed via `placeSlumClusters` — a deterministic geometry pass that
+// can be re-invoked here without perturbing its own `_districts_slums` RNG.
+//   ghetto_marker → slumBoost + outskirtScore + 0.5 × waterBoost
+//   workhouse     → slumBoost + outskirtScore + 0.5 × waterBoost
+//   gallows       → slumBoost + 0.3 × centerScore  (exterior pool; centerScore
+//                   is a weak inner-edge fallback when no slum cluster exists)
 //
 // Kind-name translations:
 //   ghetto       → ghetto_marker
@@ -962,9 +968,9 @@ function eligibleExcludedKinds(env: PlacerContext['env']): ExcludedKind[] {
 export function placeExcludedLandmarks(
   ctx: PlacerContext,
   used: Set<number>,
-  placedNamed: LandmarkV2[],
+  _placedNamed: LandmarkV2[],
 ): LandmarkV2[] {
-  const { seed, cityName, env, polygons, candidatePool, wall } = ctx;
+  const { seed, cityName, env, polygons, candidatePool, wall, waterPolygonIds, mountainPolygonIds } = ctx;
   if (candidatePool.size === 0) return [];
 
   const eligibleKinds = eligibleExcludedKinds(env);
@@ -986,23 +992,36 @@ export function placeExcludedLandmarks(
 
   const { interior, exterior } = splitPoolByInteriority(candidatePool, wall.interiorPolygonIds, polygons);
 
-  const marketSites = collectKindSites(placedNamed, polygons, 'market');
-  const wonderSites = collectKindSites(placedNamed, polygons, 'wonder');
+  // Slum cluster sites — excluded quarters cluster around poor residential
+  // areas. `placeSlumClusters` is deterministic from geometry and seeds its
+  // own `_districts_slums` RNG independently, so calling it here doesn't
+  // perturb the `_unified_excluded` stream and matches the slum set that
+  // `assignDistricts` will produce later in the pipeline.
+  const slumPolygonIds = placeSlumClusters(
+    seed, cityName, env, polygons, wall,
+    waterPolygonIds, mountainPolygonIds, CANVAS_SIZE,
+  );
+  const slumSites: [number, number][] = [];
+  for (const pid of slumPolygonIds) {
+    const poly = polygons[pid];
+    if (poly) slumSites.push(poly.site);
+  }
 
   type Candidate = {
     polygonId: number;
     centerScore: number;
-    marketBoost: number;
-    monumentBoost: number;
+    outskirtScore: number;
+    slumBoost: number;
     waterBoost: number;
   };
   const buildCand = (pid: number): Candidate => {
     const site = polygons[pid].site;
+    const cs = centerScore(site);
     return {
       polygonId: pid,
-      centerScore: centerScore(site),
-      marketBoost: siteBoost(site, marketSites),
-      monumentBoost: siteBoost(site, wonderSites),
+      centerScore: cs,
+      outskirtScore: 1 - cs,
+      slumBoost: siteBoost(site, slumSites),
       waterBoost: waterBoost(site, env),
     };
   };
@@ -1011,17 +1030,19 @@ export function placeExcludedLandmarks(
 
   const idTieBreak = (a: Candidate, b: Candidate) => a.polygonId - b.polygonId;
   const ghettoList = interiorCandidates.slice().sort((a, b) =>
-    (b.centerScore + b.marketBoost + b.waterBoost * 0.5) -
-    (a.centerScore + a.marketBoost + a.waterBoost * 0.5) ||
+    (b.slumBoost + b.outskirtScore + b.waterBoost * 0.5) -
+    (a.slumBoost + a.outskirtScore + a.waterBoost * 0.5) ||
     idTieBreak(a, b),
   );
   const workhouseList = interiorCandidates.slice().sort((a, b) =>
-    (b.centerScore + b.monumentBoost * 0.3 + b.waterBoost * 0.5) -
-    (a.centerScore + a.monumentBoost * 0.3 + a.waterBoost * 0.5) ||
+    (b.slumBoost + b.outskirtScore + b.waterBoost * 0.5) -
+    (a.slumBoost + a.outskirtScore + a.waterBoost * 0.5) ||
     idTieBreak(a, b),
   );
   const gallowsList = exteriorCandidates.slice().sort((a, b) =>
-    b.centerScore - a.centerScore || idTieBreak(a, b),
+    (b.slumBoost + b.centerScore * 0.3) -
+    (a.slumBoost + a.centerScore * 0.3) ||
+    idTieBreak(a, b),
   );
 
   const listFor = (kind: ExcludedKind): Candidate[] => {
