@@ -428,7 +428,41 @@ export function placeNamedLandmarks(
 
   // ── Pass 1: civic square (deterministic) ─────────────────────────────────
   {
-    const pool = eligible(candidatePool, used);
+    // [Voronoi-polygon] Minimum hops from any exterior (non-interior) polygon.
+    // Ensures the civic square is genuinely inside the city, not accidentally
+    // placed near a wall gap or canvas edge.
+    const CIVIC_MIN_INTERIOR_HOPS = 3;
+    const interior = wall.interiorPolygonIds;
+
+    // Multi-source BFS from all polygons outside the city footprint. Traverses
+    // ALL polygon neighbors (interior and exterior alike) so each interior
+    // polygon gets its true shortest-path distance from the boundary.
+    const borderDist = new Array<number>(polygons.length).fill(Infinity);
+    const borderQueue: number[] = [];
+    for (const p of polygons) {
+      if (!interior.has(p.id)) {
+        borderDist[p.id] = 0;
+        borderQueue.push(p.id);
+      }
+    }
+    let bHead = 0;
+    while (bHead < borderQueue.length) {
+      const pid = borderQueue[bHead++];
+      const d = borderDist[pid];
+      for (const nb of polygons[pid].neighbors) {
+        if (borderDist[nb] === Infinity) {
+          borderDist[nb] = d + 1;
+          borderQueue.push(nb);
+        }
+      }
+    }
+
+    const allPool = eligible(candidatePool, used);
+    const deepPool = allPool.filter(pid => borderDist[pid] >= CIVIC_MIN_INTERIOR_HOPS);
+    // Fall back to the full pool on degenerate (very small) cities where no
+    // polygon satisfies the depth constraint — a civic square must always exist.
+    const pool = deepPool.length > 0 ? deepPool : allPool;
+
     if (pool.length > 0) {
       const pid = nearestPolygonBySite(pool, polygons, canvasCenter);
       if (pid !== -1) {
