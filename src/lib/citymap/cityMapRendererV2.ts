@@ -408,7 +408,9 @@ export function renderCityMapV2(
 // [Voronoi-polygon] Fill every water polygon with a light-blue sea colour
 // plus a faint darker outline so the coastline reads cleanly against the
 // cream land base. No RNG, no per-polygon variation — the sea is a single
-// connected body and should look uniform.
+// connected body and should look uniform. Polygons tagged as `'dock'` are
+// skipped here — they render as wooden platforms via `drawDockBlocks`
+// below, so their water cell would show through behind the wood otherwise.
 function drawWater(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (!data.waterPolygonIds || data.waterPolygonIds.length === 0) return;
   ctx.fillStyle = WATER_FILL;
@@ -416,6 +418,7 @@ function drawWater(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   ctx.lineWidth = 1;
   ctx.lineJoin = 'round';
   for (const pid of data.waterPolygonIds) {
+    if (data.districts[pid] === 'dock') continue;
     const polygon = data.polygons[pid];
     if (!polygon || polygon.vertices.length < 3) continue;
     tracePolygonRing(ctx, polygon);
@@ -475,70 +478,67 @@ function drawMountains(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void
   ctx.stroke();
 }
 
-// [Voronoi-polygon] Fill each dock block's polygons with a wooden platform
+// [Voronoi-polygon] Fill every dock-tagged polygon with a wooden platform
 // look: light brown base + evenly spaced darker plank stripes clipped to
 // the polygon shape. Clipping is per-polygon so the stripes don't bleed
-// across block boundaries. Stripe orientation is keyed off the block's
-// polygon-id mod 2 so adjacent docks alternate between vertical and
-// horizontal plank runs for visual variety (no RNG — deterministic).
+// across polygon boundaries. Stripe orientation is keyed off polygon-id
+// parity so neighbouring docks alternate between vertical and horizontal
+// plank runs for visual variety (no RNG — deterministic).
+//
+// Reads `data.districts[pid] === 'dock'` directly rather than walking
+// `data.blocks` because `buildBlocksFromDistricts` skips water polygons
+// entirely (water is excluded from the standard block flood) — so a
+// `block.role === 'dock'` block never exists, and we'd be drawing nothing.
 function drawDockBlocks(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
-  if (data.blocks.length === 0) return;
+  for (let pid = 0; pid < data.polygons.length; pid++) {
+    if (data.districts[pid] !== 'dock') continue;
+    const polygon = data.polygons[pid];
+    if (!polygon || polygon.vertices.length < 3) continue;
+    const vertical = (pid % 2) === 0;
 
-  for (const block of data.blocks) {
-    if (block.role !== 'dock') continue;
-    // Orientation: polygon-id parity picks vertical or horizontal stripes
-    // so neighbouring docks read as separate structures.
-    const firstPid = block.polygonIds[0] ?? 0;
-    const vertical = (firstPid % 2) === 0;
+    // Fill the wooden base.
+    tracePolygonRing(ctx, polygon);
+    ctx.fillStyle = DOCK_FILL;
+    ctx.fill();
 
-    for (const pid of block.polygonIds) {
-      const polygon = data.polygons[pid];
-      if (!polygon || polygon.vertices.length < 3) continue;
+    // Clip to the polygon and stroke stripes across it.
+    ctx.save();
+    tracePolygonRing(ctx, polygon);
+    ctx.clip();
 
-      // Fill the wooden base.
-      tracePolygonRing(ctx, polygon);
-      ctx.fillStyle = DOCK_FILL;
-      ctx.fill();
-
-      // Clip to the polygon and stroke stripes across it.
-      ctx.save();
-      tracePolygonRing(ctx, polygon);
-      ctx.clip();
-
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const [vx, vy] of polygon.vertices) {
-        if (vx < minX) minX = vx;
-        if (vx > maxX) maxX = vx;
-        if (vy < minY) minY = vy;
-        if (vy > maxY) maxY = vy;
-      }
-
-      ctx.strokeStyle = DOCK_STRIPE_INK;
-      ctx.lineWidth = DOCK_STRIPE_WIDTH;
-      ctx.lineCap = 'butt';
-      ctx.beginPath();
-      if (vertical) {
-        const start = Math.floor(minX / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
-        for (let x = start; x <= maxX; x += DOCK_STRIPE_SPACING) {
-          ctx.moveTo(x, minY);
-          ctx.lineTo(x, maxY);
-        }
-      } else {
-        const start = Math.floor(minY / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
-        for (let y = start; y <= maxY; y += DOCK_STRIPE_SPACING) {
-          ctx.moveTo(minX, y);
-          ctx.lineTo(maxX, y);
-        }
-      }
-      ctx.stroke();
-      ctx.restore();
-
-      // Outline — dark brown border so the dock reads as a distinct block.
-      tracePolygonRing(ctx, polygon);
-      ctx.strokeStyle = DOCK_OUTLINE;
-      ctx.lineWidth = DOCK_OUTLINE_WIDTH;
-      ctx.stroke();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [vx, vy] of polygon.vertices) {
+      if (vx < minX) minX = vx;
+      if (vx > maxX) maxX = vx;
+      if (vy < minY) minY = vy;
+      if (vy > maxY) maxY = vy;
     }
+
+    ctx.strokeStyle = DOCK_STRIPE_INK;
+    ctx.lineWidth = DOCK_STRIPE_WIDTH;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    if (vertical) {
+      const start = Math.floor(minX / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
+      for (let x = start; x <= maxX; x += DOCK_STRIPE_SPACING) {
+        ctx.moveTo(x, minY);
+        ctx.lineTo(x, maxY);
+      }
+    } else {
+      const start = Math.floor(minY / DOCK_STRIPE_SPACING) * DOCK_STRIPE_SPACING;
+      for (let y = start; y <= maxY; y += DOCK_STRIPE_SPACING) {
+        ctx.moveTo(minX, y);
+        ctx.lineTo(maxX, y);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // Outline — dark brown border so the dock reads as a distinct shape.
+    tracePolygonRing(ctx, polygon);
+    ctx.strokeStyle = DOCK_OUTLINE;
+    ctx.lineWidth = DOCK_OUTLINE_WIDTH;
+    ctx.stroke();
   }
 }
 
