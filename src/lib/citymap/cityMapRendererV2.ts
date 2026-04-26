@@ -1737,30 +1737,37 @@ function drawResidentialIcon(ctx: CanvasRenderingContext2D, s: number, fill: str
   ctx.fillRect(-s * 0.18, s * 0.32, s * 0.36, s * 0.4);
 }
 
-// ── Harbor: anchor (ring + shaft + crossbar + flukes) ───────────────────────
+// ── Harbor: tall-mast ship (hull + square sail) ──────────────────────────────
 function drawHarborIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  const lw = Math.max(0.4, s * 0.11);
+  ctx.lineWidth = lw;
+  ctx.lineJoin = 'round';
+  ctx.lineCap  = 'round';
+
+  // Square sail — drawn first so the mast line appears on top
   ctx.fillStyle = fill; ctx.strokeStyle = ink;
-  ctx.lineWidth = Math.max(0.5, s * 0.13);
-  // Ring at top
+  ctx.fillRect( -s * 0.44, -s * 0.70,  s * 0.88,  s * 0.56);
+  ctx.strokeRect(-s * 0.44, -s * 0.70,  s * 0.88,  s * 0.56);
+
+  // Mast (pierces the sail, extends to near the top of the disc)
   ctx.beginPath();
-  ctx.arc(0, -s * 0.6, s * 0.22, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
-  // Vertical shaft
-  ctx.beginPath();
-  ctx.moveTo(0, -s * 0.38);
-  ctx.lineTo(0, s * 0.52);
+  ctx.moveTo(0,  s * 0.22);
+  ctx.lineTo(0, -s * 0.84);
   ctx.stroke();
-  // Crossbar
+
+  // Hull — curved keel below the waterline
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
   ctx.beginPath();
-  ctx.moveTo(-s * 0.5, -s * 0.22);
-  ctx.lineTo(s * 0.5, -s * 0.22);
+  ctx.moveTo(-s * 0.72, s * 0.22);
+  ctx.bezierCurveTo(-s * 0.82, s * 0.66,  s * 0.82, s * 0.66,  s * 0.72, s * 0.22);
+  ctx.closePath();
+  ctx.fill();
   ctx.stroke();
-  // Curved flukes (two short arcs at bottom)
+
+  // Waterline
   ctx.beginPath();
-  ctx.arc(-s * 0.35, s * 0.42, s * 0.22, -Math.PI * 0.25, Math.PI * 0.65);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(s * 0.35, s * 0.42, s * 0.22, Math.PI * 0.35, -Math.PI * 0.65, true);
+  ctx.moveTo(-s * 0.86, s * 0.22);
+  ctx.lineTo( s * 0.86, s * 0.22);
   ctx.stroke();
 }
 
