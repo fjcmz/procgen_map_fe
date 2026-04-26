@@ -80,9 +80,13 @@ export class CitySettlementGenerator {
       cityCellSet.add(city.cellIndex);
     }
 
-    // Build a map of cell index → owning city id to exclude cells claimed by others
+    // Build a map of cell index → owning city id to exclude cells claimed by others.
+    // Always include each city's founding cell (city.cellIndex) regardless of ownedCells,
+    // because Expand.ts-founded and settlement-founded cities don't add their founding
+    // cell to ownedCells the way Foundation.ts does.
     const claimedCells = new Map<number, string>();
     for (const city of world.mapUsableCities.values()) {
+      claimedCells.set(city.cellIndex, city.id); // founding cell — always present
       for (const ci of city.ownedCells.keys()) {
         claimedCells.set(ci, city.id);
       }
@@ -156,13 +160,17 @@ export class CitySettlementGenerator {
       const childEntity = cityGenerator.generate(bestCell, childName, rng, targetRegion, world);
       targetRegion.cities.push(childEntity);
 
-      // Found immediately, same initial population as a fresh foundation
+      // Found immediately, same initial population as a fresh foundation.
+      // Claim the founding cell in ownedCells (mirrors Foundation.ts) so future
+      // proximity checks in the same year see it via claimedCells.
       childEntity.founded = true;
       childEntity.foundedOn = absYear;
       childEntity.currentPopulation = 500;
+      childEntity.ownedCells.set(bestCell, absYear);
       world.mapUsableCities.set(childEntity.id, childEntity);
       world.mapUncontactedCities.set(childEntity.id, childEntity);
       cityCellSet.add(bestCell);
+      claimedCells.set(bestCell, childEntity.id);
 
       // Wire parent ↔ child
       city.hasHadSettlement = true;
