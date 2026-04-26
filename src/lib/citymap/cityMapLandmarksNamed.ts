@@ -18,17 +18,24 @@
 // on block roles — Phase 5's classifier is what grows districts OUT of these
 // landmarks, not the other way around.
 //
-// Seven ordered passes share `used: Set<number>`. Each pass uses its own
+// Eight ordered passes share `used: Set<number>`. Each pass uses its own
 // dedicated seeded RNG sub-stream so adding/reordering passes in later phases
 // won't shift existing seeds:
 //
-//   1. Civic square    — deterministic, no RNG
-//   2. Wonders         — `_unified_named_wonders`
-//   3. Castles         — `_unified_named_castles`
-//   4. Palaces         — `_unified_named_palaces`
-//   5. Temples         — `_unified_named_temples`
-//   6. Markets         — `_unified_named_markets`  (tie-breaks + spread fallback)
-//   7. Parks           — `_unified_named_parks`    (seed pick + cluster size)
+//   1. Civic square         — deterministic, no RNG
+//   2. Central wonders      — `_unified_named_wonders`              (capped at floor(N/3))
+//   3. Castles              — `_unified_named_castles`
+//   4. Palaces              — `_unified_named_palaces`
+//   5. Temples              — `_unified_named_temples`
+//   6. Markets              — `_unified_named_markets`              (tie-breaks + spread fallback)
+//   7. Parks                — `_unified_named_parks`                (seed pick + cluster size)
+//   8. Distributed wonders  — `_unified_named_wonders_distributed`  (remainder, near landmarks)
+//
+// Wonders are split into two passes so the central allotment (floor(N/3) per
+// the spec) keeps its center-bias scoring while remaining wonders can score
+// against the full set of placed landmarks (parks/markets/temples/castles
+// high priority; civic_square/palace medium priority) and skip the center
+// band entirely.
 //
 // Naming uses one shared sub-stream `_unified_named_names` so reordering
 // placement passes does not perturb the name sequence on a per-city basis.
@@ -102,6 +109,15 @@ const PALACE_MIN_HOPS = 10;
 const WONDER_MIN_HOPS = 2;
 const CASTLE_WALL_WEIGHT = 0.7;
 const PALACE_AMENITY_BONUS = 0.80;
+
+// Wonder distribution: at most floor(N/3) wonders may sit within
+// WONDER_CENTER_BAND_HOPS polygon-hops of the city center. The remainder are
+// placed in a final pass (after parks) and prefer adjacency to other named
+// landmarks. High-priority neighbors (parks/markets/temples/castles) score
+// 3× medium-priority neighbors (civic_square/palace).
+const WONDER_CENTER_BAND_HOPS = 10;
+const WONDER_LANDMARK_HIGH_WEIGHT = 3;
+const WONDER_LANDMARK_MEDIUM_WEIGHT = 1;
 
 // ─── Naming pools (PREFIX from cityMapBlocks.ts:633-639, V1 port) ───────────
 
@@ -195,6 +211,30 @@ function distToWallSegments(
     }
   }
   return min;
+}
+
+// BFS over `polygon.neighbors`: returns the set of polygon ids within
+// `maxHops` of `seedId` (inclusive of `seedId`).
+function bfsHopsSet(
+  seedId: number,
+  polygons: CityPolygon[],
+  maxHops: number,
+): Set<number> {
+  const visited = new Set<number>([seedId]);
+  let frontier = [seedId];
+  for (let d = 0; d < maxHops; d++) {
+    const next: number[] = [];
+    for (const pid of frontier) {
+      for (const nb of polygons[pid].neighbors) {
+        if (visited.has(nb)) continue;
+        visited.add(nb);
+        next.push(nb);
+      }
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+  return visited;
 }
 
 // BFS over `polygon.neighbors`: true iff `candidate` is within `maxHops`
@@ -403,14 +443,21 @@ export function placeNamedLandmarks(
     }
   }
 
-  // ── Pass 2: wonders (one per env.wonderNames) ────────────────────────────
+  // ── Pass 2: central wonders (capped at floor(N/3)) ──────────────────────
+  // Spec: at most one third of the city's wonders may sit within
+  // WONDER_CENTER_BAND_HOPS polygon-hops of the city center. This pass places
+  // the central allotment with the historic center-bias scoring; the
+  // remaining wonders are placed in Pass 8 (after parks) and routed toward
+  // other landmarks instead.
   // Score = squared distance from canvas center (smaller better). Reject
   // anything within WONDER_MIN_HOPS of an already-placed wonder/castle/palace
   // so wonders don't pile up on a single block. Names come from the world-
   // sim verbatim — no procedural naming needed for wonders.
-  if (env.wonderNames.length > 0) {
+  let centralWondersPlaced = 0;
+  const centralWonderLimit = Math.floor(env.wonderNames.length / 3);
+  if (centralWonderLimit > 0) {
     const wonderRng = seededPRNG(`${seed}_city_${cityName}_unified_named_wonders`);
-    for (let i = 0; i < env.wonderNames.length; i++) {
+    for (let i = 0; i < centralWonderLimit; i++) {
       const pool = eligible(candidatePool, used);
       if (pool.length === 0) break;
       const placedPrestige = [
@@ -456,6 +503,7 @@ export function placeNamedLandmarks(
       });
       used.add(chosen);
       trackPlaced('wonder', chosen);
+      centralWondersPlaced++;
     }
   }
 
@@ -684,6 +732,115 @@ export function placeNamedLandmarks(
       });
       for (const pid of cluster) used.add(pid);
       trackPlaced('park', seedId);
+    }
+  }
+
+  // ── Pass 8: distributed wonders (outside center band, near landmarks) ────
+  // Spec: at most floor(N/3) wonders may sit within WONDER_CENTER_BAND_HOPS
+  // of the city center (Pass 2 enforces that). The remainder land here and
+  // MUST sit outside the center band, scoring by adjacency to other named
+  // landmarks. parks/markets/temples/castles get high priority;
+  // civic_square/palaces get medium priority.
+  const remainingWonders = env.wonderNames.length - centralWondersPlaced;
+  if (remainingWonders > 0) {
+    const distRng = seededPRNG(
+      `${seed}_city_${cityName}_unified_named_wonders_distributed`,
+    );
+
+    // City center polygon = the civic_square anchor (it was placed at the
+    // polygon nearest canvas center in Pass 1). Fall back to a fresh
+    // canvas-center lookup if Pass 1 produced nothing (degenerate input).
+    let cityCenterPolygonId = placedByKind['civic_square']?.[0] ?? -1;
+    if (cityCenterPolygonId === -1) {
+      const allPool: number[] = [];
+      for (const pid of candidatePool) allPool.push(pid);
+      allPool.sort((a, b) => a - b);
+      if (allPool.length > 0) {
+        cityCenterPolygonId = nearestPolygonBySite(allPool, polygons, canvasCenter);
+      }
+    }
+    const centerBand = cityCenterPolygonId !== -1
+      ? bfsHopsSet(cityCenterPolygonId, polygons, WONDER_CENTER_BAND_HOPS)
+      : new Set<number>();
+
+    // Resolve full polygon coverage per kind from `out` (parks contribute
+    // every polygon in their cluster, not just the seed).
+    const polysOfKinds = (kinds: ReadonlySet<LandmarkKind>): Set<number> => {
+      const result = new Set<number>();
+      for (const lm of out) {
+        if (!kinds.has(lm.kind)) continue;
+        result.add(lm.polygonId);
+        if (lm.polygonIds) for (const pid of lm.polygonIds) result.add(pid);
+      }
+      return result;
+    };
+    const HIGH_KINDS: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
+      'park', 'market', 'temple', 'castle',
+    ]);
+    const MEDIUM_KINDS: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
+      'civic_square', 'palace',
+    ]);
+    const highPolys = polysOfKinds(HIGH_KINDS);
+    const mediumPolys = polysOfKinds(MEDIUM_KINDS);
+
+    const adjScoreOf = (pid: number): number => {
+      let s = 0;
+      for (const nb of polygons[pid].neighbors) {
+        if (highPolys.has(nb)) s += WONDER_LANDMARK_HIGH_WEIGHT;
+        else if (mediumPolys.has(nb)) s += WONDER_LANDMARK_MEDIUM_WEIGHT;
+      }
+      return s;
+    };
+
+    for (let i = 0; i < remainingWonders; i++) {
+      const fullPool = eligible(candidatePool, used);
+      if (fullPool.length === 0) break;
+      // Hard rule: skip the center band. Only fall back to the unfiltered
+      // pool when filtering would leave nothing — otherwise the wonder cap
+      // becomes a hard placement failure on tiny test cities.
+      const outsideBand = fullPool.filter(pid => !centerBand.has(pid));
+      const sourcePool = outsideBand.length > 0 ? outsideBand : fullPool;
+
+      const placedPrestige = [
+        ...(placedByKind['wonder'] ?? []),
+        ...(placedByKind['castle'] ?? []),
+        ...(placedByKind['palace'] ?? []),
+      ];
+
+      type Cand = { pid: number; adj: number; sep: number };
+      const sepKept: Cand[] = [];
+      const all: Cand[] = [];
+      for (const pid of sourcePool) {
+        const sep = isWithinHops(pid, placedPrestige, polygons, WONDER_MIN_HOPS) ? 0 : 1;
+        const adj = adjScoreOf(pid);
+        const c: Cand = { pid, adj, sep };
+        all.push(c);
+        if (sep === 1) sepKept.push(c);
+      }
+      const ranked = sepKept.length > 0 ? sepKept : all;
+      // Sort: highest adjacency first, then deterministic id tie-break.
+      ranked.sort((a, b) => b.adj - a.adj || a.pid - b.pid);
+
+      // Tie-break among polygons sharing the leader's adjacency score: pick
+      // via RNG so the choice doesn't always collapse to the lowest id.
+      const leadAdj = ranked[0].adj;
+      const ties: number[] = [];
+      for (const c of ranked) {
+        if (c.adj === leadAdj) ties.push(c.pid);
+        else break;
+      }
+      const chosen = ties.length === 1
+        ? ties[0]
+        : ties[Math.floor(distRng() * ties.length)];
+
+      const wonderIndex = centralWondersPlaced + i;
+      out.push({
+        polygonId: chosen,
+        kind: 'wonder',
+        name: env.wonderNames[wonderIndex],
+      });
+      used.add(chosen);
+      trackPlaced('wonder', chosen);
     }
   }
 
