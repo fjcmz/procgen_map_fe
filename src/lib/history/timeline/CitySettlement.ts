@@ -23,6 +23,9 @@ export interface CitySettlement {
   readonly year: number;
 }
 
+/** Annual probability that an eligible large+ city attempts a settlement. */
+const SETTLEMENT_CHANCE = 0.01;
+
 /** BFS radius (hops) within which to search for a child city site. */
 const SETTLEMENT_SEARCH_RADIUS = 20;
 
@@ -31,8 +34,9 @@ const SETTLEMENT_SCORE_THRESHOLD = -2;
 
 export class CitySettlementGenerator {
   /**
-   * For each large+ city that has not yet had a settlement, try to found a
-   * child city within SETTLEMENT_SEARCH_RADIUS cells in the same country.
+   * For each large+ city that has not yet had a settlement, roll a 1% chance
+   * per year. On success, found a child city within SETTLEMENT_SEARCH_RADIUS
+   * cells in the same country on a cell not owned by any existing city.
    */
   generate(
     rng: () => number,
@@ -50,10 +54,21 @@ export class CitySettlementGenerator {
       cityCellSet.add(city.cellIndex);
     }
 
+    // Build a map of cell index → owning city id to exclude cells claimed by others
+    const claimedCells = new Map<number, string>();
+    for (const city of world.mapUsableCities.values()) {
+      for (const ci of city.ownedCells.keys()) {
+        claimedCells.set(ci, city.id);
+      }
+    }
+
     for (const city of world.mapUsableCities.values()) {
       if (!city.founded || city.isRuin) continue;
       if (city.hasHadSettlement) continue;
       if (city.size !== 'large' && city.size !== 'metropolis' && city.size !== 'megalopolis') continue;
+
+      // 1% annual chance to attempt a settlement
+      if (rng() >= SETTLEMENT_CHANCE) continue;
 
       // Find this city's country
       const region = world.mapRegions.get(city.regionId);
@@ -83,10 +98,12 @@ export class CitySettlementGenerator {
             visited.add(ni);
             next.push(ni);
 
-            // Candidate must be in same country, not water, not already a city
+            // Candidate must be in same country, not water, not already a city site,
+            // and not owned by any existing city.
             if (!countryCells.has(ni)) continue;
             if (cells[ni].isWater) continue;
             if (cityCellSet.has(ni)) continue;
+            if (claimedCells.has(ni)) continue;
 
             const score = scoreCellForCity(cells[ni], cells);
             if (score < SETTLEMENT_SCORE_THRESHOLD) continue;
