@@ -202,13 +202,6 @@ const DOCK_SECOND_CLUSTER_PROB = 0.3;
 // shorelines.
 const DOCK_BFS_MAX_DEPTH = 2;
 
-// ─── Harbor pass tuning ─────────────────────────────────────────────────────
-// Mirrors `cityMapBlocks.ts:84` — `HARBOR_BAND_FRACTION = 0.30`. A polygon
-// site within `canvasSize × HARBOR_BAND_FRACTION` of the matching `waterSide`
-// edge qualifies as a harbor candidate. Harbor never overrides civic / market
-// / industry / military / etc.; it only fills the sentinel.
-const HARBOR_BAND_FRACTION = 0.30;
-
 // ─── Landmark BFS tuning ────────────────────────────────────────────────────
 /**
  * Cap on hop distance the multi-source BFS from non-park landmarks may
@@ -324,9 +317,10 @@ const NEGATIVE_DISTRICTS: ReadonlySet<DistrictType> = new Set<DistrictType>([
  *   6. Multi-source BFS from non-park landmarks (interior only, capped at
  *      `LANDMARK_BFS_MAX_HOPS` hops). Each polygon inherits the district of
  *      its nearest seed via `LANDMARK_KIND_TO_DISTRICT`.
- *   7. Harbor override: sentinel-only interior polygons within
- *      `canvasSize × HARBOR_BAND_FRACTION` of the matching `env.waterSide`
- *      canvas edge → `'harbor'`.
+ *   7. (removed) Harbor is now produced exclusively by step 5b's dock
+ *      adjacency — polygons not adjacent to a dock cannot become `'harbor'`
+ *      and fall through to the wealth-tertile residential classifier in
+ *      step 8.
  *   8. Wealth scoring: every still-unassigned polygon (interior background)
  *      gets a composite score from BFS distances to positive landmark seeds,
  *      negative landmark seeds, canvas-edge polygons, and canvas-center
@@ -449,29 +443,6 @@ export function assignDistricts(
       if (distance[pid] <= LANDMARK_BFS_MAX_HOPS) {
         out[pid] = d;
         assigned[pid] = true;
-      }
-    }
-  }
-
-  // ── Step 7: harbor override on remaining interior polygons ──────────────
-  if (env.isCoastal && env.waterSide) {
-    const band = canvasSize * HARBOR_BAND_FRACTION;
-    for (const p of polygons) {
-      if (assigned[p.id]) continue;
-      if (!interior.has(p.id)) continue;
-      if (waterPolygonIds.has(p.id)) continue;
-      if (mountainPolygonIds.has(p.id)) continue;
-      const [x, y] = p.site;
-      let inBand = false;
-      switch (env.waterSide) {
-        case 'north': inBand = y < band; break;
-        case 'south': inBand = y > canvasSize - band; break;
-        case 'west':  inBand = x < band; break;
-        case 'east':  inBand = x > canvasSize - band; break;
-      }
-      if (inBand) {
-        out[p.id] = 'harbor';
-        assigned[p.id] = true;
       }
     }
   }
