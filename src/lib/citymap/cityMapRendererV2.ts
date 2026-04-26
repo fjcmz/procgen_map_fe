@@ -911,12 +911,16 @@ const BUILDING_STROKE_WIDTH = 0.75;
 
 // Coarse DistrictType background fills for named interior district kinds.
 const COARSE_DISTRICT_BG_FILL: Partial<Record<DistrictType, string>> = {
-  industry:        '#c8b498', // warm brown, like old craft
-  education_faith: '#e8cce8', // lavender, like old SFH
-  military:        '#b0c880', // army green
-  trade:           '#f0dc98', // gold-yellow
-  entertainment:   '#f8c890', // orange
-  excluded:        '#d8dce4', // silver-grey
+  industry:           '#c8b498', // warm brown, like old craft
+  education_faith:    '#e8cce8', // lavender, like old SFH
+  military:           '#b0c880', // army green
+  trade:              '#f0dc98', // gold-yellow
+  entertainment:      '#f8c890', // orange
+  excluded:           '#d8dce4', // silver-grey
+  // Residential wealth tiers — medium stays at base cream, poor is lighter/airier,
+  // rich is darker/warmer amber to signal density and prosperity.
+  residential_high:   '#d4c8a4', // darker amber-parchment — dense & prosperous
+  residential_low:    '#f4ede0', // lighter cream — sparse & poor
 };
 
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
@@ -1557,9 +1561,9 @@ const DISTRICT_ICON_PALETTE: Partial<Record<DistrictType, [fill: string, ink: st
   civic:              ['#f0e8d8', '#3a2810'],
   market:             ['#f8eebc', '#5a3000'],
   harbor:             ['#b8d4e8', '#1a3858'],
-  residential_high:   ['#ece4d4', '#3a2810'],
-  residential_medium: ['#e8e0d0', '#3a2810'],
-  residential_low:    ['#e4dccc', '#3a2810'],
+  residential_high:   ['#d8ceb0', '#3a2810'], // darker amber, matches block fill
+  residential_medium: ['#e8e0d0', '#3a2810'], // base cream, unchanged
+  residential_low:    ['#f4ede0', '#3a2810'], // lighter cream, matches block fill
   industry:           ['#dcc8a8', '#2a1a0a'],
   education_faith:    ['#e8cce8', '#280838'],
   military:           ['#b0c078', '#20280a'],
