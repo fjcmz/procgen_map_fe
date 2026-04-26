@@ -70,7 +70,7 @@ City size is recomputed each year from population and tech levels. The base popu
 | metropolis | 1,000,000 |
 | megalopolis | 10,000,000 |
 
-Cities below 10,000 population are classified as `small`. The `government` and `industry` tech levels reduce thresholds by ~4% per combined level via `techFactor = 1 / (1 + 0.04 * (govLevel + industryLevel))`.
+Cities below 10,000 population are classified as `small`. The `government` and `industry` tech levels reduce thresholds by ~0.5% per combined level via `techFactor = 1 / (1 + 0.005 * (govLevel + industryLevel))`.
 
 ## Trade Capacity (`canTradeMore()`)
 
