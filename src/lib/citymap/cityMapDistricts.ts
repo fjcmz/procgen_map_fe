@@ -447,26 +447,6 @@ export function assignDistricts(
     }
   }
 
-  // ── Step 6b: strip 'excluded' from wall-adjacent interior polygons ───────
-  // Excluded quarters (gallows_hill / workhouse / ghetto) must not sit on the
-  // inner face of the city wall. An interior polygon is "wall-adjacent" when
-  // at least one of its Voronoi-neighbours sits outside the footprint
-  // (interiorPolygonIds). Release the assignment so the polygon falls through
-  // to the wealth-scoring pass and becomes a residential tertile instead.
-  for (const p of polygons) {
-    if (!assigned[p.id]) continue;
-    if (out[p.id] !== 'excluded') continue;
-    if (!interior.has(p.id)) continue;
-    let wallAdjacent = false;
-    for (const nb of p.neighbors) {
-      if (!interior.has(nb)) { wallAdjacent = true; break; }
-    }
-    if (wallAdjacent) {
-      out[p.id] = 'residential_medium';
-      assigned[p.id] = false;
-    }
-  }
-
   // ── Step 8: wealth scoring → residential tertile ────────────────────────
   // [Voronoi-polygon] Compute three multi-source BFS distance maps:
   //   (a) distance to nearest POSITIVE-district polygon (civic/market/edu)
