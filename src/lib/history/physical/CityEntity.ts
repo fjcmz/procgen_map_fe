@@ -82,11 +82,11 @@ export function maxCellsForCity(pop: number, govLevel: number): number {
 
 /**
  * Derive city size from population and tech levels.
- * `government` and `industry` tech reduce thresholds (~4% per combined level),
+ * `government` and `industry` tech reduce thresholds (~0.5% per combined level),
  * so advanced civilizations reach higher tiers at smaller populations.
  */
 export function computeCitySize(population: number, govLevel: number = 0, industryLevel: number = 0): CitySize {
-  const techFactor = 1 / (1 + 0.04 * (govLevel + industryLevel));
+  const techFactor = 1 / (1 + 0.005 * (govLevel + industryLevel));
   for (const { size, minPop } of CITY_SIZE_THRESHOLDS) {
     if (population >= minPop * techFactor) return size;
   }
