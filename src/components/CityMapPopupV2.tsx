@@ -16,8 +16,27 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 8;
 const ZOOM_BUTTON_FACTOR = 1.5;
 const WHEEL_FACTOR = 1.15;
+const MIN_POPUP_WIDTH = 360;
+const MIN_POPUP_HEIGHT = 360;
+const POPUP_VIEWPORT_MARGIN = 8;
+// Minimum visible portion of the popup that must remain on-screen during a
+// drag-resize so the user can always recover from an over-aggressive resize.
+const MIN_VISIBLE = 80;
+// Approximate vertical chrome (header + footer + container border) so the
+// initial popup rect can target a square-ish canvas area. The live canvas
+// dimensions come from a ResizeObserver on the wrapper, so this is only
+// used for the first-open size estimate.
+const INITIAL_CHROME_V = 70;
 
+// Pan is in CSS pixels of the canvas wrapper. baseScale (max(W,H)/INTERNAL_SIZE)
+// is recomputed from the live canvas size whenever it's needed; the rendered
+// map fit-COVERS the canvas at scale=1 so a non-square popup still fills both
+// axes (the user pans along the smaller axis to see the cropped portion).
 interface Transform { x: number; y: number; scale: number }
+
+function baseScaleFor(displayW: number, displayH: number): number {
+  return Math.max(displayW, displayH) / INTERNAL_SIZE;
+}
 
 function getTouchDist(t1: Touch, t2: Touch) {
   return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
@@ -27,32 +46,44 @@ function getTouchMid(t1: Touch, t2: Touch) {
   return { x: (t1.clientX + t2.clientX) / 2, y: (t1.clientY + t2.clientY) / 2 };
 }
 
-// Keep map covering the full canvas: scale ∈ [1, MAX_SCALE], pan limited so the
-// map (INTERNAL_SIZE × scale wide) never reveals the cream backdrop's dark void.
-function clampTransform(t: Transform): Transform {
+// Keep the map fully covering the canvas: scale ∈ [1, MAX_SCALE]; pan ∈
+// [displayDim - cover, 0] in CSS pixels, where cover = scale × max(W, H). At
+// scale=1 the larger axis is locked (no pan); the smaller axis allows pan
+// over the cropped overflow. At scale > 1, both axes pan within range.
+function clampTransform(t: Transform, displayW: number, displayH: number): Transform {
   const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, t.scale));
-  const minPan = INTERNAL_SIZE * (1 - scale);
+  const cover = scale * Math.max(displayW, displayH);
   return {
     scale,
-    x: Math.max(minPan, Math.min(0, t.x)),
-    y: Math.max(minPan, Math.min(0, t.y)),
+    x: Math.max(displayW - cover, Math.min(0, t.x)),
+    y: Math.max(displayH - cover, Math.min(0, t.y)),
   };
 }
 
-// Zoom around an anchor point given in INTERNAL coordinates (0..INTERNAL_SIZE).
-function zoomAround(prev: Transform, anchorX: number, anchorY: number, factor: number): Transform {
+// Zoom around an anchor point given in CSS pixels relative to the canvas
+// origin. The world point under the anchor must stay under the anchor after
+// the zoom: screenCss = scale × baseScale × world + pan → world fixed across
+// zoom requires recomputing pan for the new scale.
+function zoomAround(
+  prev: Transform,
+  anchorX: number,
+  anchorY: number,
+  factor: number,
+  displayW: number,
+  displayH: number,
+): Transform {
   const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, prev.scale * factor));
-  // The world point under the anchor must stay under the anchor on screen.
-  // screen = scale * world + pan  →  world = (anchor - pan) / scale
-  // After zoom: newPan = anchor - world * newScale
-  const worldX = (anchorX - prev.x) / prev.scale;
-  const worldY = (anchorY - prev.y) / prev.scale;
+  const ratio = newScale / prev.scale;
   return clampTransform({
     scale: newScale,
-    x: anchorX - worldX * newScale,
-    y: anchorY - worldY * newScale,
-  });
+    x: anchorX - ratio * (anchorX - prev.x),
+    y: anchorY - ratio * (anchorY - prev.y),
+  }, displayW, displayH);
 }
+
+type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+interface PopupRect { left: number; top: number; width: number; height: number }
 
 // Emoji icon + human-readable label for every DistrictType. Exhaustive so
 // the tooltip always has something to show for any block the user hovers.
@@ -152,19 +183,41 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const [tooltip, setTooltip] = useState<(PolygonHit & { x: number; y: number }) | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Initial popup size — derived from viewport on first open. Once set, the
-  // user can resize the container freely via the native CSS `resize: both`
-  // handle in the bottom-right corner.
-  const [popupSize, setPopupSize] = useState<{ width: number; height: number } | null>(null);
-  // Canvas display size (square) — kept in sync with the canvas wrapper via a
-  // ResizeObserver so the map fills whatever space the resized popup gives it.
-  const [canvasDisplaySize, setCanvasDisplaySize] = useState(INTERNAL_SIZE);
+  // Popup rect — computed lazily on first mount so the canvas is always
+  // mounted with real dimensions on the first render (no double-render race
+  // with the data-generation effect). Persists across close/reopen so the
+  // user's resized dimensions are remembered for the rest of the session.
+  const [popupRect, setPopupRect] = useState<PopupRect>(() => {
+    if (typeof window === 'undefined') {
+      return { left: 12, top: 12, width: INTERNAL_SIZE + 4, height: INTERNAL_SIZE + INITIAL_CHROME_V };
+    }
+    const availableW = window.innerWidth - 24;
+    const availableH = window.innerHeight - 24;
+    const target = Math.max(320, Math.min(INTERNAL_SIZE, availableW - 4, availableH - INITIAL_CHROME_V));
+    const width = target + 4;
+    const height = target + INITIAL_CHROME_V;
+    return {
+      left: Math.max(12, Math.round((window.innerWidth - width) / 2)),
+      top: Math.max(12, Math.round((window.innerHeight - height) / 2)),
+      width,
+      height,
+    };
+  });
+  // Canvas display dimensions in CSS pixels — kept in sync with the canvas
+  // wrapper via a ResizeObserver. Non-square is allowed (and expected when
+  // the user resizes the popup to a non-square rect); the renderer fit-COVERS
+  // the map across both axes so empty bands never appear.
+  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({ w: INTERNAL_SIZE, h: INTERNAL_SIZE });
+  const canvasSizeRef = useRef(canvasSize);
+  canvasSizeRef.current = canvasSize;
 
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const transformRef = useRef(transform);
   transformRef.current = transform;
   const showLabelsRef = useRef(showLabels);
   showLabelsRef.current = showLabels;
+  const activeResizeDirRef = useRef<ResizeDirection | null>(null);
+  const [resizing, setResizing] = useState(false);
 
   const wheelRafRef = useRef<number | null>(null);
   const isPinchingRef = useRef(false);
@@ -175,34 +228,58 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const isMouseDraggingRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
-  // Compute initial popup size on first open, then leave it under user control
-  // (CSS `resize: both` on the container). Reset to null on close so reopening
-  // re-derives a sensible default for the current viewport.
+  // One-shot CSS for hover affordance on the resize handles. Inline styles
+  // can't express :hover, so we inject a tiny global stylesheet keyed on
+  // dedicated class names. Idempotent across multiple popup instances via the
+  // id check.
   useEffect(() => {
-    if (!isOpen) {
-      setPopupSize(null);
-      return;
-    }
-    if (popupSize !== null) return;
-    const availableW = window.innerWidth - 24;
-    const availableH = window.innerHeight - 24;
-    // Roughly: header ~38px + footer ~28px + canvas padding 16px ≈ 82px chrome.
-    const target = Math.max(320, Math.min(INTERNAL_SIZE + 16, availableW, availableH - 82));
-    setPopupSize({ width: target + 16, height: target + 82 });
-  }, [isOpen, popupSize]);
+    const STYLE_ID = 'city-map-popup-v2-resize-styles';
+    if (document.getElementById(STYLE_ID)) return;
+    const style = document.createElement('style');
+    style.id = STYLE_ID;
+    style.textContent = `
+      .cmp-resize-edge > span,
+      .cmp-resize-corner > span {
+        transition: background-color 120ms ease-out, opacity 120ms ease-out;
+      }
+      .cmp-resize-edge:hover > span,
+      .cmp-resize-corner:hover > span {
+        background-color: #5a3a10;
+        opacity: 1;
+      }
+    `;
+    document.head.appendChild(style);
+  }, []);
 
-  // Track the canvas wrapper's inner size; the canvas display size is the
-  // largest square that fits, so the map keeps its 1:1 aspect ratio while
-  // expanding into whatever space the resized container offers.
+  // Re-clamp the popup rect to the viewport when the window resizes so the
+  // popup never ends up partially or fully off-screen after a browser resize.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onResize = () => {
+      setPopupRect(prev => {
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        const width = Math.max(MIN_POPUP_WIDTH, Math.min(prev.width, vw - 2 * POPUP_VIEWPORT_MARGIN));
+        const height = Math.max(MIN_POPUP_HEIGHT, Math.min(prev.height, vh - 2 * POPUP_VIEWPORT_MARGIN));
+        const left = Math.max(MIN_VISIBLE - width, Math.min(vw - MIN_VISIBLE, prev.left));
+        const top = Math.max(0, Math.min(vh - MIN_VISIBLE, prev.top));
+        return { left, top, width, height };
+      });
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [isOpen]);
+
+  // Track the canvas wrapper's inner size (CSS pixels). Non-square is allowed
+  // — the map renders fit-COVER so it always fills both axes.
   useEffect(() => {
     if (!isOpen) return;
     const wrapper = canvasWrapperRef.current;
     if (!wrapper) return;
     const update = () => {
-      const w = wrapper.clientWidth;
-      const h = wrapper.clientHeight;
-      const size = Math.max(200, Math.min(w, h));
-      setCanvasDisplaySize(size);
+      const w = Math.max(200, wrapper.clientWidth);
+      const h = Math.max(200, wrapper.clientHeight);
+      setCanvasSize(prev => (prev.w === w && prev.h === h ? prev : { w, h }));
     };
     update();
     const ro = new ResizeObserver(update);
@@ -210,26 +287,32 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     return () => ro.disconnect();
   }, [isOpen]);
 
-  // Apply the canvas display size whenever it changes. Decoupled from the
-  // data-generation effect so resizing doesn't clear the canvas (setting
-  // canvas.width wipes its contents) and doesn't re-run map generation.
+  // Re-clamp the transform whenever the canvas size changes — the pan range
+  // depends on display dimensions, so growing the popup (while zoomed in) may
+  // unstick a pan that was previously at the boundary.
+  useEffect(() => {
+    setTransform(prev => clampTransform(prev, canvasSize.w, canvasSize.h));
+  }, [canvasSize.w, canvasSize.h]);
+
+  // Apply the canvas display size + matching internal resolution whenever it
+  // changes. Decoupled from data generation so the canvas isn't cleared and
+  // the map isn't re-generated on every drag-tick (setting canvas.width wipes
+  // pixel state). The render effect below redraws right after.
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    canvas.style.width = `${canvasDisplaySize}px`;
-    canvas.style.height = `${canvasDisplaySize}px`;
-  }, [isOpen, canvasDisplaySize]);
-
-  // Generate map data when the source inputs change. The backing canvas's
-  // internal pixel resolution is fixed at INTERNAL_SIZE * dpr regardless of
-  // display size — the resize-driven scaling is purely CSS.
-  useEffect(() => {
-    if (!isOpen || !canvasRef.current) return;
-    const canvas = canvasRef.current;
-
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = INTERNAL_SIZE * dpr;
-    canvas.height = INTERNAL_SIZE * dpr;
+    canvas.width = Math.round(canvasSize.w * dpr);
+    canvas.height = Math.round(canvasSize.h * dpr);
+    canvas.style.width = `${canvasSize.w}px`;
+    canvas.style.height = `${canvasSize.h}px`;
+  }, [isOpen, canvasSize.w, canvasSize.h]);
+
+  // Generate map data when the source inputs change. Internal pixel
+  // resolution follows the live canvas size (set by the effect above) so the
+  // map stays sharp at any popup dimension.
+  useEffect(() => {
+    if (!isOpen || !canvasRef.current) return;
 
     const data = generateCityMapV2(seed, cityName, environment);
     mapDataRef.current = data;
@@ -273,20 +356,21 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     );
   }, [isOpen, seed, cityName, environment]);
 
-  // Re-render whenever the transform or render-time toggles change. Cheap
-  // because no regeneration runs — just renderCityMapV2 over cached data.
+  // Re-render whenever the transform, canvas size, or render-time toggles
+  // change. Cheap because no regeneration runs — just renderCityMapV2 over
+  // cached data. Effective draw scale = baseScale × user scale, applied
+  // uniformly so the map never distorts; pan is in CSS pixels.
   useEffect(() => {
     if (!isOpen || !canvasRef.current || !mapDataRef.current) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    ctx.setTransform(
-      dpr * transform.scale, 0, 0, dpr * transform.scale,
-      dpr * transform.x, dpr * transform.y,
-    );
+    const base = baseScaleFor(canvasSize.w, canvasSize.h);
+    const k = dpr * base * transform.scale;
+    ctx.setTransform(k, 0, 0, k, dpr * transform.x, dpr * transform.y);
     renderCityMapV2(ctx, mapDataRef.current, environment, seed, cityName, showIcons, showLabels);
-  }, [isOpen, transform, showIcons, showLabels, environment, seed, cityName]);
+  }, [isOpen, transform, canvasSize.w, canvasSize.h, showIcons, showLabels, environment, seed, cityName]);
 
   // Clear tooltip when labels are turned on or popup closes.
   useEffect(() => {
@@ -307,16 +391,19 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     return () => window.removeEventListener('keydown', handleKey);
   }, [isOpen, onClose]);
 
-  // Convert viewport client coords → map coords (0..INTERNAL_SIZE), accounting
-  // for the current zoom transform so hit-testing works at any zoom level.
+  // Convert viewport client coords → map internal coords (0..INTERNAL_SIZE),
+  // accounting for the current transform AND baseScale so hit-testing works
+  // at any zoom level and any popup aspect ratio.
   const toMapCoords = useCallback((clientX: number, clientY: number): [number, number] | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const naturalX = (clientX - rect.left) * (INTERNAL_SIZE / rect.width);
-    const naturalY = (clientY - rect.top) * (INTERNAL_SIZE / rect.height);
+    const cssX = clientX - rect.left;
+    const cssY = clientY - rect.top;
     const t = transformRef.current;
-    return [(naturalX - t.x) / t.scale, (naturalY - t.y) / t.scale];
+    const base = baseScaleFor(canvasSizeRef.current.w, canvasSizeRef.current.h);
+    const denom = t.scale * base;
+    return [(cssX - t.x) / denom, (cssY - t.y) / denom];
   }, []);
 
   // Return the resolved tooltip info under the given client position, or null.
@@ -334,15 +421,12 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     return null;
   }, [toMapCoords]);
 
-  // Convert client (x, y) on the canvas → natural canvas coords (pre-zoom).
-  const clientToNatural = useCallback((clientX: number, clientY: number): [number, number] | null => {
+  // Convert client (x, y) → CSS-pixel coords relative to the canvas origin.
+  const clientToCanvasCss = useCallback((clientX: number, clientY: number): [number, number] | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    return [
-      (clientX - rect.left) * (INTERNAL_SIZE / rect.width),
-      (clientY - rect.top) * (INTERNAL_SIZE / rect.height),
-    ];
+    return [clientX - rect.left, clientY - rect.top];
   }, []);
 
   // Wheel zoom around cursor. Non-passive listener so we can preventDefault to
@@ -356,10 +440,11 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
       if (wheelRafRef.current !== null) cancelAnimationFrame(wheelRafRef.current);
       wheelRafRef.current = requestAnimationFrame(() => {
         wheelRafRef.current = null;
-        const anchor = clientToNatural(e.clientX, e.clientY);
+        const anchor = clientToCanvasCss(e.clientX, e.clientY);
         if (!anchor) return;
         const factor = e.deltaY < 0 ? WHEEL_FACTOR : 1 / WHEEL_FACTOR;
-        setTransform(prev => zoomAround(prev, anchor[0], anchor[1], factor));
+        const { w, h } = canvasSizeRef.current;
+        setTransform(prev => zoomAround(prev, anchor[0], anchor[1], factor, w, h));
       });
     };
 
@@ -371,7 +456,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
         wheelRafRef.current = null;
       }
     };
-  }, [isOpen, clientToNatural]);
+  }, [isOpen, clientToCanvasCss]);
 
   // Touch: pinch-to-zoom (two fingers), single-finger pan when zoomed in.
   // Non-passive so we can preventDefault and override browser pinch zoom.
@@ -404,7 +489,11 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
         }
       } else if (e.touches.length === 1) {
         const touch = e.touches[0];
-        if (transformRef.current.scale > MIN_SCALE) {
+        const { w, h } = canvasSizeRef.current;
+        // Pan available when zoomed in OR when the canvas isn't square (the
+        // map fit-COVERS so the smaller axis has cropped overflow to scroll).
+        const canPan = transformRef.current.scale > MIN_SCALE || w !== h;
+        if (canPan) {
           isPanningRef.current = true;
           lastPanRef.current = { x: touch.clientX, y: touch.clientY };
         }
@@ -414,37 +503,37 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
     const handleTouchMove = (e: TouchEvent) => {
       const rect = canvas.getBoundingClientRect();
-      const conv = INTERNAL_SIZE / rect.width;
+      const { w, h } = canvasSizeRef.current;
       if (e.touches.length === 2 && isPinchingRef.current) {
         e.preventDefault();
         const newDist = getTouchDist(e.touches[0], e.touches[1]);
         const newMid = getTouchMid(e.touches[0], e.touches[1]);
         const factor = newDist / (lastTouchDistRef.current || newDist);
-        const anchorX = (lastTouchMidRef.current.x - rect.left) * conv;
-        const anchorY = (lastTouchMidRef.current.y - rect.top) * conv;
-        const dxNatural = (newMid.x - lastTouchMidRef.current.x) * conv;
-        const dyNatural = (newMid.y - lastTouchMidRef.current.y) * conv;
+        const anchorCssX = lastTouchMidRef.current.x - rect.left;
+        const anchorCssY = lastTouchMidRef.current.y - rect.top;
+        const dxCss = newMid.x - lastTouchMidRef.current.x;
+        const dyCss = newMid.y - lastTouchMidRef.current.y;
         setTransform(prev => {
-          const zoomed = zoomAround(prev, anchorX, anchorY, factor);
+          const zoomed = zoomAround(prev, anchorCssX, anchorCssY, factor, w, h);
           return clampTransform({
             scale: zoomed.scale,
-            x: zoomed.x + dxNatural,
-            y: zoomed.y + dyNatural,
-          });
+            x: zoomed.x + dxCss,
+            y: zoomed.y + dyCss,
+          }, w, h);
         });
         lastTouchDistRef.current = newDist;
         lastTouchMidRef.current = newMid;
       } else if (e.touches.length === 1 && isPanningRef.current) {
         e.preventDefault();
         const touch = e.touches[0];
-        const dxNatural = (touch.clientX - lastPanRef.current.x) * conv;
-        const dyNatural = (touch.clientY - lastPanRef.current.y) * conv;
+        const dxCss = touch.clientX - lastPanRef.current.x;
+        const dyCss = touch.clientY - lastPanRef.current.y;
         lastPanRef.current = { x: touch.clientX, y: touch.clientY };
         setTransform(prev => clampTransform({
           scale: prev.scale,
-          x: prev.x + dxNatural,
-          y: prev.y + dyNatural,
-        }));
+          x: prev.x + dxCss,
+          y: prev.y + dyCss,
+        }, w, h));
         // Suppress tooltip while actively dragging.
         setTooltip(null);
       }
@@ -459,7 +548,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
       } else if (e.touches.length === 1 && isPinchingRef.current) {
         // Pinch → potential pan as the second finger lifts.
         isPinchingRef.current = false;
-        if (transformRef.current.scale > MIN_SCALE) {
+        const { w, h } = canvasSizeRef.current;
+        if (transformRef.current.scale > MIN_SCALE || w !== h) {
           isPanningRef.current = true;
           lastPanRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }
@@ -480,18 +570,15 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (isMouseDraggingRef.current) {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const conv = INTERNAL_SIZE / rect.width;
-      const dxNatural = (e.clientX - lastMouseRef.current.x) * conv;
-      const dyNatural = (e.clientY - lastMouseRef.current.y) * conv;
+      const dxCss = e.clientX - lastMouseRef.current.x;
+      const dyCss = e.clientY - lastMouseRef.current.y;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      const { w, h } = canvasSizeRef.current;
       setTransform(prev => clampTransform({
         scale: prev.scale,
-        x: prev.x + dxNatural,
-        y: prev.y + dyNatural,
-      }));
+        x: prev.x + dxCss,
+        y: prev.y + dyCss,
+      }, w, h));
       return;
     }
     if (showLabels) return;
@@ -500,8 +587,10 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   }, [showLabels, hitTest]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
-    // Left-click drag pans when zoomed in; middle-click always pans.
-    if (e.button === 1 || (e.button === 0 && transformRef.current.scale > MIN_SCALE)) {
+    const { w, h } = canvasSizeRef.current;
+    const canPan = transformRef.current.scale > MIN_SCALE || w !== h;
+    // Left-click drag pans when there's pannable space; middle-click always pans.
+    if (e.button === 1 || (e.button === 0 && canPan)) {
       e.preventDefault();
       isMouseDraggingRef.current = true;
       lastMouseRef.current = { x: e.clientX, y: e.clientY };
@@ -519,11 +608,13 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   }, []);
 
   const handleZoomIn = useCallback(() => {
-    setTransform(prev => zoomAround(prev, INTERNAL_SIZE / 2, INTERNAL_SIZE / 2, ZOOM_BUTTON_FACTOR));
+    const { w, h } = canvasSizeRef.current;
+    setTransform(prev => zoomAround(prev, w / 2, h / 2, ZOOM_BUTTON_FACTOR, w, h));
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    setTransform(prev => zoomAround(prev, INTERNAL_SIZE / 2, INTERNAL_SIZE / 2, 1 / ZOOM_BUTTON_FACTOR));
+    const { w, h } = canvasSizeRef.current;
+    setTransform(prev => zoomAround(prev, w / 2, h / 2, 1 / ZOOM_BUTTON_FACTOR, w, h));
   }, []);
 
   const handleZoomReset = useCallback(() => {
@@ -534,6 +625,73 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     if (e.target === e.currentTarget) onClose();
   }, [onClose]);
 
+  // Pointer-based resize: each handle reports a direction string. The handle
+  // captures the pointer on down so movements outside the handle still update
+  // the popup rect; we always work from a snapshot of the rect at down-time so
+  // jitter from React state updates can't drift the geometry.
+  const handleResizeStart = useCallback((dir: ResizeDirection) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const start = popupRect;
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.currentTarget;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    try { target.setPointerCapture(e.pointerId); } catch {}
+    activeResizeDirRef.current = dir;
+    setResizing(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      let { left, top, width, height } = start;
+
+      if (dir.includes('e')) {
+        // Drag right edge: clamp width so the popup doesn't push past the
+        // viewport's right margin.
+        width = Math.max(MIN_POPUP_WIDTH, Math.min(start.width + dx, vw - start.left - POPUP_VIEWPORT_MARGIN));
+      }
+      if (dir.includes('w')) {
+        // Drag left edge: opposite (right) edge stays anchored, so width
+        // changes by -dx and left compensates so right = start.left + start.width.
+        const desiredW = Math.max(MIN_POPUP_WIDTH, Math.min(start.width - dx, start.left + start.width - POPUP_VIEWPORT_MARGIN));
+        width = desiredW;
+        left = start.left + start.width - width;
+      }
+      if (dir.includes('s')) {
+        height = Math.max(MIN_POPUP_HEIGHT, Math.min(start.height + dy, vh - start.top - POPUP_VIEWPORT_MARGIN));
+      }
+      if (dir.includes('n')) {
+        const desiredH = Math.max(MIN_POPUP_HEIGHT, Math.min(start.height - dy, start.top + start.height - POPUP_VIEWPORT_MARGIN));
+        height = desiredH;
+        top = start.top + start.height - height;
+      }
+
+      // Hard guard: keep at least a sliver visible (matters when the popup
+      // started near a viewport edge and the user yanks the handle far past).
+      left = Math.max(MIN_VISIBLE - width, Math.min(vw - MIN_VISIBLE, left));
+      top = Math.max(0, Math.min(vh - MIN_VISIBLE, top));
+
+      setPopupRect({ left, top, width, height });
+    };
+
+    const onUp = (ev: PointerEvent) => {
+      try { target.releasePointerCapture(ev.pointerId); } catch {}
+      target.removeEventListener('pointermove', onMove);
+      target.removeEventListener('pointerup', onUp);
+      target.removeEventListener('pointercancel', onUp);
+      activeResizeDirRef.current = null;
+      setResizing(false);
+    };
+
+    target.addEventListener('pointermove', onMove);
+    target.addEventListener('pointerup', onUp);
+    target.addEventListener('pointercancel', onUp);
+  }, [popupRect]);
+
   if (!isOpen) return null;
 
   return createPortal(
@@ -542,10 +700,42 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
         <div
           style={{
             ...styles.container,
-            width: popupSize?.width,
-            height: popupSize?.height,
+            left: popupRect.left,
+            top: popupRect.top,
+            width: popupRect.width,
+            height: popupRect.height,
+            // Suppress text selection mid-resize.
+            userSelect: resizing ? 'none' : undefined,
           }}
         >
+          {/* Resize handles — 4 edges + 4 corners. Each edge handle has a
+              slim always-on hint bar centered in the strip; each corner has
+              a small visible chevron-style grip. Hover styling lives in the
+              one-shot CSS injected by `useResizeHandleStyles`. */}
+          <div className="cmp-resize-edge cmp-resize-edge-n" style={styles.resizeEdgeN} onPointerDown={handleResizeStart('n')}>
+            <span style={styles.resizeEdgeHintH} />
+          </div>
+          <div className="cmp-resize-edge cmp-resize-edge-s" style={styles.resizeEdgeS} onPointerDown={handleResizeStart('s')}>
+            <span style={styles.resizeEdgeHintH} />
+          </div>
+          <div className="cmp-resize-edge cmp-resize-edge-e" style={styles.resizeEdgeE} onPointerDown={handleResizeStart('e')}>
+            <span style={styles.resizeEdgeHintV} />
+          </div>
+          <div className="cmp-resize-edge cmp-resize-edge-w" style={styles.resizeEdgeW} onPointerDown={handleResizeStart('w')}>
+            <span style={styles.resizeEdgeHintV} />
+          </div>
+          <div className="cmp-resize-corner" style={styles.resizeCornerNE} onPointerDown={handleResizeStart('ne')}>
+            <span style={styles.resizeCornerNEGrip} />
+          </div>
+          <div className="cmp-resize-corner" style={styles.resizeCornerNW} onPointerDown={handleResizeStart('nw')}>
+            <span style={styles.resizeCornerNWGrip} />
+          </div>
+          <div className="cmp-resize-corner" style={styles.resizeCornerSE} onPointerDown={handleResizeStart('se')}>
+            <span style={styles.resizeCornerSEGrip} />
+          </div>
+          <div className="cmp-resize-corner" style={styles.resizeCornerSW} onPointerDown={handleResizeStart('sw')}>
+            <span style={styles.resizeCornerSWGrip} />
+          </div>
           <div style={styles.header}>
             <span style={styles.title}>{cityName}</span>
             <div style={styles.headerControls}>
@@ -576,7 +766,9 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
                 ref={canvasRef}
                 style={{
                   ...styles.canvas,
-                  cursor: transform.scale > MIN_SCALE ? (isMouseDraggingRef.current ? 'grabbing' : 'grab') : 'default',
+                  cursor: (transform.scale > MIN_SCALE || canvasSize.w !== canvasSize.h)
+                    ? (isMouseDraggingRef.current ? 'grabbing' : 'grab')
+                    : 'default',
                 }}
                 onMouseDown={handleMouseDown}
                 onMouseUp={handleMouseUp}
@@ -634,29 +826,178 @@ const styles: Record<string, React.CSSProperties> = {
   backdrop: {
     position: 'fixed',
     inset: 0,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
     backgroundColor: 'rgba(30, 20, 10, 0.6)',
     zIndex: 10000,
-    padding: '16px 12px',
-    boxSizing: 'border-box',
   },
   container: {
+    position: 'fixed',
     background: '#f5e9c8',
     border: '2px solid #8a6a3a',
     borderRadius: 6,
     boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
     display: 'flex',
     flexDirection: 'column',
-    maxWidth: '100%',
-    maxHeight: '100%',
-    minWidth: 320,
-    minHeight: 360,
     overflow: 'hidden',
-    // Native corner-drag resize handle; ResizeObserver on canvasWrapper picks
-    // up the new dimensions and rescales the canvas display size to fit.
-    resize: 'both',
+    boxSizing: 'border-box',
+  },
+  // Each edge handle is a thin strip along the popup border. They sit OUTSIDE
+  // the rounded border (negative offsets) so the visible hairline doesn't
+  // clash with the container's brown frame, and they have an 8px hit-target
+  // for easy grabbing.
+  resizeEdgeN: {
+    position: 'absolute',
+    top: -4,
+    left: 12,
+    right: 12,
+    height: 8,
+    cursor: 'ns-resize',
+    zIndex: 5,
+    touchAction: 'none',
+  },
+  resizeEdgeS: {
+    position: 'absolute',
+    bottom: -4,
+    left: 12,
+    right: 12,
+    height: 8,
+    cursor: 'ns-resize',
+    zIndex: 5,
+    touchAction: 'none',
+  },
+  resizeEdgeE: {
+    position: 'absolute',
+    top: 12,
+    bottom: 12,
+    right: -4,
+    width: 8,
+    cursor: 'ew-resize',
+    zIndex: 5,
+    touchAction: 'none',
+  },
+  resizeEdgeW: {
+    position: 'absolute',
+    top: 12,
+    bottom: 12,
+    left: -4,
+    width: 8,
+    cursor: 'ew-resize',
+    zIndex: 5,
+    touchAction: 'none',
+  },
+  // Corner handles overlap the edge handles so diagonal resize wins at the
+  // very corner. The SE corner additionally renders a small visible grip so
+  // there's an obvious primary-resize affordance (matching the old default).
+  resizeCornerNE: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 16,
+    height: 16,
+    cursor: 'nesw-resize',
+    zIndex: 6,
+    touchAction: 'none',
+  },
+  resizeCornerNW: {
+    position: 'absolute',
+    top: -6,
+    left: -6,
+    width: 16,
+    height: 16,
+    cursor: 'nwse-resize',
+    zIndex: 6,
+    touchAction: 'none',
+  },
+  resizeCornerSE: {
+    position: 'absolute',
+    bottom: -6,
+    right: -6,
+    width: 18,
+    height: 18,
+    cursor: 'nwse-resize',
+    zIndex: 6,
+    touchAction: 'none',
+  },
+  resizeCornerSEGrip: {
+    position: 'absolute',
+    right: 5,
+    bottom: 5,
+    width: 9,
+    height: 9,
+    borderRight: '2px solid #8a6a3a',
+    borderBottom: '2px solid #8a6a3a',
+    pointerEvents: 'none',
+    backgroundColor: 'transparent',
+    opacity: 0.85,
+  },
+  resizeCornerSWGrip: {
+    position: 'absolute',
+    left: 5,
+    bottom: 5,
+    width: 9,
+    height: 9,
+    borderLeft: '2px solid #8a6a3a',
+    borderBottom: '2px solid #8a6a3a',
+    pointerEvents: 'none',
+    backgroundColor: 'transparent',
+    opacity: 0.85,
+  },
+  resizeCornerNEGrip: {
+    position: 'absolute',
+    right: 5,
+    top: 5,
+    width: 9,
+    height: 9,
+    borderRight: '2px solid #8a6a3a',
+    borderTop: '2px solid #8a6a3a',
+    pointerEvents: 'none',
+    backgroundColor: 'transparent',
+    opacity: 0.85,
+  },
+  resizeCornerNWGrip: {
+    position: 'absolute',
+    left: 5,
+    top: 5,
+    width: 9,
+    height: 9,
+    borderLeft: '2px solid #8a6a3a',
+    borderTop: '2px solid #8a6a3a',
+    pointerEvents: 'none',
+    backgroundColor: 'transparent',
+    opacity: 0.85,
+  },
+  // Slim always-visible mid-line on each edge hinting "you can drag here";
+  // the injected hover CSS darkens / opaques it on pointer-over.
+  resizeEdgeHintH: {
+    position: 'absolute',
+    top: 3,
+    left: '20%',
+    right: '20%',
+    height: 2,
+    background: '#8a6a3a',
+    borderRadius: 1,
+    pointerEvents: 'none',
+    opacity: 0.55,
+  },
+  resizeEdgeHintV: {
+    position: 'absolute',
+    left: 3,
+    top: '20%',
+    bottom: '20%',
+    width: 2,
+    background: '#8a6a3a',
+    borderRadius: 1,
+    pointerEvents: 'none',
+    opacity: 0.55,
+  },
+  resizeCornerSW: {
+    position: 'absolute',
+    bottom: -6,
+    left: -6,
+    width: 16,
+    height: 16,
+    cursor: 'nesw-resize',
+    zIndex: 6,
+    touchAction: 'none',
   },
   header: {
     display: 'flex',
@@ -730,7 +1071,6 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 4,
   },
   canvasWrapper: {
-    padding: 8,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
