@@ -27,7 +27,7 @@ export interface CitySettlement {
 const SETTLEMENT_CHANCE = 0.01;
 
 /**
- * Returns true if `candidateCi` is within 2 hops of any cell owned by a city
+ * Returns true if `candidateCi` is within 3 hops of any cell owned by a city
  * other than `parentCityId`. Prevents child cities from spawning too close to
  * a neighbour's territory.
  */
@@ -47,6 +47,12 @@ function isTooCloseToOtherCity(
       checked.add(n2);
       const o2 = claimedCells.get(n2);
       if (o2 && o2 !== parentCityId) return true;
+      for (const n3 of cells[n2].neighbors) {
+        if (checked.has(n3)) continue;
+        checked.add(n3);
+        const o3 = claimedCells.get(n3);
+        if (o3 && o3 !== parentCityId) return true;
+      }
     }
   }
   return false;
