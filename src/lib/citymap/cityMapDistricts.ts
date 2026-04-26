@@ -180,16 +180,27 @@ export function placeSlumClusters(
 }
 
 // ─── Dock pass tuning ───────────────────────────────────────────────────────
-// Mirrors `cityMapBlocks.ts:91-99`. Constants duplicated rather than shared so
-// `cityMapDistricts.ts` stays self-contained — same convention as every other
-// V2 slice (`cityMapBuildings.ts` / `cityMapSprawl.ts` duplicate their own
-// polygon-interior helpers, etc.).
+// Per-size probability of emitting a dock cluster on a coastal city. Megalopolis
+// rolls a second time at `DOCK_SECOND_CLUSTER_PROB` for an additional cluster.
+// `small` is intentionally 0 so the table entry is exhaustive and `medium` /
+// `large` get a real probabilistic chance rather than a deterministic on/off.
+const DOCK_PROBABILITY: Record<CitySize, number> = {
+  small: 0,
+  medium: 0.3,
+  large: 0.8,
+  metropolis: 1,
+  megalopolis: 1,
+};
+const DOCK_SECOND_CLUSTER_PROB = 0.3;
 
-const DOCK_ELIGIBLE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
-  'large', 'metropolis', 'megalopolis',
-]);
-const DOCK_MAX_FRACTION_OF_CITY = 0.10;
-const DOCK_MAX_DEPTH = 3;
+// Maximum BFS diameter (longest shortest path between two cluster nodes, in
+// polygon hops) for a single dock cluster. Spec: "clusters up to 5 polygons
+// in diameter". Implemented as a per-seed BFS depth cap of 2, which produces
+// clusters with diameter <= 4 hops (worst case: a line of 5 polygons spanning
+// from one BFS-frontier to the opposite frontier). Slightly under the spec's
+// nominal 5 to keep clusters visually compact and avoid spilling along long
+// shorelines.
+const DOCK_BFS_MAX_DEPTH = 2;
 
 // ─── Harbor pass tuning ─────────────────────────────────────────────────────
 // Mirrors `cityMapBlocks.ts:84` — `HARBOR_BAND_FRACTION = 0.30`. A polygon
@@ -303,9 +314,13 @@ const NEGATIVE_DISTRICTS: ReadonlySet<DistrictType> = new Set<DistrictType>([
  *   3. Exterior pass: every non-water, non-mountain polygon outside
  *      `wall.interiorPolygonIds` → `'agricultural'`.
  *   4. Slum overlay: polygons returned by `placeSlumClusters` → `'slum'`.
- *   5. Dock pass: large+ coastal cities only — water polygons within
- *      `DOCK_MAX_DEPTH` BFS hops of the city footprint, capped at
- *      `cityPolygonCount × DOCK_MAX_FRACTION_OF_CITY`, → `'dock'`.
+ *   5. Dock pass: per-size probability roll (medium 30%, large 80%, metropolis
+ *      and megalopolis 100%, with megalopolis getting an additional 30% roll
+ *      for a second cluster). Each cluster grows from a shoreline water
+ *      polygon via BFS up to `DOCK_BFS_MAX_DEPTH` hops, → `'dock'`. Then any
+ *      Voronoi-neighbour interior polygon of a dock that is still unassigned
+ *      becomes `'harbor'` (spec: "Dock polygons along with immediately
+ *      adjacent non assigned polygons form a harbour district").
  *   6. Multi-source BFS from non-park landmarks (interior only, capped at
  *      `LANDMARK_BFS_MAX_HOPS` hops). Each polygon inherits the district of
  *      its nearest seed via `LANDMARK_KIND_TO_DISTRICT`.
@@ -332,7 +347,7 @@ export function assignDistricts(
   mountainPolygonIds: Set<number>,
   _river: RiverGenerationResult | null,
   canvasSize: number,
-  cityPolygonCount: number,
+  _cityPolygonCount: number,
 ): DistrictType[] {
   const n = polygons.length;
   const out = new Array<DistrictType>(n).fill('residential_medium');
@@ -359,18 +374,44 @@ export function assignDistricts(
     assigned[pid] = true;
   }
 
-  // ── Step 5: dock pass (large+ coastal only) ─────────────────────────────
-  if (
-    DOCK_ELIGIBLE_SIZES.has(env.size)
-    && waterPolygonIds.size > 0
-    && cityPolygonCount > 0
-  ) {
-    const dockBudget = Math.floor(cityPolygonCount * DOCK_MAX_FRACTION_OF_CITY);
-    if (dockBudget > 0) {
-      const dockIds = pickDockPolygonIds(polygons, waterPolygonIds, interior, dockBudget);
-      for (const pid of dockIds) {
-        out[pid] = 'dock';
-        assigned[pid] = true;
+  // ── Step 5: dock pass (probability-rolled per city size) ────────────────
+  // Spec: small 0%, medium 30%, large 80%, metropolis 100%, megalopolis 100%
+  // with an additional 30% chance of a second cluster. Each cluster spans at
+  // most `DOCK_BFS_MAX_DEPTH` BFS hops from a shore-anchor water polygon, so
+  // the cluster diameter stays under the spec's "up to 5 polygons" target.
+  const dockPolygonIds = new Set<number>();
+  if (waterPolygonIds.size > 0) {
+    const dockProb = DOCK_PROBABILITY[env.size];
+    const dockRng = seededPRNG(`${seed}_city_${cityName}_districts_docks`);
+    const placeFirst = dockRng() < dockProb;
+    const placeSecond =
+      env.size === 'megalopolis' && dockRng() < DOCK_SECOND_CLUSTER_PROB;
+    if (placeFirst) {
+      growDockCluster(polygons, waterPolygonIds, interior, dockPolygonIds, dockRng);
+    }
+    if (placeSecond) {
+      growDockCluster(polygons, waterPolygonIds, interior, dockPolygonIds, dockRng);
+    }
+    for (const pid of dockPolygonIds) {
+      out[pid] = 'dock';
+      assigned[pid] = true;
+    }
+  }
+
+  // ── Step 5b: harbor district from dock-adjacent unassigned polygons ─────
+  // Spec: "Dock polygons along with immediately adjacent non assigned polygons
+  // form a harbour district." Walk every dock polygon's Voronoi neighbours and
+  // promote any still-unassigned interior land polygon to `'harbor'`. Mountain
+  // and water polygons stay at the sentinel; exterior polygons are already
+  // tagged agricultural / slum and stay locked.
+  if (dockPolygonIds.size > 0) {
+    for (const dockPid of dockPolygonIds) {
+      for (const nb of polygons[dockPid].neighbors) {
+        if (assigned[nb]) continue;
+        if (waterPolygonIds.has(nb)) continue;
+        if (mountainPolygonIds.has(nb)) continue;
+        out[nb] = 'harbor';
+        assigned[nb] = true;
       }
     }
   }
@@ -571,71 +612,67 @@ function clusterCentroid(cluster: number[], polygons: CityPolygon[]): [number, n
 }
 
 /**
- * Pick water polygons to become docks. Eligibility:
- *   - polygon must be within `DOCK_MAX_DEPTH` BFS hops from the shoreline
- *     (interior-adjacent water polygons = depth 1, each step deeper adds 1)
- *   - depth-1 polygons are preferred; deeper ones fill remaining budget
- * Shallower (closer to shore) polygons rank first; ties broken by id.
+ * Grow one dock cluster of water polygons into `out`. The cluster is seeded
+ * on a shoreline polygon (water polygon Voronoi-adjacent to a city interior
+ * polygon) that is not already part of any cluster and whose neighbours are
+ * not already part of any cluster — this keeps multiple clusters spatially
+ * separated. The cluster grows via BFS over water polygons up to
+ * `DOCK_BFS_MAX_DEPTH` hops from the seed, so cluster diameter stays under
+ * the spec's "up to 5 polygons" target.
  *
- * Mirrors `pickDockPolygons` in `cityMapBlocks.ts:386-442`. Re-implemented
- * locally to keep `cityMapDistricts.ts` self-contained — same convention
- * every other V2 slice follows for polygon-interior helpers.
+ * Mutates `out` in place; no-ops if no eligible seed exists. Polygon-id
+ * tie-break in candidate sort keeps the cluster deterministic for a given
+ * RNG state, and the seed pick uses one `rng()` draw so the second cluster
+ * starts at a different shoreline location than the first.
  */
-function pickDockPolygonIds(
+function growDockCluster(
   polygons: CityPolygon[],
   water: Set<number>,
   interior: Set<number>,
-  budget: number,
-): number[] {
-  // BFS from shore: seed with water polygons adjacent to interior (depth 1),
-  // then expand up to DOCK_MAX_DEPTH steps further into open water.
-  const depthMap = new Map<number, number>();
-  const bfsQueue: number[] = [];
+  out: Set<number>,
+  rng: () => number,
+): void {
+  // [Voronoi-polygon] Shoreline pool — water polygons touching interior land.
+  // Filter out anything already in `out` (the cluster being grown) or directly
+  // adjacent to it, so a megalopolis's two clusters land on different stretches
+  // of shore rather than abutting each other.
+  const shore: number[] = [];
   for (const pid of water) {
+    if (out.has(pid)) continue;
     const poly = polygons[pid];
     if (!poly) continue;
+    let touchesInterior = false;
+    let touchesUsed = false;
     for (const nb of poly.neighbors) {
-      if (interior.has(nb)) {
-        depthMap.set(pid, 1);
-        bfsQueue.push(pid);
-        break;
-      }
+      if (interior.has(nb)) touchesInterior = true;
+      if (out.has(nb)) touchesUsed = true;
     }
+    if (touchesInterior && !touchesUsed) shore.push(pid);
   }
+  if (shore.length === 0) return;
+  shore.sort((a, b) => a - b);
+  const seed = shore[Math.floor(rng() * shore.length)];
+
+  // [Voronoi-polygon] BFS from seed over water polygons, capped at
+  // DOCK_BFS_MAX_DEPTH hops. Stops crossing into polygons already used by a
+  // prior cluster so the two megalopolis clusters never merge into one.
+  const depth = new Map<number, number>([[seed, 0]]);
+  const queue: number[] = [seed];
   let head = 0;
-  while (head < bfsQueue.length) {
-    const pid = bfsQueue[head++];
-    const d = depthMap.get(pid)!;
-    if (d >= DOCK_MAX_DEPTH) continue;
+  out.add(seed);
+  while (head < queue.length) {
+    const pid = queue[head++];
+    const d = depth.get(pid)!;
+    if (d >= DOCK_BFS_MAX_DEPTH) continue;
     for (const nb of polygons[pid].neighbors) {
-      if (water.has(nb) && !depthMap.has(nb)) {
-        depthMap.set(nb, d + 1);
-        bfsQueue.push(nb);
-      }
+      if (!water.has(nb)) continue;
+      if (out.has(nb)) continue;
+      if (depth.has(nb)) continue;
+      depth.set(nb, d + 1);
+      queue.push(nb);
+      out.add(nb);
     }
   }
-
-  type Candidate = { id: number; score: number };
-  const candidates: Candidate[] = [];
-  for (const [pid, depth] of depthMap) {
-    const poly = polygons[pid];
-    if (!poly) continue;
-    let interiorTouches = 0;
-    let landTouches = 0;
-    for (const nb of poly.neighbors) {
-      if (interior.has(nb)) interiorTouches++;
-      if (!water.has(nb)) landTouches++;
-    }
-    candidates.push({ id: pid, score: depth * 100 - interiorTouches * 10 - landTouches });
-  }
-  candidates.sort((a, b) => (a.score - b.score) || (a.id - b.id));
-
-  const picked: number[] = [];
-  for (const c of candidates) {
-    if (picked.length >= budget) break;
-    picked.push(c.id);
-  }
-  return picked;
 }
 
 /**
