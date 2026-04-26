@@ -141,6 +141,7 @@ function pointInPolygon(px: number, py: number, verts: [number, number][]): bool
 
 export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
   // polygonId → resolved tooltip info. Landmarks (forge, barracks, …) take
   // priority over the parent block so each special-quarter polygon shows its
@@ -150,6 +151,14 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const [showLabels, setShowLabels] = useState(true);
   const [tooltip, setTooltip] = useState<(PolygonHit & { x: number; y: number }) | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Initial popup size — derived from viewport on first open. Once set, the
+  // user can resize the container freely via the native CSS `resize: both`
+  // handle in the bottom-right corner.
+  const [popupSize, setPopupSize] = useState<{ width: number; height: number } | null>(null);
+  // Canvas display size (square) — kept in sync with the canvas wrapper via a
+  // ResizeObserver so the map fills whatever space the resized popup gives it.
+  const [canvasDisplaySize, setCanvasDisplaySize] = useState(INTERNAL_SIZE);
 
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 1 });
   const transformRef = useRef(transform);
@@ -166,20 +175,61 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const isMouseDraggingRef = useRef(false);
   const lastMouseRef = useRef({ x: 0, y: 0 });
 
-  // Generate map data (and (re)size the backing canvas) when the source inputs change.
+  // Compute initial popup size on first open, then leave it under user control
+  // (CSS `resize: both` on the container). Reset to null on close so reopening
+  // re-derives a sensible default for the current viewport.
+  useEffect(() => {
+    if (!isOpen) {
+      setPopupSize(null);
+      return;
+    }
+    if (popupSize !== null) return;
+    const availableW = window.innerWidth - 24;
+    const availableH = window.innerHeight - 24;
+    // Roughly: header ~38px + footer ~28px + canvas padding 16px ≈ 82px chrome.
+    const target = Math.max(320, Math.min(INTERNAL_SIZE + 16, availableW, availableH - 82));
+    setPopupSize({ width: target + 16, height: target + 82 });
+  }, [isOpen, popupSize]);
+
+  // Track the canvas wrapper's inner size; the canvas display size is the
+  // largest square that fits, so the map keeps its 1:1 aspect ratio while
+  // expanding into whatever space the resized container offers.
+  useEffect(() => {
+    if (!isOpen) return;
+    const wrapper = canvasWrapperRef.current;
+    if (!wrapper) return;
+    const update = () => {
+      const w = wrapper.clientWidth;
+      const h = wrapper.clientHeight;
+      const size = Math.max(200, Math.min(w, h));
+      setCanvasDisplaySize(size);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(wrapper);
+    return () => ro.disconnect();
+  }, [isOpen]);
+
+  // Apply the canvas display size whenever it changes. Decoupled from the
+  // data-generation effect so resizing doesn't clear the canvas (setting
+  // canvas.width wipes its contents) and doesn't re-run map generation.
+  useEffect(() => {
+    if (!isOpen || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    canvas.style.width = `${canvasDisplaySize}px`;
+    canvas.style.height = `${canvasDisplaySize}px`;
+  }, [isOpen, canvasDisplaySize]);
+
+  // Generate map data when the source inputs change. The backing canvas's
+  // internal pixel resolution is fixed at INTERNAL_SIZE * dpr regardless of
+  // display size — the resize-driven scaling is purely CSS.
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
     const canvas = canvasRef.current;
 
     const dpr = window.devicePixelRatio || 1;
-    const availableW = window.innerWidth - 48;
-    const availableH = window.innerHeight - 116;
-    const displaySize = Math.max(200, Math.min(INTERNAL_SIZE, availableW, availableH));
-
     canvas.width = INTERNAL_SIZE * dpr;
     canvas.height = INTERNAL_SIZE * dpr;
-    canvas.style.width = `${displaySize}px`;
-    canvas.style.height = `${displaySize}px`;
 
     const data = generateCityMapV2(seed, cityName, environment);
     mapDataRef.current = data;
@@ -489,7 +539,13 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   return createPortal(
     <>
       <div style={styles.backdrop} onClick={handleBackdropClick}>
-        <div style={styles.container}>
+        <div
+          style={{
+            ...styles.container,
+            width: popupSize?.width,
+            height: popupSize?.height,
+          }}
+        >
           <div style={styles.header}>
             <span style={styles.title}>{cityName}</span>
             <div style={styles.headerControls}>
@@ -514,7 +570,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
               <button style={styles.closeBtn} onClick={onClose} title="Close">&times;</button>
             </div>
           </div>
-          <div style={styles.canvasWrapper}>
+          <div ref={canvasWrapperRef} style={styles.canvasWrapper}>
             <div style={styles.canvasFrame}>
               <canvas
                 ref={canvasRef}
@@ -595,7 +651,12 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     maxWidth: '100%',
     maxHeight: '100%',
+    minWidth: 320,
+    minHeight: 360,
     overflow: 'hidden',
+    // Native corner-drag resize handle; ResizeObserver on canvasWrapper picks
+    // up the new dimensions and rescales the canvas display size to fit.
+    resize: 'both',
   },
   header: {
     display: 'flex',
@@ -673,9 +734,10 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'auto',
-    flexShrink: 1,
+    overflow: 'hidden',
+    flex: '1 1 auto',
     minHeight: 0,
+    minWidth: 0,
   },
   canvasFrame: {
     position: 'relative',
