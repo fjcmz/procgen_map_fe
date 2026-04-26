@@ -133,6 +133,10 @@ export interface City {
   ruinYear: number;
   /** Cells owned by this city, with the year each was claimed. */
   ownedCells?: CityOwnedCell[];
+  /** Cell index of the child city spawned as a growth settlement (if any). */
+  childCellIndex?: number;
+  /** Cell index of the parent city that spawned this city as a settlement (if any). */
+  parentCellIndex?: number;
 }
 
 export interface Road {
@@ -162,7 +166,7 @@ export type HistoryEventType =
   | 'FOUNDATION' | 'CONTACT' | 'COUNTRY' | 'ILLUSTRATE'
   | 'WONDER' | 'WONDER_DESTROYED' | 'RELIGION' | 'TRADE' | 'CATACLYSM'
   | 'TECH' | 'TECH_LOSS' | 'EMPIRE' | 'RUIN'
-  | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT' | 'DISCOVERY';
+  | 'TERRITORIAL_EXPANSION' | 'SETTLEMENT' | 'CITY_SETTLEMENT' | 'DISCOVERY';
 
 export interface HistoryEvent {
   type: HistoryEventType;
@@ -216,6 +220,10 @@ export interface HistoryEvent {
   expansionCellCount?: number;
   /** SETTLEMENT-only: name of the city settled in expansion territory. */
   settlementCityName?: string;
+  /** CITY_SETTLEMENT-only: cell index of the parent city that triggered the settlement. */
+  parentCityCell?: number;
+  /** CITY_SETTLEMENT-only: cell index of the newly founded child city. */
+  childCityCell?: number;
   /**
    * DISCOVERY-only: the resource newly unlocked for trade in the region,
    * and the tech gate that was crossed. Used by the Events tab and
