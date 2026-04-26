@@ -30,6 +30,7 @@ const DEFAULT_LAYERS: LayerVisibility = {
   minimap: false,
   hillshading: true,
   seasonalIce: true,
+  cityIcons: true,
 };
 
 export default function App() {
