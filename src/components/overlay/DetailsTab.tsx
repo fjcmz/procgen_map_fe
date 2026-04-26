@@ -605,38 +605,6 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           {city?.ownedCells && (
             <InfoRow label="Territory" value={`${city.ownedCells.filter(oc => oc.yearAdded <= selectedYear).length} cells`} />
           )}
-          {city?.parentCellIndex != null && (() => {
-            const parentCity = mapData.cities.find(c => c.cellIndex === city.parentCellIndex);
-            return parentCity ? (
-              <InfoRow label="Parent city">
-                <button
-                  style={styles.linkBtn}
-                  onClick={() => {
-                    onSelectEntity({ type: 'city', cellIndex: city.parentCellIndex! });
-                    onNavigate?.([city.parentCellIndex!], city.parentCellIndex!);
-                  }}
-                >
-                  {parentCity.name}
-                </button>
-              </InfoRow>
-            ) : null;
-          })()}
-          {city?.childCellIndex != null && (() => {
-            const childCity = mapData.cities.find(c => c.cellIndex === city.childCellIndex);
-            return childCity ? (
-              <InfoRow label="Child city">
-                <button
-                  style={styles.linkBtn}
-                  onClick={() => {
-                    onSelectEntity({ type: 'city', cellIndex: city.childCellIndex! });
-                    onNavigate?.([city.childCellIndex!], city.childCellIndex!);
-                  }}
-                >
-                  {childCity.name}
-                </button>
-              </InfoRow>
-            ) : null;
-          })()}
         </div>
 
         {/* Resources on this city's owned cells */}

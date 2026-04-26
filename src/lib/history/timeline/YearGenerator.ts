@@ -19,7 +19,6 @@ import { techGenerator, getCityTechLevel, getCountryTechLevel } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
 import { expandGenerator } from './Expand';
-import { citySettlementGenerator } from './CitySettlement';
 import type { CountryEvent } from './Country';
 import { ruinifyCity } from './Ruin';
 import type { CityEntity } from '../physical/CityEntity';
@@ -100,12 +99,6 @@ export class YearGenerator {
       const govLevel = getCityTechLevel(world, city, 'government');
       const indLevel = getCityTechLevel(world, city, 'industry');
       city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
-    }
-
-    // Step 4d: City-growth settlements — large+ cities spawn a child city once
-    if (cells && usedCityNames) {
-      const settles = citySettlementGenerator.generate(rng, year, world, cells, usedCityNames);
-      year.citySettlements.push(...settles);
     }
 
     // Step 4c: Territory expansion — cities claim adjacent cells from their region

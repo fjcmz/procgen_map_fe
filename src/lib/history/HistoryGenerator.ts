@@ -641,24 +641,6 @@ function serializeYearEvents(
     });
   }
 
-  // City-growth settlements
-  for (const cs of year.citySettlements) {
-    const numIdx = countryMap.idToIndex.get(cs.countryId) ?? -1;
-    const cName = resolveCountryName(countryMap, cs.countryId);
-    const parent = world.mapCities.get(cs.parentCityId);
-    const child = world.mapCities.get(cs.childCityId);
-    events.push({
-      type: 'CITY_SETTLEMENT',
-      year: absYear,
-      initiatorId: numIdx,
-      description: `${parent?.name ?? 'A large city'} (${cName}) founds ${child?.name ?? 'a settlement'} as a new settlement.`,
-      locationCellIndex: parent?.cellIndex,
-      targetCellIndex: child?.cellIndex,
-      parentCityCell: parent?.cellIndex,
-      childCityCell: child?.cellIndex,
-    });
-  }
-
   return events;
 }
 
@@ -1355,14 +1337,6 @@ export class HistoryGenerator {
       if (region?.countryId) {
         kingdomId = countryMap.idToIndex.get(region.countryId) ?? -1;
       }
-      // Resolve parent/child cell indices from sibling CityEntity objects
-      const childCellIndex = cityEntity.childCityId
-        ? world.mapCities.get(cityEntity.childCityId)?.cellIndex
-        : undefined;
-      const parentCellIndex = cityEntity.parentCityId
-        ? world.mapCities.get(cityEntity.parentCityId)?.cellIndex
-        : undefined;
-
       cities.push({
         cellIndex: cityEntity.cellIndex,
         name: cityEntity.name,
@@ -1376,8 +1350,6 @@ export class HistoryGenerator {
           cellIndex: ci,
           yearAdded: yr >= timeline.startOfTime ? yr - timeline.startOfTime : yr,
         })),
-        childCellIndex,
-        parentCellIndex,
       });
     }
 

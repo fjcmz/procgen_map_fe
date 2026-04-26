@@ -159,12 +159,6 @@ export class CityEntity {
   contactCities: Set<CityEntity> = new Set();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- typed as Map<TechField, Tech> in timeline layer; loose here to avoid circular dependency
   knownTechs: Map<string, any> = new Map();
-  /** True once this city has produced a city-growth settlement. One-time event. */
-  hasHadSettlement: boolean = false;
-  /** ID of the city this city spawned as a settlement (if any). */
-  childCityId: string | null = null;
-  /** ID of the parent city that spawned this city as a settlement (if any). */
-  parentCityId: string | null = null;
 
   constructor(cellIndex: number, name: string, rng: () => number) {
     this.id = IdUtil.id('city', rngHex(rng)) ?? 'city_unknown';
