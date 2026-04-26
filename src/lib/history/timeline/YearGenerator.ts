@@ -24,6 +24,9 @@ import { ruinifyCity } from './Ruin';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Cell } from '../../types';
 
+/** Maximum BFS hop distance from a city's founding cell that it can claim. */
+const MAX_CITY_EXPANSION_RADIUS = 7;
+
 export class YearGenerator {
   generate(rng: () => number, timeline: Timeline, world: World, cells?: Cell[], usedCityNames?: Set<string>): Year {
     const year = new Year(rng);
@@ -119,7 +122,28 @@ export class YearGenerator {
 
         const regionCellSet = new Set(region.cellIndices);
 
-        // Build frontier: cells adjacent to owned cells, in the same region, unclaimed
+        // BFS distance from the city's founding cell through the region.
+        // Cells beyond MAX_CITY_EXPANSION_RADIUS are never added to the frontier.
+        const cityDist = new Map<number, number>();
+        {
+          cityDist.set(city.cellIndex, 0);
+          const dq: number[] = [city.cellIndex];
+          let dh = 0;
+          while (dh < dq.length) {
+            const ci = dq[dh++];
+            const d = cityDist.get(ci)!;
+            if (d >= MAX_CITY_EXPANSION_RADIUS) continue;
+            for (const ni of cells[ci].neighbors) {
+              if (cityDist.has(ni)) continue;
+              if (!regionCellSet.has(ni) && !city.ownedCells.has(ni)) continue;
+              cityDist.set(ni, d + 1);
+              dq.push(ni);
+            }
+          }
+        }
+
+        // Build frontier: cells adjacent to owned cells, in the same region,
+        // unclaimed, and within MAX_CITY_EXPANSION_RADIUS hops of the city center.
         const frontier: number[] = [];
         const seen = new Set<number>();
         for (const ownedCi of city.ownedCells.keys()) seen.add(ownedCi);
@@ -129,6 +153,7 @@ export class YearGenerator {
             seen.add(ni);
             if (!regionCellSet.has(ni)) continue;
             if (claimedCells.has(ni)) continue;
+            if ((cityDist.get(ni) ?? Infinity) > MAX_CITY_EXPANSION_RADIUS) continue;
             frontier.push(ni);
           }
         }
