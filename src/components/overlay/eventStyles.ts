@@ -12,27 +12,28 @@
 import type { HistoryEventType, TechField } from '../../lib/types';
 
 export const EVENT_ICONS: Record<string, string> = {
-  WAR: '\u2694\uFE0F',
-  CONQUEST: '\uD83C\uDFF4',
-  MERGE: '\uD83E\uDD1D',
-  COLLAPSE: '\uD83D\uDC80',
-  EXPANSION: '\uD83D\uDCCD',
-  FOUNDATION: '\uD83C\uDFD7\uFE0F',
-  CONTACT: '\uD83D\uDCE8',
-  COUNTRY: '\uD83C\uDFDB\uFE0F',
-  ILLUSTRATE: '\u2B50',
-  WONDER: '\uD83C\uDFDB',
-  WONDER_DESTROYED: '\uD83D\uDCA5',
-  RELIGION: '\u2626\uFE0F',
-  TRADE: '\uD83D\uDCB0',
-  CATACLYSM: '\uD83C\uDF0B',
-  TECH: '\uD83D\uDD2C',
-  TECH_LOSS: '\uD83D\uDCDA',
-  EMPIRE: '\uD83D\uDC51',
-  RUIN: '\uD83C\uDFDA\uFE0F',
-  TERRITORIAL_EXPANSION: '\uD83E\uDDED',
-  SETTLEMENT: '\uD83C\uDFE0',
-  POPULATION: '\uD83D\uDC65',
+  WAR: '⚔️',
+  CONQUEST: '🏴',
+  MERGE: '🤝',
+  COLLAPSE: '💀',
+  EXPANSION: '📍',
+  FOUNDATION: '🏗️',
+  CONTACT: '📨',
+  COUNTRY: '🏛️',
+  ILLUSTRATE: '⭐',
+  WONDER: '🏛',
+  WONDER_DESTROYED: '💥',
+  RELIGION: '☦️',
+  TRADE: '💰',
+  CATACLYSM: '🌋',
+  TECH: '🔬',
+  TECH_LOSS: '📚',
+  EMPIRE: '👑',
+  RUIN: '🏚️',
+  TERRITORIAL_EXPANSION: '🧭',
+  SETTLEMENT: '🏠',
+  CITY_SETTLEMENT: '🏘️',
+  POPULATION: '👥',
 };
 
 export const EVENT_COLORS: Record<string, string> = {
@@ -56,6 +57,7 @@ export const EVENT_COLORS: Record<string, string> = {
   RUIN: '#888888',
   TERRITORIAL_EXPANSION: '#8B6914',
   SETTLEMENT: '#2E8B57',
+  CITY_SETTLEMENT: '#A05C20',
   POPULATION: '#5a7a5a',
 };
 
@@ -65,7 +67,7 @@ export const EVENT_TYPE_GROUPS: { label: string; types: HistoryEventType[] }[] =
   { label: 'Economy',      types: ['TRADE'] },
   { label: 'Conflict',     types: ['WAR', 'CONQUEST'] },
   { label: 'Disasters',    types: ['CATACLYSM', 'COLLAPSE'] },
-  { label: 'Expansion',    types: ['TERRITORIAL_EXPANSION', 'SETTLEMENT'] },
+  { label: 'Expansion',    types: ['TERRITORIAL_EXPANSION', 'SETTLEMENT', 'CITY_SETTLEMENT'] },
   { label: 'Other',        types: ['MERGE', 'EXPANSION', 'RUIN'] },
 ];
 
