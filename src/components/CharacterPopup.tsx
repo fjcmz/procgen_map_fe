@@ -74,6 +74,19 @@ interface CharacterPopupProps {
   character: CityCharacter | null;
   cityName?: string;
   onClose: () => void;
+  /**
+   * The full roster the displayed character was rolled with — used to
+   * resolve relationship `targetIndex`es into clickable links. When
+   * absent, the relationships section still renders the names but each
+   * row is non-interactive.
+   */
+  roster?: CityCharacter[];
+  /**
+   * Called when the user clicks a relationship row. Switching the popup's
+   * `character` prop to the related character is the parent's job — the
+   * popup just bubbles the selection up.
+   */
+  onSelectCharacter?: (c: CityCharacter) => void;
 }
 
 const ABILITY_LABELS: Record<Ability, string> = {
@@ -104,7 +117,7 @@ function fmtHeight(inches: number): string {
  * by clicking the name column in the DetailsTab character roster. Closes on
  * backdrop click, ESC, or the × button.
  */
-export function CharacterPopup({ isOpen, character, cityName, onClose }: CharacterPopupProps) {
+export function CharacterPopup({ isOpen, character, cityName, onClose, roster, onSelectCharacter }: CharacterPopupProps) {
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
@@ -206,6 +219,41 @@ export function CharacterPopup({ isOpen, character, cityName, onClose }: Charact
             <LifespanCell label="Venerable" age={c.age.venerableAge} current={c.age.currentAge} />
             <LifespanCell label="Max" age={c.age.maxAge} current={c.age.currentAge} />
           </div>
+
+          {/* Connections — bidirectional links to other roster members. Each
+              row is a button that re-opens this popup with the related
+              character (parent flips `selectedCharacter`). Falls through
+              silently when nobody connected to this character. */}
+          {c.relationships && c.relationships.length > 0 && (
+            <>
+              <div style={styles.sectionLabel}>Connections ({c.relationships.length})</div>
+              <div style={styles.connectionList}>
+                {c.relationships.map((rel, i) => {
+                  const target = roster ? roster[rel.targetIndex] : undefined;
+                  const interactive = !!(target && onSelectCharacter);
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      style={{
+                        ...styles.connectionRow,
+                        cursor: interactive ? 'pointer' : 'default',
+                        opacity: interactive ? 1 : 0.7,
+                      }}
+                      onClick={() => {
+                        if (interactive && target) onSelectCharacter!(target);
+                      }}
+                      disabled={!interactive}
+                      title={interactive ? `Open ${rel.targetName}'s sheet — ${rel.reason}` : rel.reason}
+                    >
+                      <span style={styles.connectionName}>{rel.targetName}</span>
+                      <span style={styles.connectionReason}>{rel.reason}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </>,
@@ -460,6 +508,43 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: '#7a5a30',
     fontStyle: 'italic',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+  connectionList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+  },
+  connectionRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto',
+    gap: 8,
+    alignItems: 'baseline',
+    padding: '5px 10px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+    textAlign: 'left',
+    font: 'inherit',
+    color: '#2a1a00',
+    width: '100%',
+  },
+  connectionName: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: '#2a1a00',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  connectionReason: {
+    fontSize: 10,
+    color: '#7a5a30',
+    fontStyle: 'italic',
+    textTransform: 'capitalize',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
