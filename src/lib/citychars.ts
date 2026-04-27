@@ -35,8 +35,11 @@ import type { RaceType } from './fantasy/RaceType';
 import type { AlignmentType } from './fantasy/AlignmentType';
 import type { Ability } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
-import type { City, Country, ReligionDetail } from './types';
+import type { City, Country, ReligionDetail, IllustrateDetail } from './types';
 import type { CityMapDataV2, DistrictType, LandmarkKind } from './citymap';
+
+/** Re-exported so DetailsTab can use the same enum without re-importing the sim layer. */
+export type IllustrateType = IllustrateDetail['type'];
 
 /**
  * Pointer from a character to the district / quarter they belong to in the
@@ -86,6 +89,15 @@ export interface CityCharacter {
    * undefined (consumers should fall back to a generic display).
    */
   affiliation?: CharacterAffiliation;
+  /**
+   * When this character represents a simulation-generated illustrate (i.e.
+   * the city has a famous historical figure currently active), these fields
+   * carry the illustrate's identity so the UI can mark the row. Absent for
+   * ordinary procedurally-rolled characters.
+   */
+  illustrateType?: IllustrateType;
+  illustrateBirthYear?: number;
+  illustrateDeathYear?: number | null;
 }
 
 interface SizeProfile {
@@ -424,6 +436,16 @@ export function raceLabel(r: RaceType): string {
  * best match into `CityCharacter.affiliation`. The year is folded into
  * this stream too so affiliations stay in lock-step with year-aware rosters.
  *
+ * `illustrates` integrates the simulation's illustrate system: any
+ * `IllustrateDetail` whose `cityCellIndex` matches AND that is alive at
+ * `year` (`birthYear <= year <= deathYear ?? +Inf`) consumes one roster slot
+ * and is rolled with `pcClass` / `pcLevel` forced to the values baked at
+ * sim time. The roster size becomes `max(profile.count, activeIllustrates.length)`
+ * so notable figures are always present even in small-tier cities. Filtering
+ * is skipped when `year` is undefined (legacy callers preserved). Illustrate
+ * characters carry `illustrateType` / `illustrateBirthYear` / `illustrateDeathYear`
+ * so the UI can mark their rows.
+ *
  * Returns [] on degenerate input (no worldSeed, ruined cities at the renderer
  * layer should already have skipped this call).
  */
@@ -434,6 +456,7 @@ export function generateCityCharacters(
   religions: ReligionDetail[],
   year?: number,
   cityMap?: CityMapDataV2,
+  illustrates?: IllustrateDetail[],
 ): CityCharacter[] {
   if (!worldSeed) return [];
   if (city.isRuin) return [];
@@ -461,8 +484,68 @@ export function generateCityCharacters(
     deityWeights[rel.deity] = Math.max(deityWeights[rel.deity] ?? 0, mult);
   });
 
+  // Active-at-year illustrates living in this city. Each consumes one roster
+  // slot; ordinary characters fill the rest. When the active count exceeds
+  // `profile.count`, the roster expands to fit them all (no illustrate is
+  // ever omitted) — see plan: "always include all active illustrates, expand
+  // roster".
+  const activeIllustrates: IllustrateDetail[] = (() => {
+    if (!illustrates || illustrates.length === 0 || year == null) return [];
+    return illustrates.filter(il =>
+      il.cityCellIndex === city.cellIndex &&
+      il.birthYear <= year &&
+      (il.deathYear == null || il.deathYear >= year),
+    );
+  })();
+  // Reserve illustrate names so the ordinary roller never picks the same one.
+  for (const il of activeIllustrates) usedNames.add(il.name);
+
+  const ordinaryCount = Math.max(0, profile.count - activeIllustrates.length);
+
   const out: CityCharacter[] = [];
-  for (let i = 0; i < profile.count; i++) {
+
+  // 1) Illustrate-derived characters (forced class, baked level, real name).
+  for (const il of activeIllustrates) {
+    const isDominant = rng() < profile.dominantBias;
+    const raceWeights: Partial<Record<RaceType, number>> = isDominant
+      ? { [dominantRace]: DOMINANT_RACE_MULT, ...(secondaryRace ? { [secondaryRace]: SECONDARY_RACE_MULT } : {}) }
+      : { [dominantRace]: 2, ...(secondaryRace ? { [secondaryRace]: 1.5 } : {}) };
+
+    const effectiveDeityWeights: Partial<Record<Deity, number>> | undefined =
+      city.size === 'small' && dominantDeity
+        ? { [dominantDeity]: 100 }
+        : (Object.keys(deityWeights).length > 0 ? deityWeights : undefined);
+
+    const pc = generatePcCharBiased(il.pcLevel, cityAlignment, rng, {
+      raceWeights,
+      deityWeights: effectiveDeityWeights,
+      classWeights: { [il.pcClass]: 1000 },
+    });
+
+    const abilities = {} as Record<Ability, number>;
+    pc.abilities.forEach((v, k) => { abilities[k] = v; });
+
+    out.push({
+      name: il.name,
+      race: pc.race,
+      pcClass: pc.pcClass,
+      level: pc.level,
+      alignment: pc.alignment,
+      deity: pc.deity,
+      hitPoints: pc.hitPoints,
+      abilities,
+      age: pc.age,
+      height: pc.height,
+      weight: pc.weight,
+      wealth: pc.wealth,
+      illustrateType: il.type,
+      illustrateBirthYear: il.birthYear,
+      illustrateDeathYear: il.deathYear,
+    });
+  }
+
+  // 2) Ordinary characters fill the remaining slots.
+  for (let i = 0; i < ordinaryCount; i++) {
     const isDominant = rng() < profile.dominantBias;
     const raceWeights: Partial<Record<RaceType, number>> = isDominant
       ? { [dominantRace]: DOMINANT_RACE_MULT, ...(secondaryRace ? { [secondaryRace]: SECONDARY_RACE_MULT } : {}) }
