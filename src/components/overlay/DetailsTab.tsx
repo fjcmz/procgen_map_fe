@@ -492,15 +492,6 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const [religionsOpen, setReligionsOpen] = useState(false);
   const [selectedCharacter, setSelectedCharacter] = useState<CityCharacter | null>(null);
 
-  // Roll the character roster lazily — only when the user expands the section.
-  // Uses an isolated PRNG sub-stream keyed on the world seed + cellIndex, so the
-  // same city always produces the same roster within one generation run.
-  const characters: CityCharacter[] = useMemo(() => {
-    if (!charactersOpen || !city) return [];
-    const worldSeed = history.worldSeed ?? '';
-    return generateCityCharacters(worldSeed, city, country, cityReligionDetails);
-  }, [charactersOpen, city, country, cityReligionDetails, history.worldSeed]);
-
   // Wonders for this city from wonderDetails (includes destroyed)
   const cityWonders = useMemo(() => {
     if (!history.wonderDetails) return [];
@@ -558,19 +549,44 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
     );
   }, [city, mapData, citySizesAtYear, selectedYear, wonderSnap, religionSnap]);
 
-  // Block counts by role — computed lazily when the Quarters section is expanded.
-  // Keyed on env fields that affect block layout (size, coastal, mountains)
-  // rather than year-varying wonder/religion counts which only affect landmarks.
+  // V2 city-map is generated lazily and SHARED by three consumers: the
+  // Quarters block-count summary, the Characters affiliation pass, and the
+  // pre-computed payload threaded into `CityMapPopupV2` so the popup can
+  // skip its own internal regeneration. We pay the megalopolis cost (~1500
+  // polygons) at most once per city per session, even when the user opens
+  // every section sequentially. Keyed on env fields that affect block
+  // layout (size, coastal, mountains) rather than year-varying wonder /
+  // religion counts which only affect landmarks.
+  const needsCityMapV2 = quartersOpen || charactersOpen || showCityMapV2;
+  const cityMapV2 = useMemo(() => {
+    if (!needsCityMapV2 || !city || !cityEnvironment) return null;
+    return generateCityMapV2(seed, city.name, cityEnvironment);
+  }, [needsCityMapV2, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const blockCounts = useMemo(() => {
-    if (!quartersOpen || !city || !cityEnvironment) return null;
-    const mapV2 = generateCityMapV2(seed, city.name, cityEnvironment);
+    if (!quartersOpen || !cityMapV2) return null;
     const counts: Record<string, number> = {};
-    for (const block of mapV2.blocks) {
+    for (const block of cityMapV2.blocks) {
       if (block.polygonIds.length === 0) continue;
       counts[block.role] = (counts[block.role] ?? 0) + 1;
     }
     return counts;
-  }, [quartersOpen, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [quartersOpen, cityMapV2]);
+
+  // Roll the character roster lazily — only when the user expands the
+  // section OR opens the V2 city map popup (which renders the same roster
+  // grouped by district). Uses an isolated PRNG sub-stream keyed on the
+  // world seed + cellIndex, so the same city always produces the same
+  // roster within one generation run. When `cityMapV2` is available, each
+  // character also receives a `CharacterAffiliation` pointer from the
+  // affiliation pass inside `generateCityCharacters` (separate sub-stream,
+  // doesn't shift the base roster).
+  const charactersNeeded = charactersOpen || showCityMapV2;
+  const characters: CityCharacter[] = useMemo(() => {
+    if (!charactersNeeded || !city) return [];
+    const worldSeed = history.worldSeed ?? '';
+    return generateCityCharacters(worldSeed, city, country, cityReligionDetails, cityMapV2 ?? undefined);
+  }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, cityMapV2]);
 
   return (
     <div style={styles.root}>
@@ -782,6 +798,9 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           cityName={city.name}
           environment={cityEnvironment}
           seed={seed}
+          precomputedData={cityMapV2 ?? undefined}
+          characters={characters}
+          onSelectCharacter={setSelectedCharacter}
         />
       )}
       <CharacterPopup
