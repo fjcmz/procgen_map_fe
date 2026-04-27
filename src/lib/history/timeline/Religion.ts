@@ -4,6 +4,10 @@ import type { Year } from './Year';
 import type { Illustrate } from './Illustrate';
 import type { CountryEvent } from './Country';
 import { getCountryTechLevel } from './Tech';
+import type { Deity } from '../../fantasy/Deity';
+import { DEITIES, DEITY_SPECS, deityAllowsRace } from '../../fantasy/Deity';
+import type { AlignmentType } from '../../fantasy/AlignmentType';
+import { seededPRNG } from '../../terrain/noise';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -26,6 +30,59 @@ export interface Religion {
   readonly originCountry: string | null;
   members: number;
   year?: Year;
+  /**
+   * D&D deity bound at founding via an isolated PRNG sub-stream
+   * (`seededPRNG(`${world.seed}_deity_${id}`)`), weighted toward deities of
+   * the founder country's `raceBias.primary` race. Decorative-only in v1:
+   * does not feed back into religion expansion / wars / trade — read by the
+   * UI and `lib/citychars.ts` to flavor character rolls.
+   */
+  readonly deity: Deity;
+  /** Equals `DEITY_SPECS[deity].alignment`. Stored for cheap UI lookup. */
+  readonly alignment: AlignmentType;
+}
+
+/**
+ * Bind a deity to a freshly-founded religion using an isolated PRNG sub-stream.
+ * Weights:
+ * - Base: `DEITY_SPECS[d].prob`
+ * - Race-aligned deities (DEITY_SPECS[d].race === founderRace): ×3
+ * - Universal deities (DEITY_SPECS[d].race === null): ×1.5
+ * - Race-disallowed deities (race set, doesn't match): weight 0 — would be
+ *   rejected by `deityAllowsRace` at character-roll time anyway.
+ *
+ * Falls back to the first universal deity (Boccob) if every weight is zero.
+ */
+function pickDeity(
+  worldSeed: string,
+  religionId: string,
+  founderRace: import('../../fantasy/RaceType').RaceType | null,
+): Deity {
+  const rng = seededPRNG(worldSeed + '_deity_' + religionId);
+  let total = 0;
+  const weights: number[] = new Array(DEITIES.length);
+  for (let i = 0; i < DEITIES.length; i++) {
+    const d = DEITIES[i];
+    const spec = DEITY_SPECS[d];
+    let mult = 1;
+    if (spec.race === null) {
+      mult = 1.5;
+    } else if (founderRace && spec.race === founderRace) {
+      mult = 3;
+    } else if (founderRace && !deityAllowsRace(d, founderRace)) {
+      mult = 0;
+    }
+    const w = Math.max(0, spec.prob * mult);
+    weights[i] = w;
+    total += w;
+  }
+  if (total <= 0) return 'boccob';
+  let r = rng() * total;
+  for (let i = 0; i < DEITIES.length; i++) {
+    if (r < weights[i]) return DEITIES[i];
+    r -= weights[i];
+  }
+  return DEITIES[DEITIES.length - 1];
 }
 
 export class ReligionGenerator {
@@ -53,14 +110,25 @@ export class ReligionGenerator {
       // in YearGenerator step 6 and Path 2 below both handle that case.
       const foundingRegion = world.mapRegions.get(eligibleFounder.originCity.regionId);
       const originCountry = foundingRegion?.countryId ?? null;
+      const religionId = IdUtil.id('religion', absYear, rngHex(rng)) ?? 'religion_unknown';
+      // Deity bound on an isolated PRNG sub-stream keyed on world.seed +
+      // religion id. Founder race comes from the origin country (if any) —
+      // pre-country foundings fall back to a race-agnostic weighting.
+      const founderCountryForDeity = originCountry
+        ? world.mapCountries.get(originCountry) as CountryEvent | undefined
+        : undefined;
+      const founderRace = founderCountryForDeity?.raceBias.primary ?? null;
+      const deity = pickDeity(world.seed, religionId, founderRace);
       const religion: Religion = {
-        id: IdUtil.id('religion', absYear, rngHex(rng)) ?? 'religion_unknown',
+        id: religionId,
         founder: eligibleFounder.id,
         foundedOn: absYear,
         foundingCity: eligibleFounder.originCity.id,
         originCountry,
         members: 0,
         year,
+        deity,
+        alignment: DEITY_SPECS[deity].alignment,
       };
 
       // Consume illustrate

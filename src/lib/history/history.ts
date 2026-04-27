@@ -234,10 +234,17 @@ export function buildPhysicalWorld(
   width: number,
   rng: () => number,
   rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+  /**
+   * Worker seed string. Stored on the resulting `World` so simulation
+   * generators can derive isolated PRNG sub-streams (e.g. country race bias,
+   * religion deity binding) without perturbing the main timeline RNG.
+   * Defaults to '' for backwards compatibility (sweep harness, standalone).
+   */
+  seed: string = '',
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[]; usedCityNames: Set<string> } {
   const usedCityNames = new Set<string>();
   const numCells = cells.length;
-  const world = worldGenerator.generate(rng);
+  const world = worldGenerator.generate(rng, seed);
 
   // --- Step 1: Find continents via BFS flood-fill on connected land cells ---
   const cellContinent = new Int16Array(numCells).fill(-1);

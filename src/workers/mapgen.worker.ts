@@ -119,7 +119,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
       const rng = seededPRNG(seed + '_history');
 
       post({ type: 'PROGRESS', step: 'Simulating history\u2026', pct: 72 });
-      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights);
+      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed);
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
@@ -129,7 +129,7 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
     } else {
       post({ type: 'PROGRESS', step: 'Building world\u2026', pct: 65 });
       const rng = seededPRNG(seed + '_world');
-      const result = buildPhysicalWorld(cells, width, rng, rarityWeights);
+      const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed);
       regions = result.regionData;
       continents = result.continentData;
     }

@@ -8,10 +8,11 @@ import type { Ability } from './Ability';
 import { ABILITIES, MENTAL, abilityMod } from './Ability';
 import type { AlignmentType } from './AlignmentType';
 import { ALIGNMENT_SPECS, ALIGNMENT_TYPES } from './AlignmentType';
+import type { RaceType, RaceSpec } from './RaceType';
 import { RACE_SPECS, RACE_TYPES, getAdjustAbilities } from './RaceType';
 import type { PcClassType } from './PcClassType';
 import { PC_CLASS_SPECS, PC_CLASS_TYPES, getClassesForMainAbility } from './PcClassType';
-import type { Deity } from './Deity';
+import type { Deity, DeitySpec } from './Deity';
 import { DEITIES, DEITY_SPECS, deityAllowsRace, deityAllowsAlignment } from './Deity';
 import { PcChar } from './PcChar';
 import type { PcCharAge } from './PcChar';
@@ -228,6 +229,114 @@ export function generatePcChar(
   pcChar.hitPoints = hp;
 
   selectGod(pcChar, rng);
+
+  return pcChar;
+}
+
+/**
+ * Bias options for `generatePcCharBiased` — partial multiplier maps over the
+ * default `RACE_SPECS[r].prob` and `DEITY_SPECS[d].prob` weights. A value of
+ * `2` doubles the base weight, `0.5` halves it, missing keys leave the base
+ * weight untouched. Negative values are clamped to 0 by `probPick`.
+ *
+ * Use this from city/settlement layers (e.g. `lib/citychars.ts`) to lean a
+ * roster toward the country's race bias and the city's dominant religion's
+ * deity, without re-implementing the rest of the character pipeline.
+ */
+export interface PcCharBiasOptions {
+  raceWeights?: Partial<Record<RaceType, number>>;
+  deityWeights?: Partial<Record<Deity, number>>;
+}
+
+/**
+ * Variant of `generatePcChar` that applies multiplicative weight overrides on
+ * the race and deity probability tables for a single roll. Module-level
+ * `RACE_SPECS` / `DEITY_SPECS` are NOT mutated — biased copies are constructed
+ * locally per call and discarded after the function returns. The rest of the
+ * pipeline (abilities, class, alignment re-roll, age, HP, height, weight,
+ * wealth) is identical to `generatePcChar` and shares its RNG sequence, so
+ * passing `{}` (or omitting `opts`) is byte-identical to the unbiased call.
+ */
+export function generatePcCharBiased(
+  level: number,
+  parentAlignment: AlignmentType,
+  rng: () => number,
+  opts: PcCharBiasOptions = {},
+): PcChar {
+  const raceSpecsBiased: Record<RaceType, RaceSpec> = (() => {
+    if (!opts.raceWeights) return RACE_SPECS;
+    const out = {} as Record<RaceType, RaceSpec>;
+    for (const r of RACE_TYPES) {
+      const mult = opts.raceWeights[r] ?? 1;
+      out[r] = { ...RACE_SPECS[r], prob: Math.max(0, RACE_SPECS[r].prob * mult) };
+    }
+    return out;
+  })();
+  const deitySpecsBiased: Record<Deity, DeitySpec> = (() => {
+    if (!opts.deityWeights) return DEITY_SPECS;
+    const out = {} as Record<Deity, DeitySpec>;
+    for (const d of DEITIES) {
+      const mult = opts.deityWeights[d] ?? 1;
+      out[d] = { ...DEITY_SPECS[d], prob: Math.max(0, DEITY_SPECS[d].prob * mult) };
+    }
+    return out;
+  })();
+
+  const pcChar = new PcChar();
+
+  pcChar.alignment = probPickAdjusted(
+    ALIGNMENT_SPECS,
+    ALIGNMENT_TYPES,
+    ALIGNMENT_SPECS[parentAlignment].adjustAlignment,
+    rng,
+  );
+
+  pcChar.race = probPick(raceSpecsBiased, RACE_TYPES, rng);
+
+  generateAbilities(pcChar, level, rng);
+  generateClass(pcChar, rng);
+  pcChar.level = level;
+
+  const addAbility = Math.floor(level / 4);
+  const mainAb = PC_CLASS_SPECS[pcChar.pcClass].mainAbility;
+  pcChar.abilities.set(mainAb, (pcChar.abilities.get(mainAb) ?? 0) + addAbility);
+
+  while (!PC_CLASS_SPECS[pcChar.pcClass].allowedAlignment(pcChar.alignment)) {
+    pcChar.alignment = probPickAdjusted(
+      ALIGNMENT_SPECS,
+      ALIGNMENT_TYPES,
+      ALIGNMENT_SPECS[parentAlignment].adjustAlignment,
+      rng,
+    );
+  }
+
+  ageEffects(pcChar, rng);
+
+  pcChar.height = RACE_SPECS[pcChar.race].baseHeight + RACE_SPECS[pcChar.race].heightAdjustment.roll(rng);
+  pcChar.weight = RACE_SPECS[pcChar.race].baseWeight + RACE_SPECS[pcChar.race].weightAdjustment.roll(rng);
+  pcChar.wealth = PC_CLASS_SPECS[pcChar.pcClass].initialWealth.roll(rng);
+
+  const hitDie = PC_CLASS_SPECS[pcChar.pcClass].hitDie;
+  const conMod = abilityMod(pcChar.abilities.get('constitution') ?? 10);
+  let hp = hitDie + conMod;
+  for (let lvl = 1; lvl < level; lvl++) {
+    hp += Math.floor(rng() * hitDie) + conMod + 1;
+  }
+  pcChar.hitPoints = hp;
+
+  // Inline of selectGod with biased deity table.
+  let deity: Deity | null = null;
+  let i = 0;
+  do {
+    const candidate = probPick(deitySpecsBiased, DEITIES, rng);
+    if (!deityAllowsRace(candidate, pcChar.race) || !deityAllowsAlignment(candidate, pcChar.alignment)) {
+      deity = null;
+    } else {
+      deity = candidate;
+    }
+    i++;
+  } while (deity === null && (PC_CLASS_SPECS[pcChar.pcClass].needsDeity || i < 5));
+  pcChar.deity = deity !== null ? DEITY_SPECS[deity].name : 'none';
 
   return pcChar;
 }

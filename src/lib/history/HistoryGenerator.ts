@@ -5,7 +5,8 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail, ReligionDetail } from '../types';
+import { DEITY_SPECS } from '../fantasy/Deity';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
 import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
@@ -964,6 +965,52 @@ function computeReligionCells(world: World, absYear: number): number[] {
   return result;
 }
 
+/**
+ * Build the full religionDetails array — every religion ever founded with its
+ * bound deity + derived alignment. Mirrors `buildWonderDetails`. Read by the
+ * DetailsTab and `lib/citychars.ts`.
+ */
+function buildReligionDetails(world: World): ReligionDetail[] {
+  const details: ReligionDetail[] = [];
+  for (const religion of world.mapReligions.values()) {
+    const founder = world.mapIllustrates.get(religion.founder);
+    const foundingCity = world.mapCities.get(religion.foundingCity);
+    details.push({
+      id: religion.id,
+      // Religion display name: derived from founder illustrate's name (kept for v1).
+      name: founder ? `Faith of ${founder.name}` : `Religion ${religion.id}`,
+      deity: religion.deity,
+      deityName: DEITY_SPECS[religion.deity].name,
+      alignment: religion.alignment,
+      foundingCellIndex: foundingCity?.cellIndex ?? -1,
+      foundingCityName: foundingCity?.name ?? '?',
+      founderName: founder?.name ?? '?',
+      foundedYear: religion.foundedOn,
+      members: religion.members,
+      originCountryId: religion.originCountry,
+    });
+  }
+  details.sort((a, b) => a.foundedYear - b.foundedYear);
+  return details;
+}
+
+/**
+ * Final-year mapping cellIndex → religion ids sorted by adherence descending.
+ * Only includes cities with ≥1 religion. The first id is the dominant religion;
+ * `lib/citychars.ts` reads it to pick the city's effective alignment.
+ */
+function buildCityReligions(world: World): Record<number, string[]> {
+  const out: Record<number, string[]> = {};
+  for (const city of world.mapCities.values()) {
+    if (!city.founded || city.religions.size === 0) continue;
+    const sorted = Array.from(city.religions.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([id]) => id);
+    out[city.cellIndex] = sorted;
+  }
+  return out;
+}
+
 export class HistoryGenerator {
   /**
    * Run the full generation pipeline: physical world + timeline simulation.
@@ -975,6 +1022,14 @@ export class HistoryGenerator {
     rng: () => number,
     numSimYears: number,
     rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+    /**
+     * Worker seed string. Threaded into `buildPhysicalWorld` → `WorldGenerator`
+     * → `World.seed` so simulation generators can derive isolated PRNG
+     * sub-streams (race bias, deity binding, …) and the UI can derive its
+     * own (city character roster) without perturbing the main timeline RNG.
+     * Defaults to '' for the sweep harness.
+     */
+    seed: string = '',
   ): {
     cities: City[];
     roads: Road[];
@@ -984,7 +1039,7 @@ export class HistoryGenerator {
     stats: HistoryStats;
   } {
     // Phase 0: Build physical world
-    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights);
+    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed);
 
     // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
     const historyRoot = HistoryRoot.INSTANCE;
@@ -1342,6 +1397,7 @@ export class HistoryGenerator {
         isAlive,
         foundedYear,
         diedYear,
+        raceBias: country?.raceBias,
       };
     });
 
@@ -1582,6 +1638,9 @@ export class HistoryGenerator {
       wonderDetails: buildWonderDetails(world),
       illustrateDetails: buildIllustrateDetails(world, countryMap),
       religionSnapshots,
+      religionDetails: buildReligionDetails(world),
+      cityReligions: buildCityReligions(world),
+      worldSeed: world.seed,
       empireSnapshots,
       populationSnapshots,
       techTimeline,
