@@ -109,12 +109,17 @@ export function raceLabel(r: RaceType): string {
 
 /**
  * Roll the character roster for a city. Pure function: deterministic given the
- * same `(worldSeed, city.cellIndex, city.size, country.raceBias, religions)`.
+ * same `(worldSeed, city.cellIndex, city.size, country.raceBias, religions, year)`.
  *
  * `country` may be undefined for cities outside any current country (e.g. a
  * never-incorporated outpost) — the roster falls back to a neutral race pool.
  * `religions` may be empty — the roster falls back to the country's spirit-
  * derived alignment, then to true neutral.
+ *
+ * `year` is mixed into the PRNG seed so the roster refreshes when the
+ * Details tab's selected year changes — moving the timeline produces a
+ * fresh deterministic snapshot per year. Omit (or pass undefined) to keep
+ * the v1 single-snapshot behavior.
  *
  * Returns [] on degenerate input (no worldSeed, ruined cities at the renderer
  * layer should already have skipped this call).
@@ -124,12 +129,14 @@ export function generateCityCharacters(
   city: Pick<City, 'cellIndex' | 'size' | 'isRuin'>,
   country: Pick<Country, 'raceBias'> | undefined,
   religions: ReligionDetail[],
+  year?: number,
 ): CityCharacter[] {
   if (!worldSeed) return [];
   if (city.isRuin) return [];
 
   const profile = SIZE_PROFILES[city.size];
-  const rng = seededPRNG(worldSeed + '_chars_' + city.cellIndex);
+  const yearKey = year != null ? `_y${year}` : '';
+  const rng = seededPRNG(worldSeed + '_chars_' + city.cellIndex + yearKey);
   const usedNames = new Set<string>();
 
   const dominantRace = country?.raceBias?.primary ?? 'human';
