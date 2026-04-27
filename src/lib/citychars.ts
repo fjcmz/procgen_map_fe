@@ -185,6 +185,102 @@ interface AffiliationCandidate {
 }
 
 /**
+ * Landmarks that MUST get at least one character pointing at them when the
+ * roster is large enough to cover them — palace / castle / temple. The
+ * guarantee pass below runs before the per-character `pickAffiliation` and
+ * pre-claims one character per landmark (best fit, ties broken by RNG).
+ * Remaining characters then run through the normal affinity-weighted pick,
+ * so a single landmark CAN end up with multiple characters once everyone
+ * gets a roll.
+ */
+const GUARANTEED_LANDMARK_KINDS: readonly LandmarkKind[] = ['palace', 'castle', 'temple'];
+
+function makeLandmarkAffiliation(cityMap: CityMapDataV2, lmIndex: number): CharacterAffiliation {
+  const lm = cityMap.landmarks[lmIndex];
+  let name = lm.name;
+  if (!name) {
+    const containingBlock = cityMap.blocks.find(b => b.polygonIds.includes(lm.polygonId));
+    name = containingBlock?.name ?? lm.kind.toUpperCase();
+  }
+  return { kind: 'landmark', index: lmIndex, name, landmarkKind: lm.kind };
+}
+
+/**
+ * Score a single character for placement at a guaranteed landmark. Higher is
+ * better. Always returns a positive baseline so any roster member can be
+ * forced into the slot when the city has more guaranteed landmarks than
+ * affinity-matching characters.
+ */
+function scoreCharForLandmark(c: CityCharacter, lmKind: LandmarkKind): number {
+  const classLm = CLASS_LANDMARK_AFFINITY[c.pcClass] ?? [];
+  const raceLm = RACE_LANDMARK_AFFINITY[c.race] ?? [];
+  let s = 1; // baseline so the slot is always fillable
+  if (classLm.includes(lmKind)) s += 5 + c.level * 0.5;
+  if (raceLm.includes(lmKind))  s += 2 + c.level * 0.3;
+  if (lmKind === 'temple' && c.deity !== 'none') s += 3 + c.level * 0.4;
+  // Palaces / castles bias toward higher-level characters (rulers, captains).
+  if (lmKind === 'palace' || lmKind === 'castle') s += c.level * 0.5;
+  return s;
+}
+
+/**
+ * First-pass guarantee — for each palace / castle / temple in the city, try
+ * to assign one character (best-fit, RNG tie-break). Returns the set of
+ * character indices that have been pre-claimed; the caller skips them in the
+ * regular affinity-weighted pass. Iterates landmark KINDS round-robin so a
+ * city with N palaces + 1 temple still covers the temple before doubling up
+ * on palaces.
+ */
+function assignGuaranteedLandmarks(
+  out: CityCharacter[],
+  cityMap: CityMapDataV2,
+  rng: () => number,
+): Set<number> {
+  const assigned = new Set<number>();
+  if (out.length === 0) return assigned;
+
+  const byKind = new Map<LandmarkKind, number[]>();
+  for (const k of GUARANTEED_LANDMARK_KINDS) byKind.set(k, []);
+  for (let i = 0; i < cityMap.landmarks.length; i++) {
+    const lm = cityMap.landmarks[i];
+    const queue = byKind.get(lm.kind);
+    if (queue) queue.push(i);
+  }
+
+  // Round-robin queues by kind so each guaranteed kind gets one slot covered
+  // before any single kind doubles up — fair coverage regardless of how many
+  // palaces / castles / temples the city happens to have.
+  const queues = GUARANTEED_LANDMARK_KINDS.map(k => byKind.get(k) ?? []);
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const queue of queues) {
+      if (queue.length === 0) continue;
+      const lmIdx = queue.shift()!;
+      const lm = cityMap.landmarks[lmIdx];
+
+      // Pick the best unassigned character for this slot. Tie-break by RNG.
+      let bestChar = -1;
+      let bestScore = -1;
+      for (let ci = 0; ci < out.length; ci++) {
+        if (assigned.has(ci)) continue;
+        const score = scoreCharForLandmark(out[ci], lm.kind) + rng() * 0.01;
+        if (score > bestScore) { bestScore = score; bestChar = ci; }
+      }
+      if (bestChar < 0) {
+        // No characters left — bail out; remaining guaranteed slots stay empty,
+        // which is the explicit "may not have a character" allowance.
+        return assigned;
+      }
+      out[bestChar].affiliation = makeLandmarkAffiliation(cityMap, lmIdx);
+      assigned.add(bestChar);
+      progress = true;
+    }
+  }
+  return assigned;
+}
+
+/**
  * Score every block + landmark in the city against a character's identity and
  * pick one. Residential blocks always have a non-zero baseline so any roster
  * member is placeable, even in cities without a matching specialised quarter.
@@ -409,11 +505,21 @@ export function generateCityCharacters(
   // Affiliation pass — runs on its own isolated PRNG sub-stream so adding /
   // tweaking the affiliation tables never shifts the existing roster (the
   // core character roll above stays byte-stable for legacy callers that
-  // don't pass `cityMap`).
+  // don't pass `cityMap`). Two phases:
+  //   1. `assignGuaranteedLandmarks` — pre-claim one character per palace /
+  //      castle / temple (best fit, RNG tie-break, round-robin by kind).
+  //      May leave guaranteed slots empty if the roster is too small; the
+  //      explicit allowance is "some places might not have a character".
+  //   2. The remaining roster runs through `pickAffiliation`, which can
+  //      still land additional characters at the same palace / castle /
+  //      temple — so a single guaranteed slot may end up with multiple
+  //      characters via this second pass.
   if (cityMap) {
     const affilRng = seededPRNG(worldSeed + '_charaffil_' + city.cellIndex + yearKey);
-    for (const c of out) {
-      c.affiliation = pickAffiliation(c, cityMap, affilRng);
+    const claimed = assignGuaranteedLandmarks(out, cityMap, affilRng);
+    for (let i = 0; i < out.length; i++) {
+      if (claimed.has(i)) continue;
+      out[i].affiliation = pickAffiliation(out[i], cityMap, affilRng);
     }
   }
 
