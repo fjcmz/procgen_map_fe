@@ -11,6 +11,8 @@ import { getLegacyCategory, type LegacyResourceCategory, type ResourceType } fro
 import { WONDER_TIER_NAMES } from '../../lib/history/timeline/wonderNames';
 import { CityMapPopupV2 } from '../CityMapPopupV2';
 import { deriveCityEnvironment, generateCityMapV2 } from '../../lib/citymap/cityMapGeneratorV2';
+import { generateCityCharacters, alignmentBadge, raceLabel, deriveCityAlignment } from '../../lib/citychars';
+import type { CityCharacter } from '../../lib/citychars';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -474,6 +476,29 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const hasWonder = wonderSnap.some(w => w.cellIndex === cellIndex);
   const hasReligion = religionSnap.includes(cellIndex);
 
+  // City religions (final-year snapshot, sorted dominant-first) → details lookup.
+  const cityReligionDetails = useMemo(() => {
+    if (!history.cityReligions || !history.religionDetails) return [];
+    const ids = history.cityReligions[cellIndex];
+    if (!ids || ids.length === 0) return [];
+    const byId = new Map(history.religionDetails.map(r => [r.id, r]));
+    return ids.map(id => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
+  }, [history.cityReligions, history.religionDetails, cellIndex]);
+
+  const cityAlignment = useMemo(() => deriveCityAlignment(cityReligionDetails), [cityReligionDetails]);
+
+  const [charactersOpen, setCharactersOpen] = useState(false);
+  const [religionsOpen, setReligionsOpen] = useState(false);
+
+  // Roll the character roster lazily — only when the user expands the section.
+  // Uses an isolated PRNG sub-stream keyed on the world seed + cellIndex, so the
+  // same city always produces the same roster within one generation run.
+  const characters: CityCharacter[] = useMemo(() => {
+    if (!charactersOpen || !city) return [];
+    const worldSeed = history.worldSeed ?? '';
+    return generateCityCharacters(worldSeed, city, country, cityReligionDetails);
+  }, [charactersOpen, city, country, cityReligionDetails, history.worldSeed]);
+
   // Wonders for this city from wonderDetails (includes destroyed)
   const cityWonders = useMemo(() => {
     if (!history.wonderDetails) return [];
@@ -602,6 +627,9 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           )}
           {hasWonder && <InfoRow label="Wonders" value={String(cityWonders.length)} />}
           {hasReligion && <InfoRow label="Religion" value="Present" />}
+          {cityReligionDetails.length > 0 && (
+            <InfoRow label="Alignment" value={alignmentBadge(cityAlignment)} />
+          )}
           {city?.ownedCells && (
             <InfoRow label="Territory" value={`${city.ownedCells.filter(oc => oc.yearAdded <= selectedYear).length} cells`} />
           )}
@@ -683,6 +711,53 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               {wondersOpen ? '\u25be' : '\u25b8'} Wonders ({cityWonders.length})
             </button>
             {wondersOpen && <WonderList wonders={cityWonders} convertYears={convertYears} />}
+          </>
+        )}
+
+        {/* Religions hosted in this city \u2014 each bound to a deity at founding. */}
+        {cityReligionDetails.length > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setReligionsOpen(v => !v)}
+              aria-expanded={religionsOpen}
+            >
+              {religionsOpen ? '\u25be' : '\u25b8'} Religions ({cityReligionDetails.length})
+            </button>
+            {religionsOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 8, marginTop: 4 }}>
+                {cityReligionDetails.map(rel => (
+                  <div key={rel.id} style={{ fontSize: 12, color: '#cbb89a' }}>
+                    {rel.name}
+                    <span style={{ color: '#9b8a6e' }}>
+                      {' '}\u2014 {rel.deityName} ({alignmentBadge(rel.alignment)})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Characters \u2014 procedurally generated D&D 3.5e roster. */}
+        {city && !city.isRuin && history.worldSeed && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setCharactersOpen(v => !v)}
+              aria-expanded={charactersOpen}
+            >
+              {charactersOpen ? '\u25be' : '\u25b8'} Characters
+              {charactersOpen && characters.length > 0 ? ` (${characters.length})` : ''}
+            </button>
+            {charactersOpen && characters.length === 0 && (
+              <div style={styles.loadingNote}>No roster.</div>
+            )}
+            {charactersOpen && characters.length > 0 && (
+              <CharacterList characters={characters} />
+            )}
           </>
         )}
 
@@ -836,6 +911,16 @@ function CountryDetails({ countryIndex, mapData, history, selectedYear, convertY
           <InfoRow label="Territory" value={`${territorySize} cells`} />
           <InfoRow label="Population" value={formatPopulation(countryPop)} />
           <InfoRow label="Cities" value={String(cities.length)} />
+          {country.raceBias && (
+            <InfoRow
+              label="Race"
+              value={
+                country.raceBias.secondary
+                  ? `${raceLabel(country.raceBias.primary)} / ${raceLabel(country.raceBias.secondary)}`
+                  : raceLabel(country.raceBias.primary)
+              }
+            />
+          )}
           <InfoRow label="Illustrates" value={String(eventCounts.illustrates)} />
           <InfoRow label="Wonders" value={String(eventCounts.wonders)} />
           <InfoRow label="Techs" value={String(eventCounts.techs)} />
@@ -1281,6 +1366,55 @@ function resourceDotColor(type: string): string {
 }
 
 // ── Wonder List ──
+
+// ── Character Roster ──
+//
+// Compact table of procedurally generated characters for the active city. The
+// abilities list is shown as a `title=` tooltip rather than a separate column
+// to keep the row narrow inside the 280 px overlay width. Rows are colored by
+// alignment axis (good = green-ish, evil = red-ish, neutral = base parchment).
+function CharacterList({ characters }: { characters: CityCharacter[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 0', fontSize: 11 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr', gap: 4, color: '#9b8a6e', fontWeight: 600, paddingLeft: 8, paddingBottom: 2, borderBottom: '1px solid rgba(155,138,110,0.3)' }}>
+        <span>Name</span>
+        <span>Race</span>
+        <span>Class</span>
+        <span>Lv</span>
+        <span>Al</span>
+        <span>Deity</span>
+      </div>
+      {characters.map((c, i) => {
+        const tooltip = `HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma} | Age ${c.age.currentAge} | ${c.height}" / ${c.weight}lb | ${c.wealth} gp`;
+        const alignColor =
+          c.alignment.endsWith('_good') ? '#7ab87a' :
+          c.alignment.endsWith('_evil') ? '#c47878' :
+          '#cbb89a';
+        return (
+          <div
+            key={i}
+            title={tooltip}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr',
+              gap: 4,
+              paddingLeft: 8,
+              lineHeight: '16px',
+              cursor: 'help',
+            }}
+          >
+            <span style={{ color: '#cbb89a', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            <span style={{ color: '#9b8a6e' }}>{raceLabel(c.race)}</span>
+            <span style={{ color: '#9b8a6e', textTransform: 'capitalize' }}>{c.pcClass}</span>
+            <span style={{ color: '#9b8a6e' }}>{c.level}</span>
+            <span style={{ color: alignColor, fontWeight: 600 }}>{alignmentBadge(c.alignment)}</span>
+            <span style={{ color: '#9b8a6e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.deity === 'none' ? '—' : c.deity}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function WonderList({ wonders, convertYears }: { wonders: WonderDetail[]; convertYears: boolean }) {
   return (

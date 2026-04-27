@@ -6,6 +6,19 @@ export type { TechField } from './history/timeline/Tech';
 import type { TechField } from './history/timeline/Tech';
 
 /**
+ * Re-exported from the fantasy character-generation package so UI modules
+ * (DetailsTab, citychars) and the simulation layer (Country, Religion) can
+ * agree on the race / deity / alignment vocabulary without each one reaching
+ * into `lib/fantasy/` separately.
+ */
+export type { RaceType } from './fantasy/RaceType';
+export type { Deity } from './fantasy/Deity';
+export type { AlignmentType } from './fantasy/AlignmentType';
+import type { RaceType } from './fantasy/RaceType';
+import type { Deity } from './fantasy/Deity';
+import type { AlignmentType } from './fantasy/AlignmentType';
+
+/**
  * Spec stretch §5: per-field running-max time series, precomputed in
  * `HistoryGenerator.generate()` during the same walk that produces
  * `HistoryStats.peakTechLevelByField`. One `Uint8Array` per field, indexed
@@ -153,6 +166,43 @@ export interface Country {
   foundedYear: number;
   /** Year index when this country died (all cities ruined), or undefined if still alive at final year. */
   diedYear?: number;
+  /**
+   * Cultural race-bias snapshot picked at country founding (CountryGenerator,
+   * isolated PRNG sub-stream). Drives city character rosters in `lib/citychars.ts`
+   * and (for v1) is purely decorative — does not feed back into wars / trade /
+   * religion-spread. The primary race dominates small cities; the secondary
+   * appears as a minority in larger ones.
+   */
+  raceBias?: { primary: RaceType; secondary?: RaceType };
+}
+
+/**
+ * Per-religion metadata serialized at end-of-sim, mirroring the `wonderDetails`
+ * pattern. Lets the UI render religion + bound deity + derived alignment without
+ * walking the per-year event log. Populated by `HistoryGenerator`.
+ */
+export interface ReligionDetail {
+  id: string;
+  /** Display name — derived from the founding illustrate's name (kept for v1; deity is a separate field). */
+  name: string;
+  /** D&D deity bound at founding (ReligionGenerator, isolated PRNG sub-stream). */
+  deity: Deity;
+  /** Display name for the deity (e.g. "Pelor"). Convenience: equals `DEITY_SPECS[deity].name`. */
+  deityName: string;
+  /** Religion's effective alignment — equals `DEITY_SPECS[deity].alignment`. */
+  alignment: AlignmentType;
+  /** Cell index of the founding city. */
+  foundingCellIndex: number;
+  /** Display name of the founding city. */
+  foundingCityName: string;
+  /** Display name of the founder illustrate. */
+  founderName: string;
+  /** Absolute year of founding. */
+  foundedYear: number;
+  /** Cumulative member count at end of simulation (snapshot). */
+  members: number;
+  /** Internal id of the country whose region hosted the founding city, or null if pre-country. */
+  originCountryId: string | null;
 }
 
 /** Discriminated union representing a user-selected entity on the map. */
@@ -318,6 +368,24 @@ export interface HistoryData {
   illustrateDetails?: IllustrateDetail[];
   /** Cell indices of cities with active religions, snapshotted every 20 years. */
   religionSnapshots: Record<number, number[]>;
+  /**
+   * All religions ever founded, with their bound deity and derived alignment.
+   * Mirrors the `wonderDetails` pattern. Consumed by DetailsTab + citychars.ts.
+   */
+  religionDetails?: ReligionDetail[];
+  /**
+   * Final-year mapping from city cellIndex → list of hosted religion ids,
+   * sorted by adherence descending. The first id (if any) is the dominant
+   * religion and drives the city's effective alignment for character rolls.
+   * Only populated for cities with at least one religion at end of sim.
+   */
+  cityReligions?: Record<number, string[]>;
+  /**
+   * Worker seed string, copied through to the UI so client-side
+   * `lib/citychars.ts` can derive its `${seed}_chars_<cellIndex>` PRNG
+   * sub-stream and produce a deterministic per-city character roster.
+   */
+  worldSeed?: string;
   /** Phase 4: empire membership at every 20th year, aligned with `snapshots`. */
   empireSnapshots: Record<number, EmpireSnapshotEntry[]>;
   /** Per-city population at every 20th year + final year. Key: year index, value: cellIndex → population. */

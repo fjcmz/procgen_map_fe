@@ -16,6 +16,15 @@ function rngHex(rng: () => number): string {
 
 export class World {
   readonly id: string;
+  /**
+   * Worker seed string, captured by `WorldGenerator` so simulation generators
+   * (e.g. CountryGenerator's race bias, ReligionGenerator's deity binding) can
+   * derive isolated PRNG sub-streams via `seededPRNG(`${seed}_<role>_<id>`)`
+   * without perturbing the main timeline RNG. Empty string when the harness
+   * doesn't supply one (sweep / standalone tests) — sub-stream draws are then
+   * still deterministic, just keyed off the empty-string root.
+   */
+  readonly seed: string;
   continents: Continent[] = [];
   endedOn: number = 0;
   endedBy: string = '';
@@ -42,8 +51,9 @@ export class World {
   /** Global dedup set for illustrate names — prevents duplicate names within a generation. */
   usedIllustrateNames: Set<string> = new Set();
 
-  constructor(rng: () => number) {
+  constructor(rng: () => number, seed: string = '') {
     this.id = IdUtil.id('world', rngHex(rng)) ?? 'world_unknown';
+    this.seed = seed;
   }
 
   addContinent(continent: Continent): void {

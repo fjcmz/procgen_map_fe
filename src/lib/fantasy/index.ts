@@ -40,4 +40,5 @@ export { PC_CLASS_TYPES, PC_CLASS_SPECS, getClassesForMainAbility } from './PcCl
 export type { PcCharAge } from './PcChar';
 export { PcChar } from './PcChar';
 
-export { PcCharGenerator, pcCharGenerator, generatePcChar } from './PcCharGenerator';
+export type { PcCharBiasOptions } from './PcCharGenerator';
+export { PcCharGenerator, pcCharGenerator, generatePcChar, generatePcCharBiased } from './PcCharGenerator';

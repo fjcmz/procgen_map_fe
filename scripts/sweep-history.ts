@@ -129,7 +129,11 @@ function runSeed(seed: string, args: CliArgs): SeedResult {
 
   // Worker uses `seed + '_history'` for the history RNG (see mapgen.worker.ts:84).
   const rng = seededPRNG(seed + '_history');
-  const result = historyGenerator.generate(cells, args.width, rng, args.years);
+  // Pass `seed` so isolated PRNG sub-streams (race bias, deity binding) match
+  // the worker exactly. Race bias and deity decisions don't enter HistoryStats,
+  // so this trailing arg is byte-equivalent to the old call when the sweep
+  // baseline was generated — the sub-stream draws don't perturb the main RNG.
+  const result = historyGenerator.generate(cells, args.width, rng, args.years, undefined, seed);
 
   return {
     seed,
