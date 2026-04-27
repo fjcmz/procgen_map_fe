@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CityEnvironment, CityMapDataV2, DistrictType, LandmarkKind } from '../lib/citymap';
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
+import type { CityCharacter } from '../lib/citychars';
+import { alignmentBadge, raceLabel } from '../lib/citychars';
 
 interface CityMapPopupV2Props {
   isOpen: boolean;
@@ -9,6 +11,24 @@ interface CityMapPopupV2Props {
   cityName: string;
   environment: CityEnvironment;
   seed: string;
+  /**
+   * Pre-computed city-map data — when provided, the popup skips its
+   * internal `generateCityMapV2` call and uses this instance directly. The
+   * DetailsTab uses this to share one map between the Quarters block-count
+   * summary, the Characters affiliation pass, and the popup itself.
+   */
+  precomputedData?: CityMapDataV2;
+  /**
+   * Roster for this city, with `affiliation` populated against the same
+   * `CityMapDataV2`. Drives the click-to-open district modal.
+   */
+  characters?: CityCharacter[];
+  /**
+   * Click-handler for individual characters inside the district modal. The
+   * parent owns the `<CharacterPopup>` instance, so we just bubble the
+   * selection back up.
+   */
+  onSelectCharacter?: (c: CityCharacter) => void;
 }
 
 const INTERNAL_SIZE = 1000;
@@ -156,6 +176,22 @@ interface PolygonHit {
   label: string;
 }
 
+// Identity of the district the user clicked. Encodes whether it's a generic
+// block cluster or a single-polygon landmark, plus the index inside the
+// matching `CityMapDataV2.blocks` / `CityMapDataV2.landmarks` array. Used as
+// the key into the polygonId → district lookup AND as the React state key
+// for the district modal.
+type DistrictKey =
+  | { kind: 'block'; index: number }
+  | { kind: 'landmark'; index: number };
+
+// Threshold (squared px) for treating a mousedown→mouseup or touchstart→
+// touchend as a click instead of a pan. Loose on touch because fingers
+// jitter; tight on mouse so a tiny drag-to-pan still pans rather than
+// opening the district modal.
+const CLICK_MOVE_TOLERANCE_MOUSE_SQ = 25;   // 5 px
+const CLICK_MOVE_TOLERANCE_TOUCH_SQ = 100;  // 10 px
+
 // Ray-casting point-in-polygon (unclosed ring, matching CityPolygon contract).
 function pointInPolygon(px: number, py: number, verts: [number, number][]): boolean {
   let inside = false;
@@ -170,7 +206,7 @@ function pointInPolygon(px: number, py: number, verts: [number, number][]): bool
   return inside;
 }
 
-export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }: CityMapPopupV2Props) {
+export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed, precomputedData, characters, onSelectCharacter }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
@@ -178,10 +214,44 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   // priority over the parent block so each special-quarter polygon shows its
   // own name + icon + type instead of the coarser block role.
   const polygonToHitRef = useRef(new Map<number, PolygonHit>());
+  // polygonId → district identity for click-to-modal navigation. Same
+  // landmark-wins-over-block precedence as `polygonToHitRef`, but stored
+  // as structured DistrictKey so the modal can look up the canonical block /
+  // landmark from `mapDataRef.current` instead of stringly-matching names.
+  const polygonToDistrictRef = useRef(new Map<number, DistrictKey>());
   const [showIcons, setShowIcons] = useState(true);
   const [showLabels, setShowLabels] = useState(true);
   const [tooltip, setTooltip] = useState<(PolygonHit & { x: number; y: number }) | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [selectedDistrict, setSelectedDistrict] = useState<DistrictKey | null>(null);
+  // Mousedown / touchstart anchor for click-vs-pan detection. Reset on
+  // pointer up; cleared on cancel / leave so a half-finished gesture never
+  // fires a click.
+  const mouseDownStartRef = useRef<{ x: number; y: number } | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Group the roster by the district they're affiliated with, keyed on
+  // `${kind}:${index}` so the modal can do an O(1) lookup. Characters
+  // missing affiliation (city had no map data when their roster was rolled)
+  // fall through silently and just don't appear in any district.
+  const charactersByDistrict = useMemo(() => {
+    const map = new Map<string, CityCharacter[]>();
+    if (!characters) return map;
+    for (const c of characters) {
+      const a = c.affiliation;
+      if (!a) continue;
+      const key = `${a.kind}:${a.index}`;
+      const list = map.get(key);
+      if (list) list.push(c);
+      else map.set(key, [c]);
+    }
+    // Sort each district's characters by level descending so the modal
+    // surfaces leaders / veterans first, with name as the stable tiebreaker.
+    for (const list of map.values()) {
+      list.sort((a, b) => (b.level - a.level) || a.name.localeCompare(b.name));
+    }
+    return map;
+  }, [characters]);
 
   // Popup rect — computed lazily on first mount so the canvas is always
   // mounted with real dimensions on the first render (no double-render race
@@ -310,35 +380,47 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
 
   // Generate map data when the source inputs change. Internal pixel
   // resolution follows the live canvas size (set by the effect above) so the
-  // map stays sharp at any popup dimension.
+  // map stays sharp at any popup dimension. When the parent passes
+  // `precomputedData` (DetailsTab generates one map and shares it across
+  // the Quarters / Characters / Map panels), reuse that instance verbatim
+  // — the generator is deterministic from `(seed, cityName, environment)`
+  // so the result is byte-identical anyway, but reusing the reference saves
+  // ~50ms of redundant work on megalopolis-tier cities.
   useEffect(() => {
     if (!isOpen || !canvasRef.current) return;
 
-    const data = generateCityMapV2(seed, cityName, environment);
+    const data = precomputedData ?? generateCityMapV2(seed, cityName, environment);
     mapDataRef.current = data;
 
-    // Build polygon → tooltip-info index. Two passes:
+    // Build polygon → tooltip-info index AND polygon → district-key index
+    // in the same two-pass walk so the click handler and the hover tooltip
+    // never disagree about which block / landmark owns a given polygon.
     //   1. Block fallback for every interior polygon (any DistrictType, no
-    //      role filter) so non-landmark polygons still get a tooltip.
+    //      role filter) so non-landmark polygons still get a tooltip /
+    //      modal target.
     //   2. Landmark overlay — overwrites the block entry on each polygon a
     //      LandmarkV2 covers (single polygon, or every id in `polygonIds`
-    //      for park clusters) so the user sees the specific landmark's name,
-    //      icon, and quarter type instead of the coarser parent block role.
-    //      Unnamed Phase 4 quarters (forge / barracks / …) inherit the
-    //      parent block's procedural name; named landmarks (castle /
-    //      palace / wonder / …) keep their own `lm.name`.
-    const polygonToBlock = new Map<number, { name: string; role: DistrictType }>();
-    for (const block of data.blocks) {
-      const entry = { name: block.name, role: block.role };
+    //      for park clusters) so the user sees the specific landmark's
+    //      name, icon, and quarter type instead of the coarser parent
+    //      block role. Unnamed Phase 4 quarters (forge / barracks / …)
+    //      inherit the parent block's procedural name; named landmarks
+    //      (castle / palace / wonder / …) keep their own `lm.name`.
+    const polygonToBlock = new Map<number, { name: string; role: DistrictType; blockIndex: number }>();
+    for (let bi = 0; bi < data.blocks.length; bi++) {
+      const block = data.blocks[bi];
+      const entry = { name: block.name, role: block.role, blockIndex: bi };
       for (const pid of block.polygonIds) polygonToBlock.set(pid, entry);
     }
 
     const pMap = new Map<number, PolygonHit>();
+    const dMap = new Map<number, DistrictKey>();
     for (const [pid, block] of polygonToBlock) {
       const info = DISTRICT_ROLE_INFO[block.role];
       pMap.set(pid, { name: block.name, icon: info.icon, label: info.label });
+      dMap.set(pid, { kind: 'block', index: block.blockIndex });
     }
-    for (const lm of data.landmarks) {
+    for (let li = 0; li < data.landmarks.length; li++) {
+      const lm = data.landmarks[li];
       const kindInfo = LANDMARK_KIND_INFO[lm.kind];
       if (!kindInfo) continue;
       const pids = lm.polygonIds ?? [lm.polygonId];
@@ -346,15 +428,17 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
         const block = polygonToBlock.get(pid);
         const name = lm.name ?? block?.name ?? kindInfo.label;
         pMap.set(pid, { name, icon: kindInfo.icon, label: kindInfo.label });
+        dMap.set(pid, { kind: 'landmark', index: li });
       }
     }
     polygonToHitRef.current = pMap;
+    polygonToDistrictRef.current = dMap;
 
     // Reset zoom whenever a fresh map is generated.
     setTransform(prev =>
       (prev.x === 0 && prev.y === 0 && prev.scale === 1) ? prev : { x: 0, y: 0, scale: 1 }
     );
-  }, [isOpen, seed, cityName, environment]);
+  }, [isOpen, seed, cityName, environment, precomputedData]);
 
   // Re-render whenever the transform, canvas size, or render-time toggles
   // change. Cheap because no regeneration runs — just renderCityMapV2 over
@@ -382,6 +466,13 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
       }
     }
   }, [showLabels, isOpen]);
+
+  // Closing the popup must also dismiss the district modal — otherwise the
+  // user can re-open the city-map popup (or a different city's popup) with
+  // a stale modal still floating from the previous session.
+  useEffect(() => {
+    if (!isOpen) setSelectedDistrict(null);
+  }, [isOpen]);
 
   // Keyboard escape.
   useEffect(() => {
@@ -420,6 +511,32 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     }
     return null;
   }, [toMapCoords]);
+
+  // Hit-test for click-to-open-district. Mirrors `hitTest` but returns the
+  // structured DistrictKey from `polygonToDistrictRef` so the modal can look
+  // up the canonical block / landmark. Returns null when the click lands on
+  // a polygon outside any block (water / mountain / unallocated edge cells).
+  const districtHitTest = useCallback((clientX: number, clientY: number): DistrictKey | null => {
+    const coords = toMapCoords(clientX, clientY);
+    if (!coords) return null;
+    const data = mapDataRef.current;
+    if (!data) return null;
+    const [cx, cy] = coords;
+    for (const polygon of data.polygons) {
+      if (pointInPolygon(cx, cy, polygon.vertices)) {
+        return polygonToDistrictRef.current.get(polygon.id) ?? null;
+      }
+    }
+    return null;
+  }, [toMapCoords]);
+
+  const handleCanvasClick = useCallback((clientX: number, clientY: number) => {
+    const dk = districtHitTest(clientX, clientY);
+    if (dk) {
+      setSelectedDistrict(dk);
+      setTooltip(null);
+    }
+  }, [districtHitTest]);
 
   // Convert client (x, y) → CSS-pixel coords relative to the canvas origin.
   const clientToCanvasCss = useCallback((clientX: number, clientY: number): [number, number] | null => {
@@ -497,6 +614,10 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
           isPanningRef.current = true;
           lastPanRef.current = { x: touch.clientX, y: touch.clientY };
         }
+        // Tap-to-open-district uses the same start position as the panning
+        // anchor; touchend compares the final touch against this start to
+        // decide tap vs pan, with a looser tolerance than mouse clicks.
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY };
         showTooltipFor(touch.clientX, touch.clientY);
       }
     };
@@ -543,6 +664,19 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
       if (e.touches.length === 0) {
         isPinchingRef.current = false;
         isPanningRef.current = false;
+        // Detect tap → open district modal. `changedTouches` carries the
+        // finger that just lifted; if it stayed within the tap tolerance
+        // of the start anchor we treat the gesture as a click.
+        const start = touchStartRef.current;
+        touchStartRef.current = null;
+        if (start && e.changedTouches.length > 0) {
+          const t = e.changedTouches[0];
+          const dx = t.clientX - start.x;
+          const dy = t.clientY - start.y;
+          if (dx * dx + dy * dy <= CLICK_MOVE_TOLERANCE_TOUCH_SQ) {
+            handleCanvasClick(t.clientX, t.clientY);
+          }
+        }
         if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
         tooltipTimerRef.current = setTimeout(() => setTooltip(null), 2000);
       } else if (e.touches.length === 1 && isPinchingRef.current) {
@@ -553,6 +687,8 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
           isPanningRef.current = true;
           lastPanRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }
+        // Pinch-then-pan is not a tap; drop the start anchor.
+        touchStartRef.current = null;
       }
     };
 
@@ -566,7 +702,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
       canvas.removeEventListener('touchend', handleTouchEnd);
       canvas.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [isOpen, hitTest]);
+  }, [isOpen, hitTest, handleCanvasClick]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (isMouseDraggingRef.current) {
@@ -589,6 +725,11 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const { w, h } = canvasSizeRef.current;
     const canPan = transformRef.current.scale > MIN_SCALE || w !== h;
+    // Track every left-button mousedown for click-vs-pan resolution on
+    // mouseup. Middle-click is reserved for pan and never opens a modal.
+    if (e.button === 0) {
+      mouseDownStartRef.current = { x: e.clientX, y: e.clientY };
+    }
     // Left-click drag pans when there's pannable space; middle-click always pans.
     if (e.button === 1 || (e.button === 0 && canPan)) {
       e.preventDefault();
@@ -598,13 +739,27 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
     }
   }, []);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     isMouseDraggingRef.current = false;
-  }, []);
+    // If the mouse barely moved between down and up, treat it as a click and
+    // open the district modal. Otherwise the user was panning — leave the
+    // transform where they dragged it to.
+    const start = mouseDownStartRef.current;
+    mouseDownStartRef.current = null;
+    if (e.button !== 0 || !start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (dx * dx + dy * dy <= CLICK_MOVE_TOLERANCE_MOUSE_SQ) {
+      handleCanvasClick(e.clientX, e.clientY);
+    }
+  }, [handleCanvasClick]);
 
   const handleMouseLeave = useCallback(() => {
     setTooltip(null);
     isMouseDraggingRef.current = false;
+    // Drop the click anchor so a mousedown-then-leave-then-up-elsewhere can't
+    // synthesize a bogus click on the next entry.
+    mouseDownStartRef.current = null;
   }, []);
 
   const handleZoomIn = useCallback(() => {
@@ -817,8 +972,138 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed }:
           <div style={styles.tooltipRole}>{tooltip.icon} {tooltip.label}</div>
         </div>
       )}
+      {selectedDistrict && mapDataRef.current && (
+        <DistrictModal
+          districtKey={selectedDistrict}
+          data={mapDataRef.current}
+          characters={charactersByDistrict.get(`${selectedDistrict.kind}:${selectedDistrict.index}`) ?? []}
+          onClose={() => setSelectedDistrict(null)}
+          onSelectCharacter={onSelectCharacter}
+        />
+      )}
     </>,
     document.body,
+  );
+}
+
+// ─── District modal ─────────────────────────────────────────────────────────
+//
+// Opened by clicking a polygon on the city map. Renders the district's
+// display name, the underlying block role / landmark kind, and the list of
+// roster characters the affiliation pass placed there. Clicking a character
+// row bubbles back up via `onSelectCharacter` so the parent's
+// `<CharacterPopup>` opens on top of this modal.
+
+interface DistrictModalProps {
+  districtKey: DistrictKey;
+  data: CityMapDataV2;
+  characters: CityCharacter[];
+  onClose: () => void;
+  onSelectCharacter?: (c: CityCharacter) => void;
+}
+
+function DistrictModal({ districtKey, data, characters, onClose, onSelectCharacter }: DistrictModalProps) {
+  // ESC-to-close. Keying it on `districtKey` rather than mount lets the user
+  // jump from one district to another without remounting and re-binding.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Resolve display fields from the map data — block name + role, OR
+  // landmark name (falling back to its containing block when the landmark
+  // is one of the Phase 4 nameless quarter kinds) + landmark kind.
+  let title = '';
+  let subtitle = '';
+  let icon = '';
+  if (districtKey.kind === 'block') {
+    const block = data.blocks[districtKey.index];
+    if (!block) return null;
+    title = block.name;
+    const info = DISTRICT_ROLE_INFO[block.role];
+    subtitle = info.label;
+    icon = info.icon;
+  } else {
+    const lm = data.landmarks[districtKey.index];
+    if (!lm) return null;
+    const info = LANDMARK_KIND_INFO[lm.kind];
+    if (lm.name) title = lm.name;
+    else {
+      const containing = data.blocks.find(b => b.polygonIds.includes(lm.polygonId));
+      title = containing?.name ?? info.label;
+    }
+    subtitle = info.label;
+    icon = info.icon;
+  }
+
+  return (
+    <>
+      <div style={styles.modalBackdrop} onClick={onClose} />
+      <div
+        style={styles.modalContainer}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="district-modal-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={styles.modalHeader}>
+          <div style={styles.modalTitleBlock}>
+            <span style={styles.modalIcon}>{icon}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <span id="district-modal-title" style={styles.modalTitle}>{title}</span>
+              <span style={styles.modalSubtitle}>{subtitle}</span>
+            </div>
+          </div>
+          <button style={styles.modalCloseBtn} onClick={onClose} title="Close (Esc)">&times;</button>
+        </div>
+        <div style={styles.modalBody}>
+          {characters.length === 0 ? (
+            <div style={styles.modalEmpty}>No notable inhabitants.</div>
+          ) : (
+            <div style={styles.modalCharList}>
+              {characters.map((c, i) => {
+                const alignColor =
+                  c.alignment.endsWith('_good') ? '#4a7a4a' :
+                  c.alignment.endsWith('_evil') ? '#943030' :
+                  '#5a3a10';
+                const tooltip = `HP ${c.hitPoints} | ${c.deity === 'none' ? 'No deity' : c.deity}`;
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    style={styles.modalCharRow}
+                    onClick={() => {
+                      // Close the district modal first so the parent's
+                      // CharacterPopup opens cleanly on top (no z-index war
+                      // — both share the same modal stacking context).
+                      onClose();
+                      onSelectCharacter?.(c);
+                    }}
+                    disabled={!onSelectCharacter}
+                    title={onSelectCharacter ? `Open ${c.name}'s sheet — ${tooltip}` : tooltip}
+                  >
+                    <span style={styles.modalCharName}>{c.name}</span>
+                    <span style={styles.modalCharMeta}>
+                      L{c.level} {raceLabel(c.race)}{' '}
+                      <span style={{ textTransform: 'capitalize' }}>{c.pcClass}</span>
+                    </span>
+                    <span style={{ ...styles.modalCharAlign, color: alignColor }}>
+                      {alignmentBadge(c.alignment)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -1151,5 +1436,133 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: '#c8a462',
     letterSpacing: 0.4,
+  },
+  // ─── District modal (opened by clicking a polygon on the city map) ──
+  // Sits above the city-map popup (zIndex 10001) so it visually layers on
+  // top, while leaving the parent's CharacterPopup (zIndex 10001 too,
+  // rendered later in the DOM) free to stack above when a character row
+  // is clicked.
+  modalBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(20, 12, 4, 0.45)',
+    zIndex: 10001,
+  },
+  modalContainer: {
+    position: 'fixed',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: 'min(440px, calc(100vw - 32px))',
+    maxHeight: 'calc(100vh - 64px)',
+    background: '#f5e9c8',
+    border: '2px solid #8a6a3a',
+    borderRadius: 6,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.45)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    zIndex: 10002,
+    fontFamily: 'inherit',
+  },
+  modalHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '10px 14px',
+    borderBottom: '1px solid #c8a868',
+    background: 'linear-gradient(180deg, #efe0b5 0%, #e6d5a3 100%)',
+    gap: 10,
+  },
+  modalTitleBlock: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+    flex: 1,
+  },
+  modalIcon: {
+    fontSize: 20,
+    flexShrink: 0,
+  },
+  modalTitle: {
+    fontSize: 15,
+    fontWeight: 700,
+    color: '#2a1a00',
+    fontFamily: 'Georgia, serif',
+    letterSpacing: 0.5,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  modalSubtitle: {
+    fontSize: 11,
+    color: '#7a5a30',
+    fontStyle: 'italic',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  modalCloseBtn: {
+    background: 'none',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: 22,
+    lineHeight: 1,
+    color: '#5a3a10',
+    padding: '0 4px',
+    flexShrink: 0,
+  },
+  modalBody: {
+    padding: '10px 12px',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+  },
+  modalEmpty: {
+    fontStyle: 'italic',
+    color: '#7a5a30',
+    padding: '16px 4px',
+    textAlign: 'center',
+  },
+  modalCharList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+  },
+  modalCharRow: {
+    display: 'grid',
+    gridTemplateColumns: '1.4fr 1.6fr 0.4fr',
+    gap: 8,
+    alignItems: 'baseline',
+    padding: '6px 10px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+    cursor: 'pointer',
+    textAlign: 'left',
+    font: 'inherit',
+    color: '#2a1a00',
+  },
+  modalCharName: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: '#2a1a00',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  modalCharMeta: {
+    fontSize: 11,
+    color: '#5a3a10',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  modalCharAlign: {
+    fontSize: 11,
+    fontWeight: 700,
+    textAlign: 'right',
   },
 };
