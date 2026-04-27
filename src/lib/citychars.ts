@@ -62,6 +62,24 @@ export interface CharacterAffiliation {
 }
 
 /**
+ * One side of a character ↔ character relationship. Stored on every
+ * connected character; the link is symmetric so opening either popup shows
+ * the same edge from its own perspective.
+ *
+ * `targetIndex` indexes into the SAME roster array `generateCityCharacters`
+ * returned, so the popup can resolve `roster[rel.targetIndex]` without a
+ * by-name lookup. `targetName` is duplicated for tooltip / preview rendering
+ * when the roster isn't on hand. `reason` is a short flavor label derived
+ * from the shared trait that scored highest at link time (deity → class →
+ * alignment → race → "acquainted").
+ */
+export interface CharacterRelationship {
+  targetIndex: number;
+  targetName: string;
+  reason: string;
+}
+
+/**
  * Display-friendly snapshot of one rolled character. Captures enough to render
  * a roster row plus a hover tooltip; intentionally a plain JSON-safe shape so
  * the UI doesn't need to import `PcChar` (a class with a `Map`).
@@ -86,6 +104,14 @@ export interface CityCharacter {
    * undefined (consumers should fall back to a generic display).
    */
   affiliation?: CharacterAffiliation;
+  /**
+   * Connections to other roster members. Always populated by
+   * `generateCityCharacters` (possibly as an empty array). Each character
+   * rolls a 50% outgoing chance of forming one weighted-by-similarity link;
+   * the entry on both ends gets bidirectional, so popular characters
+   * accumulate multiple incoming edges.
+   */
+  relationships?: CharacterRelationship[];
 }
 
 interface SizeProfile {
@@ -403,7 +429,104 @@ export function generateCityCharacters(
     }
   }
 
+  // Relationship pass — also on its own PRNG sub-stream. Always runs (even
+  // without a cityMap) since relationships only depend on the rolled roster
+  // identities, not on the city map. Single-character rosters skip the pass
+  // because there's no candidate target to link to.
+  if (out.length >= 2) {
+    const relRng = seededPRNG(worldSeed + '_charrel_' + city.cellIndex);
+    assignRelationships(out, relRng);
+  } else {
+    for (const c of out) c.relationships = [];
+  }
+
   return out;
+}
+
+// ─── Relationship pass ─────────────────────────────────────────────────────
+
+const RELATIONSHIP_CHANCE = 0.5;
+
+/**
+ * For each character, roll a 50% chance of "having a relationship". On a
+ * hit, score every other character by shared traits (deity > class >
+ * alignment > race) and pick one weighted-random target. Both endpoints
+ * receive the link so popular characters accumulate multiple incoming
+ * edges — matching the spec's "may have several relationships if several
+ * other characters get related to them".
+ *
+ * Symmetric: the same edge appears on both characters' lists with the same
+ * `reason` label (the shared trait is symmetric by construction). Each
+ * (i, j) pair is recorded at most once via a per-character `Set<number>` so
+ * mutual outgoing rolls (A → B and B → A in the same year) don't duplicate.
+ *
+ * The link reason is derived from whichever shared trait has the strongest
+ * score weight, falling back to "Acquainted" when nothing matches (the
+ * weighted pick still allows a stranger pairing thanks to the +1 base
+ * weight in the score table).
+ */
+function assignRelationships(characters: CityCharacter[], rng: () => number): void {
+  const links: Set<number>[] = characters.map(() => new Set<number>());
+
+  for (let i = 0; i < characters.length; i++) {
+    if (rng() >= RELATIONSHIP_CHANCE) continue;
+
+    const me = characters[i];
+    let total = 0;
+    const candidates: { index: number; weight: number }[] = [];
+    for (let j = 0; j < characters.length; j++) {
+      if (i === j) continue;
+      const other = characters[j];
+      // Base 1 ensures any character can connect to any other (rare, but
+      // not impossible). Deity is the strongest cue because it's the most
+      // distinctive identity marker; race is the weakest because it
+      // overlaps heavily with the country's race bias.
+      let w = 1;
+      if (me.deity !== 'none' && other.deity === me.deity) w += 4;
+      if (other.pcClass === me.pcClass)                     w += 2;
+      if (other.alignment === me.alignment)                 w += 3;
+      if (other.race === me.race)                           w += 1;
+      candidates.push({ index: j, weight: w });
+      total += w;
+    }
+    if (candidates.length === 0 || total <= 0) continue;
+
+    let roll = rng() * total;
+    let chosen = candidates[candidates.length - 1].index;
+    for (const c of candidates) {
+      roll -= c.weight;
+      if (roll <= 0) { chosen = c.index; break; }
+    }
+
+    links[i].add(chosen);
+    links[chosen].add(i);
+  }
+
+  for (let i = 0; i < characters.length; i++) {
+    const me = characters[i];
+    me.relationships = Array.from(links[i])
+      .sort((a, b) => a - b) // Stable ordering — index-ascending is deterministic
+      .map(j => ({
+        targetIndex: j,
+        targetName: characters[j].name,
+        reason: deriveRelationshipReason(me, characters[j]),
+      }));
+  }
+}
+
+/**
+ * Pick the strongest shared trait between two characters and turn it into
+ * a short display label. Same trait order as the scoring function: deity
+ * first (rarest / most flavorful), then class (shared profession), then
+ * alignment (shared moral compass), then race (shared kin), with a
+ * neutral "Acquainted" fallback for stranger pairings.
+ */
+function deriveRelationshipReason(a: CityCharacter, b: CityCharacter): string {
+  if (a.deity !== 'none' && a.deity === b.deity) return `Faith of ${a.deity}`;
+  if (a.pcClass === b.pcClass) return `Fellow ${a.pcClass}`;
+  if (a.alignment === b.alignment) return 'Same alignment';
+  if (a.race === b.race) return `Kin (${raceLabel(a.race)})`;
+  return 'Acquainted';
 }
 
 /**

@@ -808,6 +808,8 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
         character={selectedCharacter}
         cityName={city?.name}
         onClose={() => setSelectedCharacter(null)}
+        roster={characters}
+        onSelectCharacter={setSelectedCharacter}
       />
     </div>
   );
