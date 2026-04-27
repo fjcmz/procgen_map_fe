@@ -13,6 +13,7 @@ import { CityMapPopupV2 } from '../CityMapPopupV2';
 import { deriveCityEnvironment, generateCityMapV2 } from '../../lib/citymap/cityMapGeneratorV2';
 import { generateCityCharacters, alignmentBadge, raceLabel, deriveCityAlignment } from '../../lib/citychars';
 import type { CityCharacter } from '../../lib/citychars';
+import { CharacterPopup } from '../CharacterPopup';
 
 interface DetailsTabProps {
   selectedEntity: SelectedEntity | null;
@@ -489,6 +490,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
   const [charactersOpen, setCharactersOpen] = useState(false);
   const [religionsOpen, setReligionsOpen] = useState(false);
+  const [selectedCharacter, setSelectedCharacter] = useState<CityCharacter | null>(null);
 
   // Roll the character roster lazily — only when the user expands the section.
   // Uses an isolated PRNG sub-stream keyed on the world seed + cellIndex, so the
@@ -756,7 +758,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               <div style={styles.loadingNote}>No roster.</div>
             )}
             {charactersOpen && characters.length > 0 && (
-              <CharacterList characters={characters} />
+              <CharacterList characters={characters} onSelect={setSelectedCharacter} />
             )}
           </>
         )}
@@ -782,6 +784,12 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           seed={seed}
         />
       )}
+      <CharacterPopup
+        isOpen={selectedCharacter !== null}
+        character={selectedCharacter}
+        cityName={city?.name}
+        onClose={() => setSelectedCharacter(null)}
+      />
     </div>
   );
 }
@@ -1369,11 +1377,18 @@ function resourceDotColor(type: string): string {
 
 // ── Character Roster ──
 //
-// Compact table of procedurally generated characters for the active city. The
-// abilities list is shown as a `title=` tooltip rather than a separate column
-// to keep the row narrow inside the 280 px overlay width. Rows are colored by
-// alignment axis (good = green-ish, evil = red-ish, neutral = base parchment).
-function CharacterList({ characters }: { characters: CityCharacter[] }) {
+// Compact table of procedurally generated characters for the active city.
+// Clicking a name opens a CharacterPopup with the full sheet. The hover
+// tooltip on the row gives a quick stat summary without opening the popup.
+// Rows are colored by alignment axis (good = green-ish, evil = red-ish,
+// neutral = base parchment).
+function CharacterList({
+  characters,
+  onSelect,
+}: {
+  characters: CityCharacter[];
+  onSelect: (c: CityCharacter) => void;
+}) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 0', fontSize: 11 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr', gap: 4, color: '#9b8a6e', fontWeight: 600, paddingLeft: 8, paddingBottom: 2, borderBottom: '1px solid rgba(155,138,110,0.3)' }}>
@@ -1385,7 +1400,7 @@ function CharacterList({ characters }: { characters: CityCharacter[] }) {
         <span>Deity</span>
       </div>
       {characters.map((c, i) => {
-        const tooltip = `HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma} | Age ${c.age.currentAge} | ${c.height}" / ${c.weight}lb | ${c.wealth} gp`;
+        const tooltip = `Click for full sheet — HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma}`;
         const alignColor =
           c.alignment.endsWith('_good') ? '#7ab87a' :
           c.alignment.endsWith('_evil') ? '#c47878' :
@@ -1400,10 +1415,32 @@ function CharacterList({ characters }: { characters: CityCharacter[] }) {
               gap: 4,
               paddingLeft: 8,
               lineHeight: '16px',
-              cursor: 'help',
+              alignItems: 'center',
             }}
           >
-            <span style={{ color: '#cbb89a', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+            <button
+              type="button"
+              onClick={() => onSelect(c)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                font: 'inherit',
+                color: '#cbb89a',
+                fontWeight: 500,
+                textAlign: 'left',
+                textDecoration: 'underline',
+                textDecorationColor: 'rgba(203,184,154,0.4)',
+                cursor: 'pointer',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={`Open ${c.name}'s character sheet`}
+            >
+              {c.name}
+            </button>
             <span style={{ color: '#9b8a6e' }}>{raceLabel(c.race)}</span>
             <span style={{ color: '#9b8a6e', textTransform: 'capitalize' }}>{c.pcClass}</span>
             <span style={{ color: '#9b8a6e' }}>{c.level}</span>
