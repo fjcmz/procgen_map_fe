@@ -477,14 +477,22 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const hasWonder = wonderSnap.some(w => w.cellIndex === cellIndex);
   const hasReligion = religionSnap.includes(cellIndex);
 
-  // City religions (final-year snapshot, sorted dominant-first) → details lookup.
+  // City religions hosted at the selected year. Sourced from the final-year
+  // `cityReligions` lookup (the only per-city religion list we serialize), but
+  // filtered to those whose `foundedYear <= absoluteYear` so older years
+  // correctly hide later-founded religions. This keeps the Religions section
+  // and the character roster's deity/alignment biases in sync with the
+  // current timeline scrub.
   const cityReligionDetails = useMemo(() => {
     if (!history.cityReligions || !history.religionDetails) return [];
     const ids = history.cityReligions[cellIndex];
     if (!ids || ids.length === 0) return [];
     const byId = new Map(history.religionDetails.map(r => [r.id, r]));
-    return ids.map(id => byId.get(id)).filter((r): r is NonNullable<typeof r> => r != null);
-  }, [history.cityReligions, history.religionDetails, cellIndex]);
+    const absoluteYear = history.startOfTime + selectedYear;
+    return ids
+      .map(id => byId.get(id))
+      .filter((r): r is NonNullable<typeof r> => r != null && r.foundedYear <= absoluteYear);
+  }, [history.cityReligions, history.religionDetails, history.startOfTime, cellIndex, selectedYear]);
 
   const cityAlignment = useMemo(() => deriveCityAlignment(cityReligionDetails), [cityReligionDetails]);
 
@@ -575,18 +583,32 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
 
   // Roll the character roster lazily — only when the user expands the
   // section OR opens the V2 city map popup (which renders the same roster
-  // grouped by district). Uses an isolated PRNG sub-stream keyed on the
-  // world seed + cellIndex, so the same city always produces the same
-  // roster within one generation run. When `cityMapV2` is available, each
-  // character also receives a `CharacterAffiliation` pointer from the
-  // affiliation pass inside `generateCityCharacters` (separate sub-stream,
-  // doesn't shift the base roster).
+  // grouped by district). Uses an isolated PRNG sub-stream keyed on
+  // `${worldSeed}_chars_${cellIndex}_y${selectedYear}`, so scrubbing the
+  // timeline produces a fresh snapshot whose race / deity / alignment
+  // biases reflect the current owner country, dominant religion, and
+  // year-aware city size. When `cityMapV2` is available, each character
+  // also receives a `CharacterAffiliation` pointer from the affiliation
+  // pass inside `generateCityCharacters` (separate sub-stream, doesn't
+  // shift the base roster).
   const charactersNeeded = charactersOpen || showCityMapV2;
   const characters: CityCharacter[] = useMemo(() => {
     if (!charactersNeeded || !city) return [];
+    if (city.foundedYear > selectedYear) return [];
     const worldSeed = history.worldSeed ?? '';
-    return generateCityCharacters(worldSeed, city, country, cityReligionDetails, cityMapV2 ?? undefined);
-  }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, cityMapV2]);
+    // Prefer the year-aware city size (population-driven) over the static
+    // final-year `city.size` so smaller historical snapshots roll smaller rosters.
+    const sizeAtYear = resolveCitySize(city, mapData, citySizesAtYear);
+    const cityForRoll = sizeAtYear === city.size ? city : { ...city, size: sizeAtYear };
+    return generateCityCharacters(
+      worldSeed,
+      cityForRoll,
+      country,
+      cityReligionDetails,
+      selectedYear,
+      cityMapV2 ?? undefined,
+    );
+  }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, cityMapV2, selectedYear, mapData, citySizesAtYear]);
 
   return (
     <div style={styles.root}>
@@ -758,8 +780,8 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           </>
         )}
 
-        {/* Characters \u2014 procedurally generated D&D 3.5e roster. */}
-        {city && !city.isRuin && history.worldSeed && (
+        {/* Characters \u2014 procedurally generated D&D 3.5e roster, year-aware. */}
+        {city && !city.isRuin && history.worldSeed && city.foundedYear <= selectedYear && (
           <>
             <button
               type="button"
