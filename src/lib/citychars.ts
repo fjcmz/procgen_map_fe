@@ -455,6 +455,12 @@ const RELATIONSHIP_CHANCE = 0.5;
  * edges — matching the spec's "may have several relationships if several
  * other characters get related to them".
  *
+ * A level gate filters out wildly mismatched pairs: a relationship can
+ * only form when the lower-level character is at least HALF the level of
+ * the higher-level one (`2 * min(La, Lb) >= max(La, Lb)`). The gate is
+ * symmetric, so it removes both outgoing and incoming candidates in one
+ * place.
+ *
  * Symmetric: the same edge appears on both characters' lists with the same
  * `reason` label (the shared trait is symmetric by construction). Each
  * (i, j) pair is recorded at most once via a per-character `Set<number>` so
@@ -477,6 +483,15 @@ function assignRelationships(characters: CityCharacter[], rng: () => number): vo
     for (let j = 0; j < characters.length; j++) {
       if (i === j) continue;
       const other = characters[j];
+      // Level gate: relationships only form when one character is at
+      // least half the level of the other (i.e. `2 * min >= max`).
+      // Keeps level-1 commoners from being best friends with level-15
+      // archmages while letting reasonable mentor / peer pairings
+      // through (e.g. L4 ↔ L8 OK, L2 ↔ L5 not OK). Symmetric by
+      // construction, so this also filters incoming edges.
+      const minL = Math.min(me.level, other.level);
+      const maxL = Math.max(me.level, other.level);
+      if (2 * minL < maxL) continue;
       // Base 1 ensures any character can connect to any other (rare, but
       // not impossible). Deity is the strongest cue because it's the most
       // distinctive identity marker; race is the weakest because it
