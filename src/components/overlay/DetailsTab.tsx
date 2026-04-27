@@ -733,7 +733,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
                   <div key={rel.id} style={{ fontSize: 12, color: '#cbb89a' }}>
                     {rel.name}
                     <span style={{ color: '#9b8a6e' }}>
-                      {' '}\u2014 {rel.deityName} ({alignmentBadge(rel.alignment)})
+                      {' \u2014 '}{rel.deityName} ({alignmentBadge(rel.alignment)})
                     </span>
                   </div>
                 ))}
