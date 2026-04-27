@@ -1381,7 +1381,29 @@ function resourceDotColor(type: string): string {
 // Clicking a name opens a CharacterPopup with the full sheet. The hover
 // tooltip on the row gives a quick stat summary without opening the popup.
 // Rows are colored by alignment axis (good = green-ish, evil = red-ish,
-// neutral = base parchment).
+// neutral = base parchment). Column headers are clickable to sort; clicking
+// the active column toggles ascending / descending.
+type CharColumn = 'name' | 'race' | 'pcClass' | 'level' | 'alignment' | 'deity';
+
+const CHAR_GRID_TEMPLATE = '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr';
+
+const CHAR_COLUMNS: { key: CharColumn; label: string }[] = [
+  { key: 'name',      label: 'Name'  },
+  { key: 'race',      label: 'Race'  },
+  { key: 'pcClass',   label: 'Class' },
+  { key: 'level',     label: 'Lv'    },
+  { key: 'alignment', label: 'Al'    },
+  { key: 'deity',     label: 'Deity' },
+];
+
+function compareChars(a: CityCharacter, b: CityCharacter, col: CharColumn): number {
+  if (col === 'level') return a.level - b.level;
+  // Strings compare locale-naturally; deity 'none' falls last via a sentinel.
+  const aVal = col === 'deity' && a.deity === 'none' ? '￿' : String(a[col]);
+  const bVal = col === 'deity' && b.deity === 'none' ? '￿' : String(b[col]);
+  return aVal.localeCompare(bVal);
+}
+
 function CharacterList({
   characters,
   onSelect,
@@ -1389,17 +1411,61 @@ function CharacterList({
   characters: CityCharacter[];
   onSelect: (c: CityCharacter) => void;
 }) {
+  const [sortBy, setSortBy] = useState<CharColumn>('level');
+  const [sortDesc, setSortDesc] = useState(true);
+
+  const sorted = useMemo(() => {
+    const out = [...characters];
+    out.sort((a, b) => {
+      const cmp = compareChars(a, b, sortBy);
+      // Stable name fallback so equal-key rows keep a predictable order.
+      const tiebreak = cmp === 0 && sortBy !== 'name' ? a.name.localeCompare(b.name) : cmp;
+      return sortDesc ? -tiebreak : tiebreak;
+    });
+    return out;
+  }, [characters, sortBy, sortDesc]);
+
+  const handleHeaderClick = (col: CharColumn) => {
+    if (col === sortBy) {
+      setSortDesc(d => !d);
+    } else {
+      setSortBy(col);
+      // Numeric columns default to descending (highest level first); strings ascending.
+      setSortDesc(col === 'level');
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 0', fontSize: 11 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr', gap: 4, color: '#9b8a6e', fontWeight: 600, paddingLeft: 8, paddingBottom: 2, borderBottom: '1px solid rgba(155,138,110,0.3)' }}>
-        <span>Name</span>
-        <span>Race</span>
-        <span>Class</span>
-        <span>Lv</span>
-        <span>Al</span>
-        <span>Deity</span>
+      <div style={{ display: 'grid', gridTemplateColumns: CHAR_GRID_TEMPLATE, gap: 4, color: '#9b8a6e', fontWeight: 600, paddingLeft: 8, paddingBottom: 2, borderBottom: '1px solid rgba(155,138,110,0.3)' }}>
+        {CHAR_COLUMNS.map(col => {
+          const active = col.key === sortBy;
+          const arrow = active ? (sortDesc ? ' ▾' : ' ▴') : '';
+          return (
+            <button
+              key={col.key}
+              type="button"
+              onClick={() => handleHeaderClick(col.key)}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: 0,
+                margin: 0,
+                font: 'inherit',
+                color: active ? '#cbb89a' : '#9b8a6e',
+                fontWeight: 600,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              title={`Sort by ${col.label.toLowerCase()}`}
+              aria-sort={active ? (sortDesc ? 'descending' : 'ascending') : 'none'}
+            >
+              {col.label}{arrow}
+            </button>
+          );
+        })}
       </div>
-      {characters.map((c, i) => {
+      {sorted.map((c, i) => {
         const tooltip = `Click for full sheet — HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma}`;
         const alignColor =
           c.alignment.endsWith('_good') ? '#7ab87a' :
@@ -1411,7 +1477,7 @@ function CharacterList({
             title={tooltip}
             style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 0.7fr 0.6fr 0.4fr 0.4fr 0.6fr',
+              gridTemplateColumns: CHAR_GRID_TEMPLATE,
               gap: 4,
               paddingLeft: 8,
               lineHeight: '16px',
