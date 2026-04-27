@@ -36,6 +36,30 @@ import type { AlignmentType } from './fantasy/AlignmentType';
 import type { Ability } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
 import type { City, Country, ReligionDetail } from './types';
+import type { CityMapDataV2, DistrictType, LandmarkKind } from './citymap';
+
+/**
+ * Pointer from a character to the district / quarter they belong to in the
+ * city map. Resolved at roster-roll time from the same `CityMapDataV2` the
+ * V2 popup renders, so the IDs index directly into `cityMap.blocks` and
+ * `cityMap.landmarks` without further lookups.
+ *
+ * Low-level characters lean toward residential blocks; higher-level
+ * characters lean toward landmarks / specialised quarters that align with
+ * their class, race, or deity. See `pickAffiliation` below for the scoring.
+ */
+export interface CharacterAffiliation {
+  /** 'block' for a generic district cluster; 'landmark' for a specific quarter / wonder / civic anchor. */
+  kind: 'block' | 'landmark';
+  /** Index into `cityMap.blocks` (when kind === 'block') or `cityMap.landmarks` (when kind === 'landmark'). */
+  index: number;
+  /** Display name to show in the character popup and the district modal. */
+  name: string;
+  /** Block role for kind === 'block'; absent for landmarks. */
+  role?: DistrictType;
+  /** Landmark kind for kind === 'landmark'; absent for blocks. */
+  landmarkKind?: LandmarkKind;
+}
 
 /**
  * Display-friendly snapshot of one rolled character. Captures enough to render
@@ -56,6 +80,12 @@ export interface CityCharacter {
   height: number;
   weight: number;
   wealth: number;
+  /**
+   * District / quarter the character is associated with. Populated when
+   * `generateCityCharacters` is called with a `cityMap` argument; otherwise
+   * undefined (consumers should fall back to a generic display).
+   */
+  affiliation?: CharacterAffiliation;
 }
 
 interface SizeProfile {
@@ -83,6 +113,176 @@ const SIZE_PROFILES: Record<City['size'], SizeProfile> = {
 const DOMINANT_RACE_MULT = 12;
 const SECONDARY_RACE_MULT = 4;
 const DOMINANT_DEITY_MULT = 8;
+
+// ─── Affiliation tables ────────────────────────────────────────────────────
+//
+// Class / race → preferred LandmarkKinds and DistrictTypes. Used by
+// `pickAffiliation` to score each (block, landmark) candidate against a
+// character's identity. Higher level multiplies the specialised weights, so
+// veterans gravitate toward race / class / deity-aligned quarters while
+// fresh adventurers cluster in residential blocks.
+//
+// Tables stay `Partial<...>` so adding a new class / race in
+// `lib/fantasy/PcClassType.ts` or `lib/fantasy/RaceType.ts` doesn't force a
+// keyword-by-keyword fill-out — the missing entries just no-op. `human` is
+// intentionally empty: the dominant race in most countries doesn't need a
+// thumbprint quarter, the residential weights handle them.
+
+const CLASS_LANDMARK_AFFINITY: Partial<Record<PcClassType, LandmarkKind[]>> = {
+  cleric:    ['temple', 'temple_quarter'],
+  paladin:   ['temple', 'temple_quarter', 'citadel', 'barracks'],
+  monk:      ['temple', 'temple_quarter', 'archive'],
+  wizard:    ['academia', 'archive'],
+  sorcerer:  ['academia', 'theater'],
+  bard:      ['theater', 'festival', 'pleasure', 'bathhouse'],
+  fighter:   ['barracks', 'citadel', 'arsenal', 'watchmen'],
+  barbarian: ['barracks', 'foreign_quarter', 'gallows'],
+  ranger:    ['park', 'caravanserai'],
+  druid:     ['park'],
+  rogue:     ['ghetto_marker', 'foreign_quarter', 'market', 'pleasure', 'gallows'],
+};
+
+const CLASS_DISTRICT_AFFINITY: Partial<Record<PcClassType, DistrictType[]>> = {
+  cleric:    ['civic'],
+  paladin:   ['civic', 'military'],
+  monk:      ['civic'],
+  wizard:    ['education_faith'],
+  sorcerer:  ['education_faith', 'entertainment'],
+  bard:      ['entertainment'],
+  fighter:   ['military'],
+  barbarian: ['military', 'slum'],
+  ranger:    ['agricultural'],
+  druid:     ['agricultural'],
+  rogue:     ['slum', 'market'],
+};
+
+const RACE_LANDMARK_AFFINITY: Partial<Record<RaceType, LandmarkKind[]>> = {
+  elf:      ['temple_quarter', 'park', 'archive'],
+  half_elf: ['foreign_quarter', 'park'],
+  dwarf:    ['forge', 'arsenal', 'mill'],
+  gnome:    ['forge', 'academia', 'potters'],
+  halfling: ['market', 'caravanserai'],
+  human:    [],
+  half_orc: ['ghetto_marker', 'foreign_quarter', 'barracks'],
+  orc:      ['ghetto_marker', 'foreign_quarter'],
+};
+
+const RACE_DISTRICT_AFFINITY: Partial<Record<RaceType, DistrictType[]>> = {
+  elf:      ['residential_high'],
+  half_elf: ['residential_medium'],
+  dwarf:    ['industry'],
+  gnome:    ['industry', 'education_faith'],
+  halfling: ['residential_medium', 'market', 'agricultural'],
+  human:    [],
+  half_orc: ['slum', 'military'],
+  orc:      ['slum'],
+};
+
+interface AffiliationCandidate {
+  kind: 'block' | 'landmark';
+  index: number;
+  weight: number;
+}
+
+/**
+ * Score every block + landmark in the city against a character's identity and
+ * pick one. Residential blocks always have a non-zero baseline so any roster
+ * member is placeable, even in cities without a matching specialised quarter.
+ *
+ * Level shapes the curve in two ways:
+ *   • residential weights shift from low → high tier as level rises (richer
+ *     characters live in nicer blocks);
+ *   • specialised landmark / district weights scale linearly with level, so
+ *     mid- to high-level characters out-bid residential placement when their
+ *     class / race / deity matches an available landmark.
+ */
+function pickAffiliation(
+  char: Pick<CityCharacter, 'pcClass' | 'race' | 'level' | 'deity'>,
+  cityMap: CityMapDataV2,
+  rng: () => number,
+): CharacterAffiliation | undefined {
+  const blocks = cityMap.blocks;
+  const landmarks = cityMap.landmarks;
+  if (blocks.length === 0 && landmarks.length === 0) return undefined;
+
+  const level = char.level;
+  const classLm = CLASS_LANDMARK_AFFINITY[char.pcClass] ?? [];
+  const classDist = CLASS_DISTRICT_AFFINITY[char.pcClass] ?? [];
+  const raceLm = RACE_LANDMARK_AFFINITY[char.race] ?? [];
+  const raceDist = RACE_DISTRICT_AFFINITY[char.race] ?? [];
+  const isFaithful = char.deity !== 'none' &&
+    (char.pcClass === 'cleric' || char.pcClass === 'paladin' || char.pcClass === 'monk');
+
+  // Residential tier weights — slums skew low-level, mansions skew high-level,
+  // medium peaks around level 4. The clamps guarantee every tier stays a
+  // viable fallback for any level so degenerate cities (only one residential
+  // tier present) never strand a character with weight 0.
+  const residentialLowW  = Math.max(0.6, 2.6 - level * 0.20);
+  const residentialMedW  = 1.8 + Math.max(0, 0.5 - Math.abs(level - 4) * 0.1);
+  const residentialHighW = Math.min(3.0, 0.4 + level * 0.25);
+
+  const candidates: AffiliationCandidate[] = [];
+
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.polygonIds.length === 0) continue;
+    let weight = 0;
+    if (b.role === 'residential_low')         weight = residentialLowW;
+    else if (b.role === 'residential_medium') weight = residentialMedW;
+    else if (b.role === 'residential_high')   weight = residentialHighW;
+    else {
+      if (classDist.includes(b.role)) weight += 0.7 + level * 0.4;
+      if (raceDist.includes(b.role))  weight += 0.4 + level * 0.25;
+    }
+    if (weight > 0) candidates.push({ kind: 'block', index: i, weight });
+  }
+
+  for (let i = 0; i < landmarks.length; i++) {
+    const lm = landmarks[i];
+    let weight = 0;
+    if (classLm.includes(lm.kind)) weight += 1.0 + level * 0.5;
+    if (raceLm.includes(lm.kind))  weight += 0.5 + level * 0.3;
+    if (isFaithful && (lm.kind === 'temple' || lm.kind === 'temple_quarter')) {
+      weight += 0.5 + level * 0.4;
+    }
+    if (weight > 0) candidates.push({ kind: 'landmark', index: i, weight });
+  }
+
+  // Fallback chain: any non-empty block, then any landmark. Guarantees every
+  // character gets an affiliation as long as the city has any geometry at all.
+  if (candidates.length === 0) {
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].polygonIds.length > 0) candidates.push({ kind: 'block', index: i, weight: 1 });
+    }
+  }
+  if (candidates.length === 0) {
+    for (let i = 0; i < landmarks.length; i++) candidates.push({ kind: 'landmark', index: i, weight: 1 });
+  }
+  if (candidates.length === 0) return undefined;
+
+  const total = candidates.reduce((s, c) => s + c.weight, 0);
+  let roll = rng() * total;
+  let chosen = candidates[candidates.length - 1];
+  for (const c of candidates) {
+    roll -= c.weight;
+    if (roll <= 0) { chosen = c; break; }
+  }
+
+  if (chosen.kind === 'block') {
+    const b = blocks[chosen.index];
+    return { kind: 'block', index: chosen.index, name: b.name, role: b.role };
+  }
+  const lm = landmarks[chosen.index];
+  // Phase 4 quarters (forge / barracks / …) have no `lm.name` of their own —
+  // they inherit the parent block's procedural name. Mirror what the V2 popup
+  // tooltip does: look up the block that owns this polygon and reuse its name.
+  let name = lm.name;
+  if (!name) {
+    const containingBlock = blocks.find(b => b.polygonIds.includes(lm.polygonId));
+    name = containingBlock?.name ?? lm.kind.toUpperCase();
+  }
+  return { kind: 'landmark', index: chosen.index, name, landmarkKind: lm.kind };
+}
 
 /**
  * Pretty-print an `AlignmentType` enum value as the conventional 2-letter
@@ -121,6 +321,13 @@ export function raceLabel(r: RaceType): string {
  * fresh deterministic snapshot per year. Omit (or pass undefined) to keep
  * the v1 single-snapshot behavior.
  *
+ * `cityMap` enables district / quarter affiliations on each rolled
+ * character. When supplied, a second isolated PRNG sub-stream
+ * (`${worldSeed}_charaffil_${cellIndex}` plus the year suffix when set)
+ * scores each character against every block / landmark and stamps the
+ * best match into `CityCharacter.affiliation`. The year is folded into
+ * this stream too so affiliations stay in lock-step with year-aware rosters.
+ *
  * Returns [] on degenerate input (no worldSeed, ruined cities at the renderer
  * layer should already have skipped this call).
  */
@@ -130,6 +337,7 @@ export function generateCityCharacters(
   country: Pick<Country, 'raceBias'> | undefined,
   religions: ReligionDetail[],
   year?: number,
+  cityMap?: CityMapDataV2,
 ): CityCharacter[] {
   if (!worldSeed) return [];
   if (city.isRuin) return [];
@@ -197,6 +405,18 @@ export function generateCityCharacters(
       wealth: pc.wealth,
     });
   }
+
+  // Affiliation pass — runs on its own isolated PRNG sub-stream so adding /
+  // tweaking the affiliation tables never shifts the existing roster (the
+  // core character roll above stays byte-stable for legacy callers that
+  // don't pass `cityMap`).
+  if (cityMap) {
+    const affilRng = seededPRNG(worldSeed + '_charaffil_' + city.cellIndex + yearKey);
+    for (const c of out) {
+      c.affiliation = pickAffiliation(c, cityMap, affilRng);
+    }
+  }
+
   return out;
 }
 

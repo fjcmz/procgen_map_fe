@@ -1,11 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { City, Country, EmpireSnapshotEntry, HistoryData, MapData, SelectedEntity } from '../../lib/types';
+import type { City, Country, EmpireSnapshotEntry, HistoryData, MapData, ReligionDetail, SelectedEntity } from '../../lib/types';
 import { INDEX_TO_CITY_SIZE } from '../../lib/history/physical/CityEntity';
 import { getEmpiresAtYear } from '../../lib/history';
 import { formatYear } from '../Timeline';
 import type { CityEnvironment } from '../../lib/citymap';
 import { deriveCityEnvironment } from '../../lib/citymap';
 import { CityMapPopupV2 } from '../CityMapPopupV2';
+import type { AlignmentType } from '../../lib/fantasy/AlignmentType';
+import { ALIGNMENT_TYPES } from '../../lib/fantasy/AlignmentType';
+import { alignmentBadge } from '../../lib/citychars';
 
 interface HierarchyTabProps {
   historyData: HistoryData;
@@ -96,7 +99,25 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set<string>());
   const [searchQuery, setSearchQuery] = useState('');
   const [enabledSizes, setEnabledSizes] = useState<Set<City['size']>>(() => new Set(ALL_CITY_SIZES));
+  const [alignmentFilter, setAlignmentFilter] = useState<'all' | AlignmentType>('all');
   const [cityMapState, setCityMapState] = useState<CityMapState | null>(null);
+
+  /** Maps city cellIndex → dominant religion's alignment (final-year snapshot). */
+  const cityAlignmentMap = useMemo((): Map<number, AlignmentType> => {
+    const map = new Map<number, AlignmentType>();
+    if (!historyData.cityReligions || !historyData.religionDetails) return map;
+    const relById = new Map<string, ReligionDetail>(
+      historyData.religionDetails.map(r => [r.id, r]),
+    );
+    for (const [cellIdxStr, relIds] of Object.entries(historyData.cityReligions)) {
+      const cellIdx = Number(cellIdxStr);
+      const domRelId = relIds[0];
+      if (!domRelId) continue;
+      const detail = relById.get(domRelId);
+      if (detail) map.set(cellIdx, detail.alignment);
+    }
+    return map;
+  }, [historyData.cityReligions, historyData.religionDetails]);
 
   const toggle = (key: string) => {
     setExpanded(prev => {
@@ -398,10 +419,55 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     };
   }, [tree, enabledSizes, resolveCitySize]);
 
-  // Search filter applied on top of size filter
+  // Alignment filter applied on top of size filter.
+  // Cities with no recorded religion are treated as neutral_neutral (matches deriveCityAlignment).
+  const alignmentFilteredTree = useMemo<Tree>(() => {
+    if (alignmentFilter === 'all') return sizeFilteredTree;
+
+    const cityPassesFilter = (city: City): boolean =>
+      (cityAlignmentMap.get(city.cellIndex) ?? 'neutral_neutral') === alignmentFilter;
+
+    const filterCountry = (node: CountryNode): CountryNode | null => {
+      if (node.cities.length === 0) return node;
+      const filtered = node.cities.filter(cityPassesFilter);
+      if (filtered.length === 0) return null;
+      return { ...node, cities: filtered };
+    };
+
+    const filteredEmpires: EmpireNode[] = [];
+    for (const emp of sizeFilteredTree.empires) {
+      const filteredCountries: CountryNode[] = [];
+      let totalCities = 0;
+      for (const c of emp.countries) {
+        const fc = filterCountry(c);
+        if (fc) { filteredCountries.push(fc); totalCities += fc.cities.length; }
+      }
+      if (filteredCountries.length > 0) {
+        filteredEmpires.push({ ...emp, countries: filteredCountries, totalCities });
+      }
+    }
+
+    const filteredStateless: CountryNode[] = [];
+    let filteredStatelessCityCount = 0;
+    for (const c of sizeFilteredTree.stateless) {
+      const fc = filterCountry(c);
+      if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
+    }
+
+    const filteredUnassigned = sizeFilteredTree.unassignedCities.filter(cityPassesFilter);
+
+    return {
+      empires: filteredEmpires,
+      stateless: filteredStateless,
+      statelessCityCount: filteredStatelessCityCount,
+      unassignedCities: filteredUnassigned,
+    };
+  }, [sizeFilteredTree, alignmentFilter, cityAlignmentMap]);
+
+  // Search filter applied on top of size + alignment filters
   const filteredTree = useMemo<Tree>(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return sizeFilteredTree;
+    if (!q) return alignmentFilteredTree;
 
     const matchesQuery = (name: string) => name.toLowerCase().includes(q);
 
@@ -414,7 +480,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     };
 
     const filteredEmpires: EmpireNode[] = [];
-    for (const emp of sizeFilteredTree.empires) {
+    for (const emp of alignmentFilteredTree.empires) {
       const empireMatches = matchesQuery(emp.entry.name);
       if (empireMatches) { filteredEmpires.push(emp); continue; }
       const filteredCountries: CountryNode[] = [];
@@ -430,12 +496,12 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
 
     const filteredStateless: CountryNode[] = [];
     let filteredStatelessCityCount = 0;
-    for (const c of sizeFilteredTree.stateless) {
+    for (const c of alignmentFilteredTree.stateless) {
       const fc = filterCountryNode(c, false);
       if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
     }
 
-    const filteredUnassigned = sizeFilteredTree.unassignedCities.filter(c => matchesQuery(c.name));
+    const filteredUnassigned = alignmentFilteredTree.unassignedCities.filter(c => matchesQuery(c.name));
 
     return {
       empires: filteredEmpires,
@@ -443,7 +509,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       statelessCityCount: filteredStatelessCityCount,
       unassignedCities: filteredUnassigned,
     };
-  }, [sizeFilteredTree, searchQuery]);
+  }, [alignmentFilteredTree, searchQuery]);
 
   const isSearching = searchQuery.trim().length > 0;
   const isExpanded = (key: string) => isSearching || expanded.has(key);
@@ -653,6 +719,17 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               </button>
             );
           })}
+          <select
+            value={alignmentFilter}
+            onChange={e => setAlignmentFilter(e.target.value as 'all' | AlignmentType)}
+            style={styles.alignmentSelect}
+            title="Filter cities by alignment"
+          >
+            <option value="all">All</option>
+            {ALIGNMENT_TYPES.map(a => (
+              <option key={a} value={a}>{alignmentBadge(a)}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -661,7 +738,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           && filteredTree.stateless.length === 0
           && filteredTree.unassignedCities.length === 0 && (
           <div style={styles.emptyNote}>
-            {isSearching ? 'No matches.' : enabledSizes.size < ALL_CITY_SIZES.length ? 'No cities match the selected sizes.' : 'No realms yet.'}
+            {isSearching ? 'No matches.' : alignmentFilter !== 'all' ? `No ${alignmentBadge(alignmentFilter)} cities.` : enabledSizes.size < ALL_CITY_SIZES.length ? 'No cities match the selected sizes.' : 'No realms yet.'}
           </div>
         )}
 
@@ -988,5 +1065,17 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.2,
     color: '#5a3a00',
     textTransform: 'uppercase',
+  },
+  alignmentSelect: {
+    marginLeft: 'auto',
+    fontSize: 9,
+    fontFamily: 'Georgia, serif',
+    border: '1px solid #c8b07a',
+    borderRadius: 3,
+    background: '#faf3e6',
+    color: '#3a1a00',
+    padding: '1px 2px',
+    cursor: 'pointer',
+    flexShrink: 0,
   },
 };

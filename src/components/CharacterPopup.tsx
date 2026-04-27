@@ -1,9 +1,73 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { CityCharacter } from '../lib/citychars';
+import type { CityCharacter, CharacterAffiliation } from '../lib/citychars';
 import { alignmentBadge, raceLabel } from '../lib/citychars';
 import { abilityMod } from '../lib/fantasy/Ability';
 import type { Ability } from '../lib/fantasy/Ability';
+import type { DistrictType, LandmarkKind } from '../lib/citymap';
+
+// Human-readable label for the affiliation's role / kind. Mirrors the
+// DISTRICT_ROLE_INFO / LANDMARK_KIND_INFO labels in `CityMapPopupV2.tsx` so
+// the wording in the character sheet matches the city-map tooltip the user
+// just saw.
+const DISTRICT_LABELS: Record<DistrictType, string> = {
+  civic:              'Civic Centre',
+  market:             'Market',
+  harbor:             'Harbour',
+  residential_high:   'Wealthy Residential',
+  residential_medium: 'Residential',
+  residential_low:    'Poor Residential',
+  agricultural:       'Fields',
+  slum:               'Slums',
+  dock:               'Docks',
+  industry:           'Industry Quarter',
+  education_faith:    'Education & Faith',
+  military:           'Military Quarter',
+  trade:              'Trade Quarter',
+  entertainment:      'Entertainment Quarter',
+  excluded:           'Excluded Zone',
+};
+
+const LANDMARK_LABELS: Record<LandmarkKind, string> = {
+  wonder:          'Wonder',
+  palace:          'Palace',
+  castle:          'Castle',
+  civic_square:    'Civic Square',
+  temple:          'Temple',
+  market:          'Market',
+  park:            'Park',
+  forge:           'Forge',
+  tannery:         'Tannery',
+  textile:         'Textile Quarter',
+  potters:         'Potters Quarter',
+  mill:            'Mill',
+  barracks:        'Barracks',
+  citadel:         'Citadel',
+  arsenal:         'Arsenal',
+  watchmen:        'Watchmen Precinct',
+  temple_quarter:  'Temple Quarter',
+  necropolis:      'Necropolis',
+  plague_ward:     'Plague Ward',
+  academia:        'Academia',
+  archive:         'Archive',
+  theater:         'Theatre District',
+  bathhouse:       'Bathhouse Quarter',
+  pleasure:        'Pleasure Quarter',
+  festival:        'Festival Grounds',
+  foreign_quarter: 'Foreign Quarter',
+  caravanserai:    'Caravanserai',
+  bankers_row:     "Bankers' Row",
+  warehouse:       'Warehouse Row',
+  gallows:         'Gallows Hill',
+  workhouse:       'Workhouse',
+  ghetto_marker:   'Ghetto',
+};
+
+function affiliationKindLabel(a: CharacterAffiliation): string {
+  if (a.kind === 'block' && a.role) return DISTRICT_LABELS[a.role];
+  if (a.kind === 'landmark' && a.landmarkKind) return LANDMARK_LABELS[a.landmarkKind];
+  return a.kind === 'block' ? 'District' : 'Landmark';
+}
 
 interface CharacterPopupProps {
   isOpen: boolean;
@@ -96,6 +160,19 @@ export function CharacterPopup({ isOpen, character, cityName, onClose }: Charact
               <div style={styles.identityValue}>{c.hitPoints}</div>
             </div>
           </div>
+
+          {/* District / quarter affiliation — populated when the V2 city map
+              data was available at roster-roll time (DetailsTab passes it in
+              once Quarters / Characters / Map V2 has been touched). */}
+          {c.affiliation && (
+            <div style={styles.affiliationRow}>
+              <span style={styles.affiliationLabel}>From</span>
+              <span style={styles.affiliationName}>{c.affiliation.name}</span>
+              <span style={styles.affiliationKind}>
+                {affiliationKindLabel(c.affiliation)}
+              </span>
+            </div>
+          )}
 
           {/* Abilities — 6-column grid with score + modifier */}
           <div style={styles.sectionLabel}>Abilities</div>
@@ -350,5 +427,42 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#2a1a00',
     fontFamily: 'Georgia, serif',
     fontSize: 13,
+  },
+  affiliationRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 8,
+    padding: '6px 10px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+    fontSize: 12,
+    color: '#2a1a00',
+    overflow: 'hidden',
+  },
+  affiliationLabel: {
+    fontSize: 9,
+    color: '#7a5a30',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: 600,
+    flexShrink: 0,
+  },
+  affiliationName: {
+    fontWeight: 700,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+    flexShrink: 1,
+  },
+  affiliationKind: {
+    fontSize: 11,
+    color: '#7a5a30',
+    fontStyle: 'italic',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
   },
 };
