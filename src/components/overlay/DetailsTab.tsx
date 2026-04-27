@@ -607,8 +607,9 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
       cityReligionDetails,
       selectedYear,
       cityMapV2 ?? undefined,
+      history.illustrateDetails,
     );
-  }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, cityMapV2, selectedYear, mapData, citySizesAtYear]);
+  }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, history.illustrateDetails, cityMapV2, selectedYear, mapData, citySizesAtYear]);
 
   return (
     <div style={styles.root}>
@@ -1509,7 +1510,10 @@ function CharacterList({
         })}
       </div>
       {sorted.map((c, i) => {
-        const tooltip = `Click for full sheet — HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma}`;
+        const illustrateNote = c.illustrateType
+          ? `\nIllustrious ${c.illustrateType} (b. ${c.illustrateBirthYear})`
+          : '';
+        const tooltip = `Click for full sheet — HP ${c.hitPoints} | STR ${c.abilities.strength} DEX ${c.abilities.dexterity} CON ${c.abilities.constitution} INT ${c.abilities.intelligence} WIS ${c.abilities.wisdom} CHA ${c.abilities.charisma}${illustrateNote}`;
         const alignColor =
           c.alignment.endsWith('_good') ? '#7ab87a' :
           c.alignment.endsWith('_evil') ? '#c47878' :
@@ -1546,8 +1550,9 @@ function CharacterList({
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
-              title={`Open ${c.name}'s character sheet`}
+              title={c.illustrateType ? `Open ${c.name}'s character sheet — illustrious ${c.illustrateType}` : `Open ${c.name}'s character sheet`}
             >
+              {c.illustrateType ? <span style={{ color: '#e6c75a', marginRight: 3 }} aria-label="illustrate">{'★'}</span> : null}
               {c.name}
             </button>
             <span style={{ color: '#9b8a6e' }}>{raceLabel(c.race)}</span>

@@ -925,6 +925,8 @@ function buildIllustrateDetails(world: World, countryMap: CountryIndexMap): Illu
       birthYear: ill.birthYear,
       deathYear: ill.diedOn,
       deathCause: ill.deathCause,
+      pcClass: ill.pcClass,
+      pcLevel: ill.pcLevel,
     });
   }
   details.sort((a, b) => a.birthYear - b.birthYear);

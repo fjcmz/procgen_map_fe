@@ -10,7 +10,7 @@ import type { AlignmentType } from './AlignmentType';
 import { ALIGNMENT_SPECS, ALIGNMENT_TYPES } from './AlignmentType';
 import type { RaceType, RaceSpec } from './RaceType';
 import { RACE_SPECS, RACE_TYPES, getAdjustAbilities } from './RaceType';
-import type { PcClassType } from './PcClassType';
+import type { PcClassType, PcClassSpec } from './PcClassType';
 import { PC_CLASS_SPECS, PC_CLASS_TYPES, getClassesForMainAbility } from './PcClassType';
 import type { Deity, DeitySpec } from './Deity';
 import { DEITIES, DEITY_SPECS, deityAllowsRace, deityAllowsAlignment } from './Deity';
@@ -246,6 +246,17 @@ export function generatePcChar(
 export interface PcCharBiasOptions {
   raceWeights?: Partial<Record<RaceType, number>>;
   deityWeights?: Partial<Record<Deity, number>>;
+  /**
+   * Multiplicative weight overrides on `PC_CLASS_SPECS[c].prob`. When provided,
+   * the class is picked via a single weighted `probPick` over all classes
+   * instead of the ability-driven `generateClass` path — letting callers force
+   * a class (set its weight very high, e.g. 1000) for narrative roles such as
+   * illustrate-derived characters. The character's rolled abilities may not
+   * match the forced class's `mainAbilities`; that's accepted in exchange for
+   * narrative fit. Pass-through (omitted) keeps the default ability-driven
+   * class picker intact.
+   */
+  classWeights?: Partial<Record<PcClassType, number>>;
 }
 
 /**
@@ -294,7 +305,20 @@ export function generatePcCharBiased(
   pcChar.race = probPick(raceSpecsBiased, RACE_TYPES, rng);
 
   generateAbilities(pcChar, level, rng);
-  generateClass(pcChar, rng);
+  if (opts.classWeights) {
+    // Class is forced via weighted roulette over PC_CLASS_SPECS — bypasses
+    // the ability-driven picker so callers can guarantee a class regardless
+    // of which ability rolled highest. Local biased copy mirrors the
+    // race / deity discipline; PC_CLASS_SPECS is never mutated.
+    const classSpecsBiased = {} as Record<PcClassType, PcClassSpec>;
+    for (const c of PC_CLASS_TYPES) {
+      const mult = opts.classWeights[c] ?? 1;
+      classSpecsBiased[c] = { ...PC_CLASS_SPECS[c], prob: Math.max(0, PC_CLASS_SPECS[c].prob * mult) };
+    }
+    pcChar.pcClass = probPick(classSpecsBiased, PC_CLASS_TYPES, rng);
+  } else {
+    generateClass(pcChar, rng);
+  }
   pcChar.level = level;
 
   const addAbility = Math.floor(level / 4);

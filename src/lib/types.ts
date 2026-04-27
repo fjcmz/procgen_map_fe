@@ -14,8 +14,10 @@ import type { TechField } from './history/timeline/Tech';
 export type { RaceType } from './fantasy/RaceType';
 export type { Deity } from './fantasy/Deity';
 export type { AlignmentType } from './fantasy/AlignmentType';
+export type { PcClassType } from './fantasy/PcClassType';
 import type { RaceType } from './fantasy/RaceType';
 import type { Deity } from './fantasy/Deity';
+import type { PcClassType } from './fantasy/PcClassType';
 import type { AlignmentType } from './fantasy/AlignmentType';
 
 /**
@@ -347,6 +349,14 @@ export interface IllustrateDetail {
   birthYear: number;        // absolute year
   deathYear: number | null;  // absolute year, null if still alive at end of sim
   deathCause: string;        // 'natural', 'war', cataclysm description, or ''
+  /**
+   * D&D 3.5e class baked at sim time from an isolated PRNG sub-stream
+   * (`${world.seed}_illustrate_${id}`). Lets the city's character roster
+   * spawn this illustrate as a real character with a class consistent with
+   * their illustrate type (religion → cleric, military → fighter, etc.).
+   */
+  pcClass: PcClassType;
+  pcLevel: number;
 }
 
 export interface HistoryData {
