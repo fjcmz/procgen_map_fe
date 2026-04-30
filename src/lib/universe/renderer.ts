@@ -114,8 +114,14 @@ export function galaxySpiralPositions(
   const arms = 2;
   const armOffset = Math.PI;
   const a = 8;       // logarithmic spiral inner radius
-  const b = 0.18;    // tightness — smaller = tighter winding
   const angleStep = 0.42;
+  // Adaptive tightness: for high star counts the fixed b=0.18 pushes outer
+  // arms far outside the viewport. Compute the maximum b that keeps the last
+  // arm within ~45% of `spread` (a * exp(b * maxAngle) * spread/200 ≤ spread*0.45
+  // ⟹ b ≤ ln(11.25) / maxAngle ≈ 2.42 / maxAngle). For count ≤ ~64 the cap
+  // has no effect and the original value 0.18 is preserved.
+  const maxK = Math.max(1, Math.floor(count / 2));
+  const b = Math.min(0.18, 2.42 / (maxK * angleStep));
 
   for (let i = 0; i < count; i++) {
     const arm = i % arms;
@@ -245,10 +251,12 @@ export function drawGalaxyScene(
   vh: number,
   stars: BackgroundStar[],
   cameraScale: number = 1,
+  panX: number = 0,
+  panY: number = 0,
 ): GalaxyDrawResult {
   drawBackground(ctx, vw, vh, stars);
-  const cx = vw / 2;
-  const cy = vh / 2;
+  const cx = vw / 2 + panX;
+  const cy = vh / 2 + panY;
   const spread = Math.min(vw, vh) * 0.7;
   const positions = galaxySpiralPositions(data.solarSystems.length, cx, cy, spread);
 

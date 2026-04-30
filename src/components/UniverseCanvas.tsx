@@ -59,6 +59,11 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     const dataRef = useRef<UniverseData | null>(data);
     dataRef.current = data;
 
+    // Galaxy-view pan state
+    const panRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+    const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+    const hasDraggedRef = useRef(false);
+
     // Keep the latest onEntityClick callback in a ref so the click handler
     // effect doesn't need to re-register on every render.
     const onEntityClickRef = useRef(onEntityClick);
@@ -72,6 +77,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       if (!data) return;
       setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
       transitionRef.current = null;
+      panRef.current = { x: 0, y: 0 };
     }, [data]);
 
     useEffect(() => {
@@ -154,7 +160,8 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
         let activeHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          const res = drawGalaxyScene(ctx, d, vw, vh, stars, 1);
+          const { x: panX, y: panY } = panRef.current;
+          const res = drawGalaxyScene(ctx, d, vw, vh, stars, 1, panX, panY);
           activeHit = res.hit;
         } else if (state.scene === 'system' && system) {
           const res = drawSystemScene(ctx, system, vw, vh, stars, time);
@@ -185,6 +192,11 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       if (!canvas) return;
       const onClick = (e: MouseEvent) => {
         if (e.button !== 0) return;
+        // Suppress click when the pointer moved enough to be a pan gesture
+        if (hasDraggedRef.current) {
+          hasDraggedRef.current = false;
+          return;
+        }
         const rect = canvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
@@ -210,6 +222,55 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       };
       canvas.addEventListener('click', onClick);
       return () => canvas.removeEventListener('click', onClick);
+    }, []);
+
+    // Galaxy-view drag-to-pan via Pointer Events
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const onPointerDown = (e: PointerEvent) => {
+        if (e.button !== 0) return;
+        if (sceneStateRef.current.scene !== 'galaxy') return;
+        canvas.setPointerCapture(e.pointerId);
+        dragRef.current = {
+          startX: e.clientX,
+          startY: e.clientY,
+          originX: panRef.current.x,
+          originY: panRef.current.y,
+        };
+        hasDraggedRef.current = false;
+        canvas.style.cursor = 'grabbing';
+      };
+
+      const onPointerMove = (e: PointerEvent) => {
+        if (!dragRef.current) return;
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) {
+          hasDraggedRef.current = true;
+        }
+        panRef.current = {
+          x: dragRef.current.originX + dx,
+          y: dragRef.current.originY + dy,
+        };
+      };
+
+      const onPointerUp = () => {
+        dragRef.current = null;
+        canvas.style.cursor = sceneStateRef.current.scene === 'galaxy' ? 'grab' : 'pointer';
+      };
+
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', onPointerUp);
+      canvas.addEventListener('pointercancel', onPointerUp);
+      return () => {
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        canvas.removeEventListener('pointermove', onPointerMove);
+        canvas.removeEventListener('pointerup', onPointerUp);
+        canvas.removeEventListener('pointercancel', onPointerUp);
+      };
     }, []);
 
     // Escape → back (only when no popup is open; popup intercepts Escape first)
@@ -241,7 +302,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           left: 0,
           display: 'block',
           touchAction: 'none',
-          cursor: 'pointer',
+          cursor: sceneState.scene === 'galaxy' ? 'grab' : 'pointer',
         }}
       />
     );
