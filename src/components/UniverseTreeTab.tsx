@@ -34,6 +34,16 @@ const DEFAULT_FILTERS: Filters = {
   lifeOnly: false,
 };
 
+function pluralize(n: number, singular: string): string {
+  return n === 1 ? singular : `${singular}s`;
+}
+
+/** "3 stars" when nothing was filtered out; "2/5 stars" when it was. */
+function formatCount(visible: number, total: number, noun: string): string {
+  if (visible === total) return `${total} ${pluralize(total, noun)}`;
+  return `${visible}/${total} ${pluralize(total, noun)}`;
+}
+
 // ── Filter logic ──────────────────────────────────────────────────────────
 
 function starMatches(star: StarData, f: Filters): boolean {
@@ -52,16 +62,22 @@ function planetMatches(planet: PlanetData, f: Filters): boolean {
   return true;
 }
 
-/** A planet "passes" the tree filter iff the planet itself matches AND it
- *  matches whatever sub-filters are active for its descendants. We only
- *  surface a planet if it itself passes — satellite filters narrow the
- *  visible satellites under that planet but never hide the planet by
- *  themselves. */
+/** A planet shows iff:
+ *  - the planet itself passes (composition + life filters), AND
+ *  - if the satellite filter is active, the planet has at least one matching
+ *    satellite. (Inactive sat filter = planets without satellites still show.)
+ *  This is the "hide parents without matching children" rule applied to
+ *  planet → satellite. */
 function planetPasses(planet: PlanetData, f: Filters): boolean {
-  return planetMatches(planet, f);
+  if (!planetMatches(planet, f)) return false;
+  if (f.satellite !== 'any') {
+    return planet.satellites.some(sat => satelliteMatches(sat, f));
+  }
+  return true;
 }
 
-/** A system passes iff at least one direct child (star or planet) passes. */
+/** A system shows iff at least one direct child (matching star or passing
+ *  planet) is visible. Same "hide parents without matching children" rule. */
 function systemPasses(system: SolarSystemData, f: Filters): boolean {
   if (system.stars.some(s => starMatches(s, f))) return true;
   if (system.planets.some(p => planetPasses(p, f))) return true;
@@ -139,7 +155,7 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
       {/* Tree */}
       <div style={s.treeWrap}>
         <div style={s.treeHeader}>
-          {visibleSystems.length} of {data.solarSystems.length} system{data.solarSystems.length === 1 ? '' : 's'}
+          {formatCount(visibleSystems.length, data.solarSystems.length, 'system')}
         </div>
         {visibleSystems.length === 0 && (
           <div style={s.empty}>No systems match the active filters.</div>
@@ -175,6 +191,8 @@ function SystemNode({
   const visibleStars = system.stars.filter(st => starMatches(st, filters));
   const visiblePlanets = system.planets.filter(p => planetPasses(p, filters));
   const childCount = visibleStars.length + visiblePlanets.length;
+  const starCountLabel = formatCount(visibleStars.length, system.stars.length, 'star');
+  const planetCountLabel = formatCount(visiblePlanets.length, system.planets.length, 'planet');
 
   return (
     <div style={s.node}>
@@ -188,7 +206,7 @@ function SystemNode({
           <span style={s.icon}>●</span>
           <code style={s.code}>{system.id}</code>
           <span style={s.dim}>
-            {' '}— {system.composition.toLowerCase()}, {system.stars.length} star{system.stars.length === 1 ? '' : 's'}, {system.planets.length} planet{system.planets.length === 1 ? '' : 's'}
+            {' '}— {system.composition.toLowerCase()}, {starCountLabel}, {planetCountLabel}
           </span>
         </button>
       </div>
@@ -263,6 +281,9 @@ function PlanetNode({
   const isOpen = expanded.has(key);
   const visibleSats = planet.satellites.filter(sat => satelliteMatches(sat, filters));
   const hasChildren = planet.satellites.length > 0;
+  const satCountLabel = hasChildren
+    ? formatCount(visibleSats.length, planet.satellites.length, 'sat')
+    : '';
 
   return (
     <div style={s.node}>
@@ -281,7 +302,7 @@ function PlanetNode({
           {planet.life && <span style={s.life}> ★life</span>}
           <span style={s.dim}>
             , orbit={planet.orbit.toFixed(1)}
-            {planet.satellites.length > 0 && `, ${planet.satellites.length} sat${planet.satellites.length > 1 ? 's' : ''}`}
+            {hasChildren && `, ${satCountLabel}`}
           </span>
         </button>
       </div>
