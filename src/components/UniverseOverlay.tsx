@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Draggable } from './Draggable';
 import type { UniverseData } from '../lib/universe/types';
 import type { UniverseSceneState, PopupEntity } from './UniverseCanvas';
@@ -20,11 +20,31 @@ interface UniverseOverlayProps {
 
 type OverlayTab = 'generation' | 'tree';
 
+const TAB_LABELS: Record<OverlayTab, string> = {
+  generation: 'Gen',
+  tree: 'Tree',
+};
+
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'tree'];
+
 const TAB_WIDTHS: Record<OverlayTab, number> = {
   generation: 320,
   tree: 360,
 };
 const SYSTEM_OPTIONS = [10, 30, 80, 200, 500];
+
+// ── Focus-ring injection ──────────────────────────────────────────────────
+// Mirrors the world generation overlay (`UnifiedOverlay`) — :focus-visible
+// can't be expressed inline, so inject a one-shot <style> block scoped to
+// the universe overlay's tab buttons.
+let focusStyleInjected = false;
+function ensureFocusStyle() {
+  if (focusStyleInjected) return;
+  focusStyleInjected = true;
+  const style = document.createElement('style');
+  style.textContent = `button[role="tab"][data-overlay="universe"]:focus-visible { outline: 2px solid #7a88c8; outline-offset: 2px; }`;
+  document.head.appendChild(style);
+}
 
 export function UniverseOverlay(props: UniverseOverlayProps) {
   const {
@@ -39,6 +59,13 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
   const [activeTab, setActiveTab] = useState<OverlayTab>('generation');
   const treeEnabled = !!data;
   const effectiveTab: OverlayTab = activeTab === 'tree' && !treeEnabled ? 'generation' : activeTab;
+
+  useEffect(ensureFocusStyle, []);
+
+  const tabEnabled: Record<OverlayTab, boolean> = {
+    generation: true,
+    tree: treeEnabled,
+  };
 
   return (
     <Draggable
@@ -60,61 +87,61 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
 
       {!collapsed && (
         <>
-          <div style={styles.tabBar} role="tablist" data-drag-handle>
-            <TabButton
-              label="Generation"
-              active={effectiveTab === 'generation'}
-              enabled
-              onClick={() => setActiveTab('generation')}
-            />
-            <TabButton
-              label="Tree"
-              active={effectiveTab === 'tree'}
-              enabled={treeEnabled}
-              onClick={() => setActiveTab('tree')}
-            />
+          <div style={styles.tabBar} role="tablist" data-drag-handle aria-label="Universe overlay sections">
+            {VALID_TABS.map(tab => {
+              const isActive = effectiveTab === tab;
+              const isEnabled = tabEnabled[tab];
+              return (
+                <button
+                  key={tab}
+                  role="tab"
+                  data-overlay="universe"
+                  id={`universe-tab-${tab}`}
+                  aria-selected={isActive}
+                  aria-controls={`universe-panel-${tab}`}
+                  tabIndex={isActive ? 0 : -1}
+                  style={{
+                    ...styles.tabBtn,
+                    ...(isActive ? styles.tabBtnActive : {}),
+                    ...(!isEnabled ? styles.tabBtnDisabled : {}),
+                  }}
+                  onClick={() => isEnabled && setActiveTab(tab)}
+                  disabled={!isEnabled}
+                  title={!isEnabled ? 'Generate a universe to enable' : TAB_LABELS[tab]}
+                >
+                  {TAB_LABELS[tab]}
+                </button>
+              );
+            })}
           </div>
 
-          {effectiveTab === 'generation' && (
-            <GenerationTabBody
-              seed={seed}
-              onSeedChange={onSeedChange}
-              numSolarSystems={numSolarSystems}
-              onNumSolarSystemsChange={onNumSolarSystemsChange}
-              onGenerate={onGenerate}
-              generating={generating}
-              progress={progress}
-              data={data}
-              sceneState={sceneState}
-              onBack={onBack}
-            />
-          )}
-          {effectiveTab === 'tree' && data && (
-            <UniverseTreeTab data={data} onSelect={onTreeEntitySelect} />
-          )}
+          <div
+            style={styles.tabContent}
+            role="tabpanel"
+            id={`universe-panel-${effectiveTab}`}
+            aria-labelledby={`universe-tab-${effectiveTab}`}
+          >
+            {effectiveTab === 'generation' && (
+              <GenerationTabBody
+                seed={seed}
+                onSeedChange={onSeedChange}
+                numSolarSystems={numSolarSystems}
+                onNumSolarSystemsChange={onNumSolarSystemsChange}
+                onGenerate={onGenerate}
+                generating={generating}
+                progress={progress}
+                data={data}
+                sceneState={sceneState}
+                onBack={onBack}
+              />
+            )}
+            {effectiveTab === 'tree' && data && (
+              <UniverseTreeTab data={data} onSelect={onTreeEntitySelect} />
+            )}
+          </div>
         </>
       )}
     </Draggable>
-  );
-}
-
-function TabButton({
-  label, active, enabled, onClick,
-}: { label: string; active: boolean; enabled: boolean; onClick: () => void }) {
-  return (
-    <button
-      role="tab"
-      aria-selected={active}
-      disabled={!enabled}
-      onClick={onClick}
-      style={{
-        ...styles.tabBtn,
-        ...(active ? styles.tabBtnActive : {}),
-        ...(!enabled ? styles.tabBtnDisabled : {}),
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -288,34 +315,43 @@ const styles: Record<string, React.CSSProperties> = {
   },
   tabBar: {
     display: 'flex',
-    gap: 4,
-    borderBottom: '1px solid rgba(108,122,184,0.3)',
-    paddingBottom: 6,
+    gap: 0,
+    borderBottom: '1px solid #4a5080',
+    marginBottom: 2,
     cursor: 'move',
     touchAction: 'none',
   },
   tabBtn: {
     flex: 1,
-    padding: '5px 0',
-    background: 'transparent',
+    padding: '6px 0',
     border: '1px solid #4a5080',
-    borderRadius: 4,
+    borderBottom: 'none',
+    borderRadius: '4px 4px 0 0',
+    background: '#2a2848',
     fontFamily: 'Georgia, serif',
     fontSize: 11,
     color: '#a0a8d0',
     cursor: 'pointer',
+    fontWeight: 'bold',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-    fontWeight: 'bold',
   },
   tabBtnActive: {
-    background: '#5a68a8',
+    background: 'rgba(20,18,40,0.92)',
     color: '#fff',
-    border: '1px solid #7a88c8',
+    borderBottom: '1px solid rgba(20,18,40,0.92)',
+    position: 'relative',
+    top: 1,
   },
   tabBtnDisabled: {
-    opacity: 0.4,
+    background: '#1f1d3a',
+    color: '#5a608a',
     cursor: 'not-allowed',
+    opacity: 0.6,
+  },
+  tabContent: {
+    display: 'flex',
+    flexDirection: 'column',
   },
   body: {
     display: 'flex',
