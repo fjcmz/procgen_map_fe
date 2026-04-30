@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "sweep": "tsx scripts/sweep-history.ts"
+    "sweep": "tsx scripts/sweep-history.ts",
+    "icons": "tsx scripts/generate-icons.ts"
   },
   "dependencies": {
     "d3-delaunay": "^6.0.4",
@@ -21,6 +22,7 @@
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.0",
+    "sharp": "^0.34.5",
     "tsx": "^4.21.0",
     "typescript": "^5.4.5",
     "vite": "^5.2.12",
