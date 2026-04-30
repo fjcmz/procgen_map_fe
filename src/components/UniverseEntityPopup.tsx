@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { UniverseData, SolarSystemData, PlanetData, SatelliteData } from '../lib/universe/types';
 import type { PopupEntity } from './UniverseCanvas';
 
@@ -98,16 +98,16 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
       <Row label="ID"><code style={s.code}>{system.id}</code></Row>
       <Row label="Type">{system.composition.toLowerCase()}</Row>
 
-      <Section title={`Stars (${system.stars.length})`}>
+      <CollapsibleSection title="Stars" count={system.stars.length}>
         {system.stars.map(star => (
           <Item key={star.id}>
             <code style={s.code}>{star.id}</code>
             <span style={s.dim}> — {star.composition.toLowerCase()}, r={star.radius.toFixed(1)}, brightness={star.brightness.toFixed(0)}</span>
           </Item>
         ))}
-      </Section>
+      </CollapsibleSection>
 
-      <Section title={`Planets (${system.planets.length})`}>
+      <CollapsibleSection title="Planets" count={system.planets.length}>
         {system.planets.map(planet => (
           <Item key={planet.id}>
             <code style={s.code}>{planet.id}</code>
@@ -120,7 +120,7 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
           </Item>
         ))}
         {system.planets.length === 0 && <Item><span style={s.dim}>none</span></Item>}
-      </Section>
+      </CollapsibleSection>
     </>
   );
 }
@@ -141,7 +141,7 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
         </Item>
       </Section>
 
-      <Section title={`Satellites (${planet.satellites.length})`}>
+      <CollapsibleSection title="Satellites" count={planet.satellites.length}>
         {planet.satellites.map(sat => (
           <Item key={sat.id}>
             <code style={s.code}>{sat.id}</code>
@@ -149,7 +149,7 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
           </Item>
         ))}
         {planet.satellites.length === 0 && <Item><span style={s.dim}>none</span></Item>}
-      </Section>
+      </CollapsibleSection>
     </>
   );
 }
@@ -201,6 +201,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div style={s.section}>
       <div style={s.sectionTitle}>{title}</div>
       <div style={s.sectionBody}>{children}</div>
+    </div>
+  );
+}
+
+function CollapsibleSection({
+  title, count, children,
+}: { title: string; count: number; children: React.ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div style={s.section}>
+      <button
+        type="button"
+        style={s.collapsibleTitle}
+        onClick={() => setExpanded(e => !e)}
+        aria-expanded={expanded}
+      >
+        <span style={s.caret}>{expanded ? '▾' : '▸'}</span>
+        <span>{title} ({count})</span>
+      </button>
+      {expanded && <div style={s.sectionBody}>{children}</div>}
     </div>
   );
 }
@@ -297,6 +317,29 @@ const s: Record<string, React.CSSProperties> = {
     textTransform: 'uppercase',
     letterSpacing: 0.5,
     fontWeight: 'bold',
+  },
+  collapsibleTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+    fontFamily: 'Georgia, serif',
+    fontSize: 11,
+    color: '#a0a8d0',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    textAlign: 'left',
+  },
+  caret: {
+    fontSize: 10,
+    color: '#a0a8d0',
+    width: 10,
+    display: 'inline-block',
   },
   sectionBody: {
     display: 'flex',
