@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { UniverseCanvas } from './UniverseCanvas';
-import type { UniverseCanvasHandle, UniverseSceneState } from './UniverseCanvas';
+import type { UniverseCanvasHandle, UniverseSceneState, PopupEntity } from './UniverseCanvas';
 import { UniverseOverlay } from './UniverseOverlay';
+import { UniverseEntityPopup } from './UniverseEntityPopup';
 import type {
   UniverseData,
   UniverseGenerateRequest,
@@ -18,6 +19,7 @@ const DEFAULT_SOLAR_SYSTEMS = 80;
  *  - the most recent `UniverseData`
  *  - the current scene state (lifted from the canvas so the overlay can show
  *    a breadcrumb and back button)
+ *  - popup state for entity detail popups (opened on canvas entity click)
  *
  * Mirrors the worker lifecycle in `App.tsx::handleGenerate` for the planet flow.
  */
@@ -30,12 +32,11 @@ export function UniverseScreen() {
   const [sceneState, setSceneState] = useState<UniverseSceneState>({
     scene: 'galaxy', systemId: null, planetId: null,
   });
+  const [popupEntity, setPopupEntity] = useState<PopupEntity | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const canvasRef = useRef<UniverseCanvasHandle>(null);
 
-  // Cleanup any in-flight worker on unmount (e.g. user goes back to landing
-  // mid-generation).
   useEffect(() => {
     return () => {
       workerRef.current?.terminate();
@@ -46,7 +47,6 @@ export function UniverseScreen() {
   const handleGenerate = useCallback(() => {
     if (generating) return;
 
-    // Tear down any prior worker before starting a new generation
     workerRef.current?.terminate();
 
     const worker = new Worker(
@@ -56,8 +56,7 @@ export function UniverseScreen() {
     workerRef.current = worker;
     setGenerating(true);
     setProgress({ step: 'Starting…', pct: 0 });
-    // Don't blank previous data — leaves the prior universe visible until
-    // the new one paints.
+    setPopupEntity(null);
 
     worker.onmessage = (e: MessageEvent<UniverseWorkerMessage>) => {
       const msg = e.data;
@@ -90,12 +89,47 @@ export function UniverseScreen() {
     canvasRef.current?.back();
   }, []);
 
+  // Called by the canvas when the user clicks a renderable entity.
+  const handleEntityClick = useCallback((entity: PopupEntity) => {
+    setPopupEntity(entity);
+  }, []);
+
+  const handlePopupClose = useCallback(() => {
+    setPopupEntity(null);
+  }, []);
+
+  // Navigate to the entity's parent scene and close the popup.
+  const handlePopupNavigateUp = useCallback(() => {
+    if (!popupEntity) return;
+    setPopupEntity(null);
+    if (popupEntity.kind === 'system') {
+      canvasRef.current?.navigateTo('galaxy');
+    } else if (popupEntity.kind === 'planet') {
+      canvasRef.current?.navigateTo('system', popupEntity.systemId);
+    } else if (popupEntity.kind === 'satellite') {
+      canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
+    }
+  }, [popupEntity]);
+
+  // Navigate into the entity's child scene and close the popup.
+  const handlePopupNavigateDown = useCallback(() => {
+    if (!popupEntity) return;
+    setPopupEntity(null);
+    if (popupEntity.kind === 'system') {
+      canvasRef.current?.navigateTo('system', popupEntity.systemId);
+    } else if (popupEntity.kind === 'planet') {
+      canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
+    }
+    // satellite is a leaf — no down navigation
+  }, [popupEntity]);
+
   return (
     <>
       <UniverseCanvas
         ref={canvasRef}
         data={data}
         onSceneChange={setSceneState}
+        onEntityClick={handleEntityClick}
       />
       <UniverseOverlay
         seed={seed}
@@ -109,6 +143,17 @@ export function UniverseScreen() {
         sceneState={sceneState}
         onBack={handleBack}
       />
+      {popupEntity && data && (
+        <UniverseEntityPopup
+          entity={popupEntity}
+          data={data}
+          onClose={handlePopupClose}
+          onNavigateUp={handlePopupNavigateUp}
+          onNavigateDown={
+            popupEntity.kind !== 'satellite' ? handlePopupNavigateDown : undefined
+          }
+        />
+      )}
       {!data && !generating && (
         <div style={styles.emptyHint}>
           Set a seed and a solar-system count, then press <strong>Generate Universe</strong>.

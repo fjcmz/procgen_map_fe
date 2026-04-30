@@ -18,34 +18,38 @@ export interface UniverseSceneState {
   planetId: string | null;
 }
 
+export type PopupEntity =
+  | { kind: 'system'; systemId: string }
+  | { kind: 'planet'; systemId: string; planetId: string }
+  | { kind: 'satellite'; systemId: string; planetId: string; satelliteId: string };
+
 export interface UniverseCanvasHandle {
   reset: () => void;
   back: () => void;
+  navigateTo: (scene: UniverseScene, systemId?: string, planetId?: string) => void;
 }
 
 interface UniverseCanvasProps {
   data: UniverseData | null;
   onSceneChange?: (state: UniverseSceneState) => void;
+  onEntityClick?: (entity: PopupEntity) => void;
 }
 
 const TRANSITION_DUR = 0.55;
 
-/** Cubic Hermite ease-in-out (smoothstep). Matches the reference repo. */
 function ease(t: number): number {
   const u = Math.max(0, Math.min(1, t));
   return u * u * (3 - 2 * u);
 }
 
 export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasProps>(
-  function UniverseCanvas({ data, onSceneChange }, ref) {
+  function UniverseCanvas({ data, onSceneChange, onEntityClick }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [sceneState, setSceneState] = useState<UniverseSceneState>({
       scene: 'galaxy',
       systemId: null,
       planetId: null,
     });
-    // Keep latest scene state in a ref so the animation loop reads it
-    // without restarting every transition.
     const sceneStateRef = useRef(sceneState);
     sceneStateRef.current = sceneState;
 
@@ -55,19 +59,21 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     const dataRef = useRef<UniverseData | null>(data);
     dataRef.current = data;
 
-    // Notify parent on scene changes (used by overlay breadcrumb / back button)
+    // Keep the latest onEntityClick callback in a ref so the click handler
+    // effect doesn't need to re-register on every render.
+    const onEntityClickRef = useRef(onEntityClick);
+    onEntityClickRef.current = onEntityClick;
+
     useEffect(() => {
       onSceneChange?.(sceneState);
     }, [sceneState, onSceneChange]);
 
-    // Reset to galaxy whenever a new universe arrives
     useEffect(() => {
       if (!data) return;
       setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
       transitionRef.current = null;
     }, [data]);
 
-    // Resize + (re)build star field when viewport changes
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -98,12 +104,18 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           return prev;
         });
       },
+      navigateTo(scene: UniverseScene, systemId?: string, planetId?: string) {
+        setSceneState(prev => {
+          transitionRef.current = { start: performance.now() / 1000, from: prev.scene, to: scene };
+          return {
+            scene,
+            systemId: systemId ?? null,
+            planetId: planetId ?? null,
+          };
+        });
+      },
     }), []);
 
-    // requestAnimationFrame loop — always runs while data is present so the
-    // orbit animations stay smooth in system/planet scenes. Galaxy scene is
-    // static but the cost of a single fillRect + ~80 circles per frame is
-    // negligible and lets camera transitions ease cleanly.
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas || !data) return;
@@ -127,7 +139,6 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           return;
         }
 
-        // Resolve current entity refs from id (safe across re-renders)
         const state = sceneStateRef.current;
         const system: SolarSystemData | null = state.systemId
           ? d.solarSystems.find(ss => ss.id === state.systemId) ?? null
@@ -136,14 +147,11 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           ? system.planets.find(p => p.id === state.planetId) ?? null
           : null;
 
-        // Camera transition: blend in/out via ease(t). For v1 we draw the
-        // outgoing scene faded out and the incoming scene faded in on top.
         const tr = transitionRef.current;
         const tElapsed = tr ? Math.min(1, (now - tr.start) / TRANSITION_DUR) : 1;
         const tEase = ease(tElapsed);
         if (tr && tElapsed >= 1) transitionRef.current = null;
 
-        // Draw the active (incoming) scene
         let activeHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
           const res = drawGalaxyScene(ctx, d, vw, vh, stars, 1);
@@ -152,12 +160,10 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           const res = drawSystemScene(ctx, system, vw, vh, stars, time);
           activeHit = res.hit;
         } else if (state.scene === 'planet' && planet) {
-          drawPlanetScene(ctx, planet, vw, vh, stars, time);
-          activeHit = [];
+          const res = drawPlanetScene(ctx, planet, vw, vh, stars, time);
+          activeHit = res.hit;
         }
 
-        // If transitioning, dim the incoming scene briefly to imply motion.
-        // Cheap visual cue without needing a second offscreen canvas.
         if (tr && tElapsed < 1) {
           ctx.fillStyle = `rgba(5, 3, 13, ${(1 - tEase) * 0.55})`;
           ctx.fillRect(0, 0, vw, vh);
@@ -173,7 +179,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       };
     }, [data]);
 
-    // Click handler — drill down on hit
+    // Click → open entity popup (no direct navigation)
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -184,15 +190,21 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         const py = e.clientY - rect.top;
         const hit = pickHit(lastHitRef.current, px, py);
         if (!hit) return;
+        const state = sceneStateRef.current;
         if (hit.kind === 'system') {
-          setSceneState(_ => {
-            transitionRef.current = { start: performance.now() / 1000, from: 'galaxy', to: 'system' };
-            return { scene: 'system', systemId: hit.id, planetId: null };
-          });
+          onEntityClickRef.current?.({ kind: 'system', systemId: hit.id });
         } else if (hit.kind === 'planet') {
-          setSceneState(prev => {
-            transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'planet' };
-            return { scene: 'planet', systemId: prev.systemId, planetId: hit.id };
+          onEntityClickRef.current?.({
+            kind: 'planet',
+            systemId: state.systemId!,
+            planetId: hit.id,
+          });
+        } else if (hit.kind === 'satellite') {
+          onEntityClickRef.current?.({
+            kind: 'satellite',
+            systemId: state.systemId!,
+            planetId: state.planetId!,
+            satelliteId: hit.id,
           });
         }
       };
@@ -200,8 +212,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       return () => canvas.removeEventListener('click', onClick);
     }, []);
 
-    // Right-click or Escape → back. Browser back navigation is reserved for
-    // the screen-level guard already wired in App.tsx.
+    // Escape → back (only when no popup is open; popup intercepts Escape first)
     useEffect(() => {
       const onKey = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return;
@@ -221,8 +232,6 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       return () => window.removeEventListener('keydown', onKey);
     }, []);
 
-    const cursor = sceneState.scene === 'planet' ? 'default' : 'pointer';
-
     return (
       <canvas
         ref={canvasRef}
@@ -232,7 +241,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           left: 0,
           display: 'block',
           touchAction: 'none',
-          cursor,
+          cursor: 'pointer',
         }}
       />
     );
