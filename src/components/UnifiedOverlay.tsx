@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, SelectedEntity, ResourceRarityMode } from '../lib/types';
+import type { WorldOrigin } from '../App';
 import { Draggable } from './Draggable';
 import { GenerationTab } from './overlay/GenerationTab';
 import { EventsTab } from './overlay/EventsTab';
@@ -57,6 +58,11 @@ interface UnifiedOverlayProps {
   onEntityNavigate?: (cellIndices: number[], centerCellIndex: number) => void;
   selectedEntity: SelectedEntity | null;
   onSelectEntity: (entity: SelectedEntity | null) => void;
+
+  // Universe handoff: when set, the GenerationTab locks the predefined
+  // params and shows a "← Back to {systemName}" button.
+  worldOrigin?: WorldOrigin | null;
+  onBackToSystem?: () => void;
 }
 
 /** Fixed overlay width — wide enough for the widest tab (Events at 560 px). */
@@ -233,6 +239,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 mapData={props.mapData}
                 onExportWorld={props.onExportWorld}
                 exporting={props.exporting}
+                worldOrigin={props.worldOrigin}
+                onBackToSystem={props.onBackToSystem}
               />
             )}
             {activeTab === 'events' && props.mapData?.history && (

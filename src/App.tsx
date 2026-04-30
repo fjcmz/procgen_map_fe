@@ -11,6 +11,7 @@ import { LandingScreen } from './components/LandingScreen';
 import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
+import type { UniverseData, PlanetData, SolarSystemData } from './lib/universe/types';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 100000;
@@ -38,6 +39,34 @@ const DEFAULT_LAYERS: LayerVisibility = {
 type Screen = 'landing' | 'planet' | 'universe';
 
 const SCREEN_LEAVE_PROMPT = 'Return to the start screen?';
+
+/**
+ * Captured when the user enters the planet flow from a universe planet
+ * (the "Generate World" button on a rock+life planet). Drives:
+ *  - locked generation params in the GenerationTab
+ *  - the "← Back to system" button in the GenerationTab
+ *  - the systemId we navigate the universe canvas to on return
+ */
+export interface WorldOrigin {
+  universeSeed: string;
+  systemId: string;
+  systemName: string;
+  planetId: string;
+  planetName: string;
+}
+
+/**
+ * Map a planet's radius (1–31 in the generator) to a sensible cell count
+ * inside the world generator's [500..100_000] range. We pick a small,
+ * monotonic bucket set rather than free-form so the locked UI stays honest
+ * about what the user is getting.
+ */
+function cellCountForPlanetRadius(radius: number): number {
+  if (radius < 5) return 10000;
+  if (radius < 12) return 20000;
+  if (radius < 20) return 50000;
+  return 100000;
+}
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('landing');
@@ -68,6 +97,21 @@ export default function App() {
   const [lastGenParams, setLastGenParams] = useState<
     { seed: string; resourceRarityMode: ResourceRarityMode } | null
   >(null);
+
+  // Universe state lifted from `UniverseScreen` so it survives a
+  // round-trip through the planet flow (Generate World → world generator →
+  // Back to system). Without lifting, returning to the universe would
+  // re-mount with empty state and lose the user's generated cosmos.
+  const [universeData, setUniverseData] = useState<UniverseData | null>(null);
+  // When non-null, the universe screen will navigate the canvas to the
+  // recorded scene on mount (so "Back to system" lands you in the same
+  // solar system you came from). Cleared after consumption.
+  const [universeReturnTo, setUniverseReturnTo] = useState<
+    { systemId: string; planetId?: string } | null
+  >(null);
+  // When non-null, the planet flow is in "from-universe" mode: predefined
+  // generation params are locked and the GenerationTab shows a back button.
+  const [worldOrigin, setWorldOrigin] = useState<WorldOrigin | null>(null);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -101,6 +145,11 @@ export default function App() {
     window.history.pushState({ screen }, '');
     const onPop = () => {
       if (window.confirm(SCREEN_LEAVE_PROMPT)) {
+        // Browser-back returning to landing also resets the
+        // universe-handoff context to avoid leaking stale origin
+        // into a later "planet from landing" entry.
+        setWorldOrigin(null);
+        setUniverseReturnTo(null);
         setScreen('landing');
       } else {
         window.history.pushState({ screen }, '');
@@ -396,6 +445,68 @@ export default function App() {
 
   const canGenerateHistory = !!mapData && !mapData.history && !generating && !!lastGenParams;
 
+  /**
+   * Entry point for the "Generate World" button on a rock+life planet in
+   * the universe popup. Sets the world generator's params to the locked
+   * predefined values, captures the origin so the back button works, then
+   * switches screens. The user still has to press "Generate Map" — this
+   * just sets up the form.
+   */
+  const handleGenerateWorldFromPlanet = useCallback(
+    (planet: PlanetData, system: SolarSystemData, universe: UniverseData) => {
+      // Tear down any previous world state so the new screen starts clean.
+      workerRef.current?.terminate();
+      workerRef.current = null;
+      setMapData(null);
+      setLastGenParams(null);
+      setSelectedEntity(null);
+      setHighlightCells(null);
+      setProgress(null);
+      setGenerating(false);
+
+      // Isolated PRNG sub-stream — same convention as the existing
+      // `_racebias_<id>` / `_chars_<cellIndex>` streams in the codebase.
+      const planetSeed = `${universe.seed}_${planet.id}`;
+
+      setSeed(planetSeed);
+      setNumCells(cellCountForPlanetRadius(planet.radius));
+      setWaterRatio(0.66);
+      setProfileName('default');
+      setShapeName('default');
+      setResourceRarityMode('natural');
+      setGenerateHistory(false);
+
+      setWorldOrigin({
+        universeSeed: universe.seed,
+        systemId: system.id,
+        systemName: system.humanName,
+        planetId: planet.id,
+        planetName: planet.humanName,
+      });
+      // Remember which system to land on when the user clicks "Back".
+      setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
+      setScreen('planet');
+    },
+    [],
+  );
+
+  /**
+   * Used by the GenerationTab's "← Back to system" button. Tears down the
+   * worker and any in-flight map, then returns to the universe screen which
+   * will navigate the canvas to the saved system via `universeReturnTo`.
+   */
+  const handleBackToSystem = useCallback(() => {
+    workerRef.current?.terminate();
+    workerRef.current = null;
+    setMapData(null);
+    setLastGenParams(null);
+    setSelectedEntity(null);
+    setHighlightCells(null);
+    setProgress(null);
+    setGenerating(false);
+    setScreen('universe');
+  }, []);
+
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
@@ -426,11 +537,29 @@ export default function App() {
   }, [mapData, exporting, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears]);
 
   if (screen === 'landing') {
-    return <LandingScreen onPick={(target) => setScreen(target)} />;
+    return (
+      <LandingScreen
+        onPick={(target) => {
+          // Picking from the landing screen is always a "fresh" entry,
+          // so clear any stale world-from-planet binding.
+          setWorldOrigin(null);
+          setUniverseReturnTo(null);
+          setScreen(target);
+        }}
+      />
+    );
   }
 
   if (screen === 'universe') {
-    return <UniverseScreen />;
+    return (
+      <UniverseScreen
+        data={universeData}
+        onDataChange={setUniverseData}
+        returnTo={universeReturnTo}
+        onReturnToConsumed={() => setUniverseReturnTo(null)}
+        onGenerateWorldFromPlanet={handleGenerateWorldFromPlanet}
+      />
+    );
   }
 
   return (
@@ -497,6 +626,8 @@ export default function App() {
         onEntityNavigate={handleEntityNavigate}
         selectedEntity={selectedEntity}
         onSelectEntity={handleSelectEntity}
+        worldOrigin={worldOrigin}
+        onBackToSystem={worldOrigin ? handleBackToSystem : undefined}
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />

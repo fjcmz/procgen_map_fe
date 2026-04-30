@@ -5,12 +5,33 @@ import { UniverseOverlay } from './UniverseOverlay';
 import { UniverseEntityPopup } from './UniverseEntityPopup';
 import type {
   UniverseData,
+  PlanetData,
+  SolarSystemData,
   UniverseGenerateRequest,
   UniverseWorkerMessage,
 } from '../lib/universe/types';
 
 const DEFAULT_SEED = 'cosmos';
 const DEFAULT_SOLAR_SYSTEMS = 80;
+
+interface UniverseScreenProps {
+  /** Lifted to App so the universe survives a round-trip through the planet flow. */
+  data: UniverseData | null;
+  onDataChange: (data: UniverseData | null) => void;
+  /**
+   * When set, the canvas navigates to this scene on mount (used by the
+   * "Back to system" return path from the planet flow).
+   */
+  returnTo?: { systemId: string; planetId?: string } | null;
+  /** Called once after `returnTo` has been consumed by canvas navigation. */
+  onReturnToConsumed?: () => void;
+  /** Called when the user presses "Generate World" in a planet popup. */
+  onGenerateWorldFromPlanet?: (
+    planet: PlanetData,
+    system: SolarSystemData,
+    universe: UniverseData,
+  ) => void;
+}
 
 /**
  * Top-level screen for the universe flow. Owns:
@@ -23,10 +44,15 @@ const DEFAULT_SOLAR_SYSTEMS = 80;
  *
  * Mirrors the worker lifecycle in `App.tsx::handleGenerate` for the planet flow.
  */
-export function UniverseScreen() {
+export function UniverseScreen({
+  data,
+  onDataChange,
+  returnTo,
+  onReturnToConsumed,
+  onGenerateWorldFromPlanet,
+}: UniverseScreenProps) {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numSolarSystems, setNumSolarSystems] = useState(DEFAULT_SOLAR_SYSTEMS);
-  const [data, setData] = useState<UniverseData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [sceneState, setSceneState] = useState<UniverseSceneState>({
@@ -43,6 +69,19 @@ export function UniverseScreen() {
       workerRef.current = null;
     };
   }, []);
+
+  // Return-from-planet-flow navigation: drive the canvas to the recorded
+  // scene once data is ready, then signal App to drop the request so we
+  // don't re-navigate on every sceneState change.
+  useEffect(() => {
+    if (!returnTo || !data) return;
+    if (returnTo.planetId) {
+      canvasRef.current?.navigateTo('planet', returnTo.systemId, returnTo.planetId);
+    } else {
+      canvasRef.current?.navigateTo('system', returnTo.systemId);
+    }
+    onReturnToConsumed?.();
+  }, [returnTo, data, onReturnToConsumed]);
 
   const handleGenerate = useCallback(() => {
     if (generating) return;
@@ -63,7 +102,7 @@ export function UniverseScreen() {
       if (msg.type === 'PROGRESS') {
         setProgress({ step: msg.step, pct: msg.pct });
       } else if (msg.type === 'DONE') {
-        setData(msg.data);
+        onDataChange(msg.data);
         setGenerating(false);
         setProgress(null);
         worker.terminate();
@@ -83,7 +122,23 @@ export function UniverseScreen() {
       numSolarSystems,
     };
     worker.postMessage(req);
-  }, [generating, seed, numSolarSystems]);
+  }, [generating, seed, numSolarSystems, onDataChange]);
+
+  /**
+   * Bridge from the planet popup's "Generate World" button to App's
+   * cross-screen handler. We resolve the system from the popup's
+   * `systemId` so the handler gets a complete `(planet, system, universe)`
+   * tuple without the popup needing to know about the lifted state.
+   */
+  const handleGenerateWorldFromPopup = useCallback(
+    (planet: PlanetData, systemId: string) => {
+      if (!data || !onGenerateWorldFromPlanet) return;
+      const system = data.solarSystems.find(s => s.id === systemId);
+      if (!system) return;
+      onGenerateWorldFromPlanet(planet, system, data);
+    },
+    [data, onGenerateWorldFromPlanet],
+  );
 
   const handleBack = useCallback(() => {
     canvasRef.current?.back();
@@ -178,6 +233,9 @@ export function UniverseScreen() {
             popupEntity.kind === 'system' || popupEntity.kind === 'planet'
               ? handlePopupNavigateDown
               : undefined
+          }
+          onGenerateWorld={
+            onGenerateWorldFromPlanet ? handleGenerateWorldFromPopup : undefined
           }
         />
       )}
