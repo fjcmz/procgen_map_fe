@@ -10,6 +10,8 @@ export type SatelliteComposition = 'ICE' | 'ROCK';
 
 export class Satellite {
   readonly id: string;
+  humanName: string = '';
+  scientificName: string = '';
   radius: number = 0;
   composition: SatelliteComposition = 'ROCK';
   // Transient

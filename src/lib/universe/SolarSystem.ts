@@ -12,6 +12,8 @@ export type SolarSystemComposition = 'ROCK' | 'GAS';
 
 export class SolarSystem {
   readonly id: string;
+  humanName: string = '';
+  scientificName: string = '';
   composition: SolarSystemComposition = 'ROCK';
   stars: Star[] = [];
   planets: Planet[] = [];

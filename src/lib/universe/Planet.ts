@@ -11,6 +11,8 @@ export type PlanetComposition = 'GAS' | 'ROCK';
 
 export class Planet {
   readonly id: string;
+  humanName: string = '';
+  scientificName: string = '';
   radius: number = 0;
   orbit: number = 0;
   life: boolean = false;

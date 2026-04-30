@@ -17,6 +17,11 @@ export class SolarSystemGenerator {
       starGenerator.generate(solarSystem, rng, universe);
     }
 
+    // Solar system name derives from primary star — no new RNG needed.
+    const primaryStar = solarSystem.stars[0];
+    solarSystem.humanName = primaryStar?.humanName ?? solarSystem.id;
+    solarSystem.scientificName = primaryStar?.scientificName ?? solarSystem.id;
+
     const planetCount = solarSystem.stars.length * 2 + Math.floor(rng() * 15);
     for (let i = 0; i < planetCount; i++) {
       planetGenerator.generate(solarSystem, rng, universe);

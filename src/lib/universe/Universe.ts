@@ -20,12 +20,18 @@ export class Universe {
    * just keyed off the empty-string root).
    */
   readonly seed: string;
+  humanName: string = '';
+  scientificName: string = '';
   solarSystems: SolarSystem[] = [];
   // Indexes
   mapSolarSystems: Map<string, SolarSystem> = new Map();
   mapStars: Map<string, Star> = new Map();
   mapPlanets: Map<string, Planet> = new Map();
   mapSatellites: Map<string, Satellite> = new Map();
+  // Per-tier used-name sets for deduplication within a generation run
+  usedStarNames: Set<string> = new Set();
+  usedPlanetNames: Set<string> = new Set();
+  usedSatelliteNames: Set<string> = new Set();
 
   constructor(rng: () => number, seed: string = '') {
     this.id = IdUtil.id('universe', rngHex(rng)) ?? 'universe_unknown';

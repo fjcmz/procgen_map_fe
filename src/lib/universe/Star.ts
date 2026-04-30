@@ -10,6 +10,8 @@ export type StarComposition = 'MATTER' | 'ANTIMATTER';
 
 export class Star {
   readonly id: string;
+  humanName: string = '';
+  scientificName: string = '';
   radius: number = 0;
   brightness: number = 0;
   composition: StarComposition = 'MATTER';

@@ -204,7 +204,8 @@ function SystemNode({
           title="Show details"
         >
           <span style={s.icon}>●</span>
-          <code style={s.code}>{system.id}</code>
+          <span style={s.name}>{system.humanName}</span>
+          <span style={s.sci}> ({system.scientificName})</span>
           <span style={s.dim}>
             {' '}— {system.composition.toLowerCase()}, {starCountLabel}, {planetCountLabel}
           </span>
@@ -257,7 +258,8 @@ function StarNode({
           title="Show details"
         >
           <span style={s.icon}>★</span>
-          <code style={s.code}>{star.id}</code>
+          <span style={s.name}>{star.humanName}</span>
+          <span style={s.sci}> ({star.scientificName})</span>
           <span style={s.dim}>
             {' '}— {star.composition.toLowerCase()}, r={star.radius.toFixed(1)}, brightness={star.brightness.toFixed(0)}
           </span>
@@ -295,13 +297,13 @@ function PlanetNode({
           title="Show details"
         >
           <span style={s.icon}>◉</span>
-          <code style={s.code}>{planet.id}</code>
+          <span style={s.name}>{planet.humanName}</span>
+          <span style={s.sci}> ({planet.scientificName})</span>
           <span style={s.dim}>
             {' '}— {planet.composition.toLowerCase()}
           </span>
           {planet.life && <span style={s.life}> ★life</span>}
           <span style={s.dim}>
-            , orbit={planet.orbit.toFixed(1)}
             {hasChildren && `, ${satCountLabel}`}
           </span>
         </button>
@@ -349,7 +351,8 @@ function SatelliteNode({
           title="Show details"
         >
           <span style={s.icon}>◌</span>
-          <code style={s.code}>{satellite.id}</code>
+          <span style={s.name}>{satellite.humanName}</span>
+          <span style={s.sci}> ({satellite.scientificName})</span>
           <span style={s.dim}>
             {' '}— {satellite.composition.toLowerCase()}, r={satellite.radius.toFixed(2)}
           </span>
@@ -556,6 +559,16 @@ const s: Record<string, React.CSSProperties> = {
   icon: {
     color: '#c8d0ff',
     marginRight: 4,
+    fontSize: 11,
+  },
+  name: {
+    color: '#c8d0ff',
+    fontWeight: 'bold',
+    fontSize: 12,
+  },
+  sci: {
+    color: '#6a72a8',
+    fontStyle: 'italic',
     fontSize: 11,
   },
   code: {

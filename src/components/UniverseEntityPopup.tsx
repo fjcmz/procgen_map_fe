@@ -52,6 +52,10 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     null;
 
   const headerTitle =
+    entity.kind === 'system' && system ? system.humanName :
+    entity.kind === 'star' && star ? star.humanName :
+    entity.kind === 'planet' && planet ? planet.humanName :
+    entity.kind === 'satellite' && satellite ? satellite.humanName :
     entity.kind === 'system' ? 'Solar System' :
     entity.kind === 'star' ? 'Star' :
     entity.kind === 'planet' ? 'Planet' :
@@ -104,13 +108,13 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 function SystemDetails({ system }: { system: SolarSystemData }) {
   return (
     <>
-      <Row label="ID"><code style={s.code}>{system.id}</code></Row>
+      <NameRow humanName={system.humanName} scientificName={system.scientificName} />
       <Row label="Type">{system.composition.toLowerCase()}</Row>
 
       <CollapsibleSection title="Stars" count={system.stars.length}>
         {system.stars.map(star => (
           <Item key={star.id}>
-            <code style={s.code}>{star.id}</code>
+            <EntityLabel humanName={star.humanName} scientificName={star.scientificName} />
             <span style={s.dim}> — {star.composition.toLowerCase()}, r={star.radius.toFixed(1)}, brightness={star.brightness.toFixed(0)}</span>
           </Item>
         ))}
@@ -119,10 +123,9 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
       <CollapsibleSection title="Planets" count={system.planets.length}>
         {system.planets.map(planet => (
           <Item key={planet.id}>
-            <code style={s.code}>{planet.id}</code>
+            <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
             <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
             {planet.life && <span style={s.life}> ★life</span>}
-            <span style={s.dim}>, orbit={planet.orbit.toFixed(1)}</span>
             {planet.satellites.length > 0 && (
               <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
             )}
@@ -137,14 +140,14 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
 function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: SolarSystemData }) {
   return (
     <>
-      <Row label="ID"><code style={s.code}>{star.id}</code></Row>
+      <NameRow humanName={star.humanName} scientificName={star.scientificName} />
       <Row label="Composition">{star.composition.toLowerCase()}</Row>
       <Row label="Radius">{star.radius.toFixed(2)}</Row>
       <Row label="Brightness">{star.brightness.toFixed(0)}</Row>
 
       <Section title="Parent System">
         <Item>
-          <code style={s.code}>{parentSystem.id}</code>
+          <EntityLabel humanName={parentSystem.humanName} scientificName={parentSystem.scientificName} />
           <span style={s.dim}> ({parentSystem.composition.toLowerCase()}, {parentSystem.stars.length} star{parentSystem.stars.length !== 1 ? 's' : ''})</span>
         </Item>
       </Section>
@@ -155,7 +158,7 @@ function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: Sol
 function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSystem: SolarSystemData }) {
   return (
     <>
-      <Row label="ID"><code style={s.code}>{planet.id}</code></Row>
+      <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
       <Row label="Composition">{planet.composition.toLowerCase()}</Row>
       <Row label="Life">{planet.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
       <Row label="Radius">{planet.radius.toFixed(2)}</Row>
@@ -163,7 +166,7 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
 
       <Section title="Parent System">
         <Item>
-          <code style={s.code}>{parentSystem.id}</code>
+          <EntityLabel humanName={parentSystem.humanName} scientificName={parentSystem.scientificName} />
           <span style={s.dim}> ({parentSystem.composition.toLowerCase()}, {parentSystem.stars.length} star{parentSystem.stars.length !== 1 ? 's' : ''})</span>
         </Item>
       </Section>
@@ -171,7 +174,7 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
       <CollapsibleSection title="Satellites" count={planet.satellites.length}>
         {planet.satellites.map(sat => (
           <Item key={sat.id}>
-            <code style={s.code}>{sat.id}</code>
+            <EntityLabel humanName={sat.humanName} scientificName={sat.scientificName} />
             <span style={s.dim}> — {sat.composition.toLowerCase()}, r={sat.radius.toFixed(2)}</span>
           </Item>
         ))}
@@ -190,13 +193,13 @@ function SatelliteDetails({
 }) {
   return (
     <>
-      <Row label="ID"><code style={s.code}>{satellite.id}</code></Row>
+      <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
       <Row label="Composition">{satellite.composition.toLowerCase()}</Row>
       <Row label="Radius">{satellite.radius.toFixed(2)}</Row>
 
       <Section title="Parent Planet">
         <Item>
-          <code style={s.code}>{parentPlanet.id}</code>
+          <EntityLabel humanName={parentPlanet.humanName} scientificName={parentPlanet.scientificName} />
           <span style={s.dim}> — {parentPlanet.composition.toLowerCase()}</span>
           {parentPlanet.life && <span style={s.life}> ★life</span>}
         </Item>
@@ -204,10 +207,32 @@ function SatelliteDetails({
 
       <Section title="Parent System">
         <Item>
-          <code style={s.code}>{parentSystem.id}</code>
+          <EntityLabel humanName={parentSystem.humanName} scientificName={parentSystem.scientificName} />
           <span style={s.dim}> ({parentSystem.composition.toLowerCase()})</span>
         </Item>
       </Section>
+    </>
+  );
+}
+
+// ── Name display helpers ──────────────────────────────────────────────────
+
+/** Prominent name row shown at the top of each entity detail panel. */
+function NameRow({ humanName, scientificName }: { humanName: string; scientificName: string }) {
+  return (
+    <div style={s.nameRow}>
+      <span style={s.humanName}>{humanName}</span>
+      <span style={s.scientificName}>({scientificName})</span>
+    </div>
+  );
+}
+
+/** Compact inline name label used in parent/child lists. */
+function EntityLabel({ humanName, scientificName }: { humanName: string; scientificName: string }) {
+  return (
+    <>
+      <span style={s.entityHumanName}>{humanName}</span>
+      <span style={s.entityScientificName}> ({scientificName})</span>
     </>
   );
 }
@@ -387,6 +412,32 @@ const s: Record<string, React.CSSProperties> = {
     background: 'rgba(108,122,184,0.15)',
     padding: '1px 4px',
     borderRadius: 3,
+  },
+  nameRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 4,
+  },
+  humanName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#dde0ff',
+    letterSpacing: 0.3,
+  },
+  scientificName: {
+    fontSize: 12,
+    color: '#7a82a8',
+    fontStyle: 'italic',
+  },
+  entityHumanName: {
+    color: '#c8d0ff',
+    fontWeight: 'bold',
+  },
+  entityScientificName: {
+    color: '#7a82a8',
+    fontStyle: 'italic',
+    fontSize: 11,
   },
   dim: {
     color: '#a0a8d0',
