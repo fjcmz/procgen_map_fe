@@ -564,11 +564,11 @@ function drawSnowIcon(
 }
 
 const CITY_SIZE_SCALE: Record<string, number> = {
-  small: 0.8,
-  medium: 1.0,
-  large: 1.4,
-  metropolis: 1.9,
-  megalopolis: 2.5,
+  small: 0.55,
+  medium: 0.65,
+  large: 0.75,
+  metropolis: 0.85,
+  megalopolis: 0.95,
 };
 
 function drawHouseIcon(
@@ -727,7 +727,10 @@ function drawCityIcons(
     ? cities
     : cities.filter(c => c.foundedYear <= selectedYear);
 
-  const iconSize = Math.max(4, Math.min(8, data.width / 150)) / scale;
+  // Base icon size derived from average cell radius so icons stay within their cell
+  // regardless of numCells, and /scale keeps them screen-space stable under zoom.
+  const cellRadius = Math.sqrt(data.width * data.height / data.cells.length / Math.PI);
+  const iconSize = cellRadius / scale;
 
   const activeCities = visibleCities.filter(c =>
     !c.isRuin || (selectedYear !== undefined && c.ruinYear > selectedYear)
@@ -750,7 +753,7 @@ function drawCityIcons(
       const idx = cityIdxMap.get(city.cellIndex);
       if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
     }
-    drawHouseIcon(ctx, cell.x, cell.y, iconSize * 1.2, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 1.0, scale);
+    drawHouseIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale);
   }
 
   for (const city of ruinCities) {
@@ -758,7 +761,7 @@ function drawCityIcons(
     if (highlightSet) {
       ctx.globalAlpha = highlightSet.has(city.cellIndex) ? 1.0 : 0.25;
     }
-    drawRuinIcon(ctx, cell.x, cell.y, iconSize * 1.2, scale);
+    drawRuinIcon(ctx, cell.x, cell.y, iconSize * 0.8, scale);
   }
   if (highlightSet) ctx.globalAlpha = 1.0;
 }
