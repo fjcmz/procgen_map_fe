@@ -7,6 +7,8 @@ import { ZoomControls } from './components/ZoomControls';
 import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
+import { LandingScreen } from './components/LandingScreen';
+import { UniversePlaceholder } from './components/UniversePlaceholder';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
 
@@ -33,7 +35,12 @@ const DEFAULT_LAYERS: LayerVisibility = {
   cityIcons: true,
 };
 
+type Screen = 'landing' | 'planet' | 'universe';
+
+const SCREEN_LEAVE_PROMPT = 'Return to the start screen?';
+
 export default function App() {
+  const [screen, setScreen] = useState<Screen>('landing');
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numCells, setNumCells] = useState(DEFAULT_CELLS);
   const [waterRatio, setWaterRatio] = useState(DEFAULT_WATER_RATIO);
@@ -85,6 +92,24 @@ export default function App() {
   }, [mapData?.history, selectedYear]);
 
   // Recalculate highlight cells when selectedYear changes while an entity is
+  // Bind screen choice to browser back-button.
+  // - Entering planet/universe pushes a history entry for the screen.
+  // - popstate (back) prompts a confirm guard against misclicks; cancel
+  //   re-pushes the entry so the user stays on the current screen.
+  useEffect(() => {
+    if (screen === 'landing') return;
+    window.history.pushState({ screen }, '');
+    const onPop = () => {
+      if (window.confirm(SCREEN_LEAVE_PROMPT)) {
+        setScreen('landing');
+      } else {
+        window.history.pushState({ screen }, '');
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [screen]);
+
   // selected.  Territory boundaries shift over time, so the highlight must
   // track the entity's footprint at the *current* year — without re-centering
   // the viewport (that only happens on explicit entity selection).
@@ -399,6 +424,14 @@ export default function App() {
       }
     });
   }, [mapData, exporting, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears]);
+
+  if (screen === 'landing') {
+    return <LandingScreen onPick={(target) => setScreen(target)} />;
+  }
+
+  if (screen === 'universe') {
+    return <UniversePlaceholder />;
+  }
 
   return (
     <>
