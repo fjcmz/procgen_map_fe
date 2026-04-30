@@ -13,3 +13,13 @@ export { SatelliteGenerator, satelliteGenerator } from './SatelliteGenerator';
 export { PlanetGenerator, planetGenerator } from './PlanetGenerator';
 export { SolarSystemGenerator, solarSystemGenerator } from './SolarSystemGenerator';
 export { UniverseGenerator, universeGenerator } from './UniverseGenerator';
+export type { UniverseGenerateOptions } from './UniverseGenerator';
+export type {
+  SatelliteData,
+  PlanetData,
+  StarData,
+  SolarSystemData,
+  UniverseData,
+  UniverseGenerateRequest,
+  UniverseWorkerMessage,
+} from './types';

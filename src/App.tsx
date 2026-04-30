@@ -8,7 +8,7 @@ import { Timeline } from './components/Timeline';
 import { Legend } from './components/Legend';
 import { Minimap } from './components/Minimap';
 import { LandingScreen } from './components/LandingScreen';
-import { UniversePlaceholder } from './components/UniversePlaceholder';
+import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
 
@@ -430,7 +430,7 @@ export default function App() {
   }
 
   if (screen === 'universe') {
-    return <UniversePlaceholder />;
+    return <UniverseScreen />;
   }
 
   return (
