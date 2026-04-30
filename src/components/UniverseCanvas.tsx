@@ -98,10 +98,12 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     // Unified zoom/pan transform — written by interaction handlers, read by the RAF loop.
     const transformRef = useRef<ViewTransform>({ scale: 1, tx: 0, ty: 0 });
 
-    // Per-pointer tracking for drag (single) and pinch-zoom (two fingers).
-    const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-    const dragOriginRef = useRef<{ px: number; py: number; tx: number; ty: number } | null>(null);
-    const pinchRef = useRef<{ dist: number; mx: number; my: number } | null>(null);
+    // Touch tracking for pinch-zoom (two fingers) and pan (one finger).
+    const lastTouchDistRef = useRef(0);
+    const lastTouchMidRef = useRef({ x: 0, y: 0 });
+    // Mouse drag tracking (desktop pan).
+    const isMouseDraggingRef = useRef(false);
+    const lastMouseRef = useRef({ x: 0, y: 0 });
     const hasDraggedRef = useRef(false);
 
     // Keep the latest onEntityClick callback in a ref so the click handler
@@ -268,88 +270,126 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       };
     }, []);
 
-    // ── Pointer drag + pinch-zoom (mouse & touch via Pointer Events) ──────────
+    // ── Touch drag + pinch-zoom (mobile) ──────────────────────────────────────
+    // Uses native TouchEvent (not PointerEvent) with `{ passive: false }` and
+    // explicit `preventDefault()` so iOS/Android Safari/Chrome reliably hand
+    // gestures to the canvas instead of firing native scroll/pinch. Mirrors
+    // the proven pattern in `MapCanvas.tsx`.
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
-      const onPointerDown = (e: PointerEvent) => {
-        if (e.button > 0) return; // left / touch only
-        canvas.setPointerCapture(e.pointerId);
-        activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const getDist = (a: Touch, b: Touch) =>
+        Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+      const getMid = (a: Touch, b: Touch) => ({
+        x: (a.clientX + b.clientX) / 2,
+        y: (a.clientY + b.clientY) / 2,
+      });
 
-        if (activePointersRef.current.size === 2) {
-          // Two pointers → enter pinch mode; cancel any drag.
-          dragOriginRef.current = null;
-          const pts = [...activePointersRef.current.values()];
-          pinchRef.current = {
-            dist: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y),
-            mx: (pts[0].x + pts[1].x) / 2,
-            my: (pts[0].y + pts[1].y) / 2,
-          };
-        } else if (activePointersRef.current.size === 1) {
-          // Single pointer → drag mode.
-          dragOriginRef.current = {
-            px: e.clientX,
-            py: e.clientY,
-            tx: transformRef.current.tx,
-            ty: transformRef.current.ty,
-          };
-          hasDraggedRef.current = false;
-          pinchRef.current = null;
-          canvas.style.cursor = 'grabbing';
+      const onTouchStart = (e: TouchEvent) => {
+        e.preventDefault();
+        hasDraggedRef.current = false;
+        if (e.touches.length === 2) {
+          lastTouchDistRef.current = getDist(e.touches[0], e.touches[1]);
+          lastTouchMidRef.current = getMid(e.touches[0], e.touches[1]);
+        } else if (e.touches.length === 1) {
+          lastTouchMidRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }
       };
 
-      const onPointerMove = (e: PointerEvent) => {
-        activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-        if (activePointersRef.current.size >= 2 && pinchRef.current) {
-          const pts = [...activePointersRef.current.values()];
-          const newDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-          const newMx = (pts[0].x + pts[1].x) / 2;
-          const newMy = (pts[0].y + pts[1].y) / 2;
-          const factor = newDist / pinchRef.current.dist;
+      const onTouchMove = (e: TouchEvent) => {
+        e.preventDefault();
+        if (e.touches.length === 2) {
+          const newDist = getDist(e.touches[0], e.touches[1]);
+          const newMid = getMid(e.touches[0], e.touches[1]);
+          const oldDist = lastTouchDistRef.current || newDist;
+          const oldMid = lastTouchMidRef.current;
+          const factor = newDist / oldDist;
           const t = transformRef.current;
           const newScale = clampScale(t.scale * factor);
-          const contentX = (pinchRef.current.mx - t.tx) / t.scale;
-          const contentY = (pinchRef.current.my - t.ty) / t.scale;
+          const contentX = (oldMid.x - t.tx) / t.scale;
+          const contentY = (oldMid.y - t.ty) / t.scale;
           transformRef.current = {
             scale: newScale,
-            tx: pinchRef.current.mx - contentX * newScale + (newMx - pinchRef.current.mx),
-            ty: pinchRef.current.my - contentY * newScale + (newMy - pinchRef.current.my),
+            tx: oldMid.x - contentX * newScale + (newMid.x - oldMid.x),
+            ty: oldMid.y - contentY * newScale + (newMid.y - oldMid.y),
           };
-          pinchRef.current = { dist: newDist, mx: newMx, my: newMy };
-        } else if (activePointersRef.current.size === 1 && dragOriginRef.current) {
-          const dx = e.clientX - dragOriginRef.current.px;
-          const dy = e.clientY - dragOriginRef.current.py;
+          lastTouchDistRef.current = newDist;
+          lastTouchMidRef.current = newMid;
+          hasDraggedRef.current = true;
+        } else if (e.touches.length === 1) {
+          const tx = e.touches[0].clientX;
+          const ty = e.touches[0].clientY;
+          const dx = tx - lastTouchMidRef.current.x;
+          const dy = ty - lastTouchMidRef.current.y;
           if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) hasDraggedRef.current = true;
           transformRef.current = {
             ...transformRef.current,
-            tx: dragOriginRef.current.tx + dx,
-            ty: dragOriginRef.current.ty + dy,
+            tx: transformRef.current.tx + dx,
+            ty: transformRef.current.ty + dy,
           };
+          lastTouchMidRef.current = { x: tx, y: ty };
         }
       };
 
-      const onPointerUp = (e: PointerEvent) => {
-        activePointersRef.current.delete(e.pointerId);
-        if (activePointersRef.current.size < 2) pinchRef.current = null;
-        if (activePointersRef.current.size === 0) {
-          dragOriginRef.current = null;
-          canvas.style.cursor = 'grab';
+      const onTouchEnd = (e: TouchEvent) => {
+        if (e.touches.length === 1) {
+          // Pinch ended but one finger remains — re-anchor pan.
+          lastTouchMidRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }
       };
 
-      canvas.addEventListener('pointerdown', onPointerDown);
-      canvas.addEventListener('pointermove', onPointerMove);
-      canvas.addEventListener('pointerup', onPointerUp);
-      canvas.addEventListener('pointercancel', onPointerUp);
+      canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+      canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+      canvas.addEventListener('touchend', onTouchEnd);
+      canvas.addEventListener('touchcancel', onTouchEnd);
       return () => {
-        canvas.removeEventListener('pointerdown', onPointerDown);
-        canvas.removeEventListener('pointermove', onPointerMove);
-        canvas.removeEventListener('pointerup', onPointerUp);
-        canvas.removeEventListener('pointercancel', onPointerUp);
+        canvas.removeEventListener('touchstart', onTouchStart);
+        canvas.removeEventListener('touchmove', onTouchMove);
+        canvas.removeEventListener('touchend', onTouchEnd);
+        canvas.removeEventListener('touchcancel', onTouchEnd);
+      };
+    }, []);
+
+    // ── Mouse drag (desktop pan) ──────────────────────────────────────────────
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const onMouseDown = (e: MouseEvent) => {
+        if (e.button !== 0) return;
+        isMouseDraggingRef.current = true;
+        hasDraggedRef.current = false;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+        canvas.style.cursor = 'grabbing';
+      };
+
+      const onMouseMove = (e: MouseEvent) => {
+        if (!isMouseDraggingRef.current) return;
+        const dx = e.clientX - lastMouseRef.current.x;
+        const dy = e.clientY - lastMouseRef.current.y;
+        if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) hasDraggedRef.current = true;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+        transformRef.current = {
+          ...transformRef.current,
+          tx: transformRef.current.tx + dx,
+          ty: transformRef.current.ty + dy,
+        };
+      };
+
+      const onMouseUp = () => {
+        if (!isMouseDraggingRef.current) return;
+        isMouseDraggingRef.current = false;
+        canvas.style.cursor = 'grab';
+      };
+
+      canvas.addEventListener('mousedown', onMouseDown);
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+      return () => {
+        canvas.removeEventListener('mousedown', onMouseDown);
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
       };
     }, []);
 
