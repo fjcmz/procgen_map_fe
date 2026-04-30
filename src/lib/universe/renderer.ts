@@ -405,11 +405,11 @@ export function drawPlanetScene(
   const cy = vh / 2;
   const minSide = Math.min(vw, vh);
 
-  // orbitBase drives the satellite ring layout and scales with zoom so orbits
-  // spread outward as the user zooms in (same principle as the galaxy spiral).
-  // planetPx is the visual disk radius — constant in screen pixels.
-  const orbitBase = minSide * 0.06;
-  const planetPx = orbitBase / viewScale;
+  // orbitLayoutBase drives satellite ring radii — decoupled from planet disk
+  // size so changing the planet's visual scale doesn't affect spatial layout.
+  const orbitLayoutBase = minSide * 0.18;
+  // planetPx is the visual disk radius, kept constant in screen pixels.
+  const planetPx = minSide * 0.06 / viewScale;
 
   // Hero planet — constant-size disk, constant-gap life ring
   drawCircle(ctx, cx, cy, planetPx, planetFill(planet));
@@ -437,9 +437,7 @@ export function drawPlanetScene(
 
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
-    // Ring radius uses orbitBase (not planetPx) so orbits scale with zoom
-    // while the planet disk itself stays small.
-    const ringR = orbitBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
+    const ringR = orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
     drawOrbitRing(ctx, cx, cy, ringR, viewScale);
     const omega = orbitalAngularVelocity(ringR) * 1.5;
     const phase = phaseFromId(sat.id);
