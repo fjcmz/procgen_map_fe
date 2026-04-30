@@ -162,7 +162,7 @@ export interface HitCircle {
   x: number;
   y: number;
   r: number;
-  kind: 'system' | 'planet';
+  kind: 'system' | 'planet' | 'satellite';
   id: string;
 }
 
@@ -365,6 +365,10 @@ export function drawSystemScene(
 }
 
 // ── Planet scene ──────────────────────────────────────────────────────────
+export interface PlanetDrawResult {
+  hit: HitCircle[];
+}
+
 export function drawPlanetScene(
   ctx: CanvasRenderingContext2D,
   planet: PlanetData,
@@ -372,7 +376,7 @@ export function drawPlanetScene(
   vh: number,
   stars: BackgroundStar[],
   timeSec: number,
-): void {
+): PlanetDrawResult {
   drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
   const cy = vh / 2;
@@ -390,12 +394,13 @@ export function drawPlanetScene(
   }
 
   // Satellites on concentric rings — same Kepler ω, scaled to satellite sizing
-  if (planet.satellites.length === 0) return;
+  if (planet.satellites.length === 0) return { hit: [] };
 
   const satRadii = planet.satellites.map(s => s.radius);
   const sRadMin = Math.min(...satRadii);
   const sRadMax = Math.max(...satRadii);
 
+  const hit: HitCircle[] = [];
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
     const ringR = planetPx + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
@@ -407,5 +412,7 @@ export function drawPlanetScene(
     const sy = cy + Math.sin(angle) * ringR;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt');
     drawCircle(ctx, sx, sy, sizePx, satelliteFill(sat));
+    hit.push({ x: sx, y: sy, r: Math.max(sizePx * 2, 10), kind: 'satellite', id: sat.id });
   }
+  return { hit };
 }
