@@ -356,7 +356,11 @@ export function drawSystemScene(
   }
 
   // Planets — Kepler ω ∝ r^-1.5 with seeded phase
-  const hit: HitCircle[] = [];
+  // Star hit circle — clicking the central star(s) opens the system popup.
+  // Added first so planet disks (appended later) take priority on any overlap.
+  const hit: HitCircle[] = [
+    { x: cx, y: cy, r: STAR_MAX_PX * 1.2 / viewScale, kind: 'system', id: system.id },
+  ];
   for (const planet of system.planets) {
     const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
     const omega = orbitalAngularVelocity(ringR);
@@ -409,14 +413,20 @@ export function drawPlanetScene(
     ctx.stroke();
   }
 
+  // Planet hit circle — always present so the central planet is clickable.
+  // Satellite disks (appended below) are on outer rings so back-to-front pick
+  // order means they take priority over the planet when their disks are clicked.
+  const hit: HitCircle[] = [
+    { x: cx, y: cy, r: planetPx * 1.1, kind: 'planet', id: planet.id },
+  ];
+
   // Satellites on concentric rings — same Kepler ω, scaled to satellite sizing
-  if (planet.satellites.length === 0) return { hit: [] };
+  if (planet.satellites.length === 0) return { hit };
 
   const satRadii = planet.satellites.map(s => s.radius);
   const sRadMin = Math.min(...satRadii);
   const sRadMax = Math.max(...satRadii);
 
-  const hit: HitCircle[] = [];
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
     const ringR = planetPx + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
