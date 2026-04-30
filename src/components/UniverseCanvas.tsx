@@ -21,6 +21,7 @@ export interface UniverseSceneState {
 
 export type PopupEntity =
   | { kind: 'system'; systemId: string }
+  | { kind: 'star'; systemId: string; starId: string }
   | { kind: 'planet'; systemId: string; planetId: string }
   | { kind: 'satellite'; systemId: string; planetId: string; satelliteId: string };
 

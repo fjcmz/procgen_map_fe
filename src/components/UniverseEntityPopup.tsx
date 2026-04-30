@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData } from '../lib/universe/types';
 import type { PopupEntity } from './UniverseCanvas';
 
 interface Props {
@@ -20,6 +20,10 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
   const system: SolarSystemData | null =
     data.solarSystems.find(s => s.id === entity.systemId) ?? null;
+  const star: StarData | null =
+    entity.kind === 'star' && system
+      ? system.stars.find(st => st.id === entity.starId) ?? null
+      : null;
   const planet: PlanetData | null =
     (entity.kind === 'planet' || entity.kind === 'satellite') && system
       ? system.planets.find(p => p.id === entity.planetId) ?? null
@@ -38,6 +42,7 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
   const upLabel =
     entity.kind === 'system' ? '↑ Galaxy' :
+    entity.kind === 'star' ? '↑ System' :
     entity.kind === 'planet' ? '↑ System' :
     '↑ Planet';
 
@@ -48,6 +53,7 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
   const headerTitle =
     entity.kind === 'system' ? 'Solar System' :
+    entity.kind === 'star' ? 'Star' :
     entity.kind === 'planet' ? 'Planet' :
     'Satellite';
 
@@ -67,6 +73,9 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
         <div style={s.body}>
           {entity.kind === 'system' && system && <SystemDetails system={system} />}
+          {entity.kind === 'star' && star && system && (
+            <StarDetails star={star} parentSystem={system} />
+          )}
           {entity.kind === 'planet' && planet && system && (
             <PlanetDetails planet={planet} parentSystem={system} />
           )}
@@ -121,6 +130,24 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
         ))}
         {system.planets.length === 0 && <Item><span style={s.dim}>none</span></Item>}
       </CollapsibleSection>
+    </>
+  );
+}
+
+function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: SolarSystemData }) {
+  return (
+    <>
+      <Row label="ID"><code style={s.code}>{star.id}</code></Row>
+      <Row label="Composition">{star.composition.toLowerCase()}</Row>
+      <Row label="Radius">{star.radius.toFixed(2)}</Row>
+      <Row label="Brightness">{star.brightness.toFixed(0)}</Row>
+
+      <Section title="Parent System">
+        <Item>
+          <code style={s.code}>{parentSystem.id}</code>
+          <span style={s.dim}> ({parentSystem.composition.toLowerCase()}, {parentSystem.stars.length} star{parentSystem.stars.length !== 1 ? 's' : ''})</span>
+        </Item>
+      </Section>
     </>
   );
 }
