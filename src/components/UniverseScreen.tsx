@@ -104,6 +104,8 @@ export function UniverseScreen() {
     setPopupEntity(null);
     if (popupEntity.kind === 'system') {
       canvasRef.current?.navigateTo('galaxy');
+    } else if (popupEntity.kind === 'star') {
+      canvasRef.current?.navigateTo('galaxy');
     } else if (popupEntity.kind === 'planet') {
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
     } else if (popupEntity.kind === 'satellite') {
@@ -120,8 +122,24 @@ export function UniverseScreen() {
     } else if (popupEntity.kind === 'planet') {
       canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
     }
-    // satellite is a leaf — no down navigation
+    // star + satellite are leaves — no down navigation
   }, [popupEntity]);
+
+  // Tree entity selection: navigate the canvas to the scene that displays the
+  // entity, then open the details popup. System → galaxy view, star/planet →
+  // system view, satellite → planet view.
+  const handleTreeEntitySelect = useCallback((entity: PopupEntity) => {
+    if (entity.kind === 'system') {
+      canvasRef.current?.navigateTo('galaxy');
+    } else if (entity.kind === 'star') {
+      canvasRef.current?.navigateTo('system', entity.systemId);
+    } else if (entity.kind === 'planet') {
+      canvasRef.current?.navigateTo('system', entity.systemId);
+    } else if (entity.kind === 'satellite') {
+      canvasRef.current?.navigateTo('planet', entity.systemId, entity.planetId);
+    }
+    setPopupEntity(entity);
+  }, []);
 
   return (
     <>
@@ -148,6 +166,7 @@ export function UniverseScreen() {
         data={data}
         sceneState={sceneState}
         onBack={handleBack}
+        onTreeEntitySelect={handleTreeEntitySelect}
       />
       {popupEntity && data && (
         <UniverseEntityPopup
@@ -156,7 +175,9 @@ export function UniverseScreen() {
           onClose={handlePopupClose}
           onNavigateUp={handlePopupNavigateUp}
           onNavigateDown={
-            popupEntity.kind !== 'satellite' ? handlePopupNavigateDown : undefined
+            popupEntity.kind === 'system' || popupEntity.kind === 'planet'
+              ? handlePopupNavigateDown
+              : undefined
           }
         />
       )}
