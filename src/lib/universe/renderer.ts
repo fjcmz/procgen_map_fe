@@ -408,7 +408,7 @@ export function drawPlanetScene(
   // orbitBase drives the satellite ring layout and scales with zoom so orbits
   // spread outward as the user zooms in (same principle as the galaxy spiral).
   // planetPx is the visual disk radius — constant in screen pixels.
-  const orbitBase = minSide * 0.18;
+  const orbitBase = minSide * 0.06;
   const planetPx = orbitBase / viewScale;
 
   // Hero planet — constant-size disk, constant-gap life ring
