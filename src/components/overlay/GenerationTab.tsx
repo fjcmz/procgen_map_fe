@@ -31,6 +31,8 @@ export interface GenerationTabProps {
   resourceRarityMode: ResourceRarityMode;
   onResourceRarityModeChange: (mode: ResourceRarityMode) => void;
   onGenerate: () => void;
+  onGenerateHistory: () => void;
+  canGenerateHistory: boolean;
   generating: boolean;
   progress: { step: string; pct: number } | null;
   mapData: MapData | null;
@@ -114,6 +116,8 @@ export function GenerationTab({
   resourceRarityMode,
   onResourceRarityModeChange,
   onGenerate,
+  onGenerateHistory,
+  canGenerateHistory,
   generating,
   progress,
   mapData,
@@ -370,13 +374,42 @@ export function GenerationTab({
         </div>
       </details>
 
-      <button
-        style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
-        onClick={onGenerate}
-        disabled={generating}
-      >
-        {generating ? 'Generating…' : 'Generate Map'}
-      </button>
+      {generateHistory ? (
+        <button
+          style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
+          onClick={onGenerate}
+          disabled={generating}
+        >
+          {generating ? 'Generating…' : 'Generate Map and History'}
+        </button>
+      ) : (
+        <div style={styles.splitGenerateRow}>
+          <button
+            style={{ ...styles.generateBtnSplit, ...(generating ? styles.generateBtnDisabled : {}) }}
+            onClick={onGenerate}
+            disabled={generating}
+          >
+            {generating ? 'Generating…' : 'Generate Map'}
+          </button>
+          <button
+            style={{
+              ...styles.generateBtnSplit,
+              ...(!canGenerateHistory ? styles.generateBtnDisabled : {}),
+            }}
+            onClick={onGenerateHistory}
+            disabled={!canGenerateHistory}
+            title={
+              !mapData
+                ? 'Generate a map first'
+                : mapData.history
+                  ? 'History already generated'
+                  : 'Generate the history timeline on the existing map'
+            }
+          >
+            {generating && mapData && !mapData.history ? 'Generating…' : 'Generate History'}
+          </button>
+        </div>
+      )}
 
       <button
         style={{
@@ -509,6 +542,24 @@ const styles: Record<string, React.CSSProperties> = {
   generateBtnDisabled: {
     background: '#b0906a',
     cursor: 'not-allowed',
+  },
+  splitGenerateRow: {
+    display: 'flex',
+    gap: 8,
+  },
+  generateBtnSplit: {
+    flex: 1,
+    padding: '8px 0',
+    background: '#8b4513',
+    color: '#fff5e0',
+    border: 'none',
+    borderRadius: 5,
+    fontFamily: 'Georgia, serif',
+    fontSize: 12,
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    letterSpacing: 0.5,
+    boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
   },
   exportBtn: {
     padding: '7px 0',

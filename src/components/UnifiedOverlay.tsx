@@ -41,6 +41,8 @@ interface UnifiedOverlayProps {
   resourceRarityMode: ResourceRarityMode;
   onResourceRarityModeChange: (mode: ResourceRarityMode) => void;
   onGenerate: () => void;
+  onGenerateHistory: () => void;
+  canGenerateHistory: boolean;
   generating: boolean;
   progress: { step: string; pct: number } | null;
   onExportWorld: () => void;
@@ -224,6 +226,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 resourceRarityMode={props.resourceRarityMode}
                 onResourceRarityModeChange={props.onResourceRarityModeChange}
                 onGenerate={props.onGenerate}
+                onGenerateHistory={props.onGenerateHistory}
+                canGenerateHistory={props.canGenerateHistory}
                 generating={props.generating}
                 progress={props.progress}
                 mapData={props.mapData}

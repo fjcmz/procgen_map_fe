@@ -55,6 +55,12 @@ export default function App() {
   const [highlightCells, setHighlightCells] = useState<number[] | null>(null);
   const [selectedEntity, setSelectedEntity] = useState<SelectedEntity | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Snapshot of the seed + rarity mode that produced the current `mapData`.
+  // Used by `handleGenerateHistory` so a follow-up history run is consistent
+  // with the map on screen even if the user has since edited the form.
+  const [lastGenParams, setLastGenParams] = useState<
+    { seed: string; resourceRarityMode: ResourceRarityMode } | null
+  >(null);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -271,6 +277,7 @@ export default function App() {
         if (msg.data.history) {
           setSelectedYear(0);
         }
+        setLastGenParams({ seed, resourceRarityMode });
         setGenerating(false);
         setProgress(null);
         worker.terminate();
@@ -302,6 +309,67 @@ export default function App() {
       resourceRarityMode,
     });
   }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode]);
+
+  const handleGenerateHistory = useCallback(() => {
+    if (generating) return;
+    if (!mapData || mapData.history || !lastGenParams) return;
+
+    workerRef.current?.terminate();
+
+    const worker = new Worker(
+      new URL('./workers/mapgen.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    workerRef.current = worker;
+
+    setGenerating(true);
+    setProgress({ step: 'Starting history…', pct: 0 });
+    setSelectedEntity(null);
+    setHighlightCells(null);
+
+    worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
+      const msg = e.data;
+      if (msg.type === 'PROGRESS') {
+        setProgress({ step: msg.step, pct: msg.pct });
+      } else if (msg.type === 'DONE') {
+        // History-only path: the worker echoes cells/rivers/width/height back
+        // unchanged and adds the simulation outputs. Replace mapData with the
+        // full payload — selectedYear resets to 0 like the combined path.
+        setMapData(msg.data);
+        if (msg.data.history) {
+          setSelectedYear(0);
+        }
+        setGenerating(false);
+        setProgress(null);
+        worker.terminate();
+      } else if (msg.type === 'ERROR') {
+        console.error('History generation error:', msg.message);
+        setGenerating(false);
+        setProgress(null);
+        worker.terminate();
+      }
+      // TERRAIN_READY is not posted by the GENERATE_HISTORY path.
+    };
+
+    worker.onerror = (err) => {
+      console.error('Worker error:', err);
+      setGenerating(false);
+      setProgress(null);
+    };
+
+    worker.postMessage({
+      type: 'GENERATE_HISTORY',
+      seed: lastGenParams.seed,
+      cells: mapData.cells,
+      width: mapData.width,
+      height: mapData.height,
+      rivers: mapData.rivers,
+      numSimYears,
+      resourceRarityMode: lastGenParams.resourceRarityMode,
+    });
+  }, [generating, mapData, lastGenParams, numSimYears]);
+
+  const canGenerateHistory = !!mapData && !mapData.history && !generating && !!lastGenParams;
 
   const handleLayerToggle = useCallback((key: keyof LayerVisibility) => {
     setLayers(prev => ({ ...prev, [key]: !prev[key] }));
@@ -383,6 +451,8 @@ export default function App() {
         resourceRarityMode={resourceRarityMode}
         onResourceRarityModeChange={setResourceRarityMode}
         onGenerate={handleGenerate}
+        onGenerateHistory={handleGenerateHistory}
+        canGenerateHistory={canGenerateHistory}
         generating={generating}
         progress={progress}
         onExportWorld={handleExportWorld}
