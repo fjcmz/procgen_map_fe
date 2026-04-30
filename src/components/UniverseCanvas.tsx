@@ -226,7 +226,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         } else if (state.scene === 'system' && system) {
           rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
         } else if (state.scene === 'planet' && planet) {
-          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true).hit;
+          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true, scale).hit;
         }
 
         ctx.restore();
