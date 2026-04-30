@@ -222,9 +222,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
         let rawHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true).hit;
+          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale).hit;
         } else if (state.scene === 'system' && system) {
-          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true).hit;
+          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
         } else if (state.scene === 'planet' && planet) {
           rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true).hit;
         }
