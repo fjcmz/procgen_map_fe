@@ -525,7 +525,7 @@ export interface TerrainProfile {
   depressionFillEpsilon: number;
 }
 
-export interface GenerateRequest {
+export interface GenerateMapRequest {
   type: 'GENERATE';
   seed: string;
   numCells: number;
@@ -539,6 +539,19 @@ export interface GenerateRequest {
   profileOverrides?: Partial<TerrainProfile>;
   resourceRarityMode?: ResourceRarityMode;
 }
+
+export interface GenerateHistoryRequest {
+  type: 'GENERATE_HISTORY';
+  seed: string;
+  cells: Cell[];
+  width: number;
+  height: number;
+  rivers: River[];
+  numSimYears: number;
+  resourceRarityMode?: ResourceRarityMode;
+}
+
+export type GenerateRequest = GenerateMapRequest | GenerateHistoryRequest;
 
 export type WorkerMessage =
   | { type: 'PROGRESS'; step: string; pct: number }

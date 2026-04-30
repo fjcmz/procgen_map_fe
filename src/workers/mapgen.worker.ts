@@ -38,21 +38,29 @@ function _assertTradeCapMonotonic(): void {
 _assertTradeCapMonotonic();
 
 self.onmessage = (e: MessageEvent<GenerateRequest>) => {
-  const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = e.data;
+  if (e.data.type === 'GENERATE_HISTORY') {
+    handleGenerateHistory(e.data);
+    return;
+  }
+  handleGenerate(e.data);
+};
+
+function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): void {
+  const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = req;
 
   // Resolve terrain profile from request. Shapes stack between the biome profile
   // and any user overrides so the user override always wins and the biome layer
   // shines through for every field the shape doesn't explicitly set.
-  const profileBase = PROFILES[e.data.profileName ?? 'default'] ?? DEFAULT_PROFILE;
-  const shapeOverlay = SHAPE_PROFILES[e.data.shapeName ?? 'default'] ?? {};
+  const profileBase = PROFILES[req.profileName ?? 'default'] ?? DEFAULT_PROFILE;
+  const shapeOverlay = SHAPE_PROFILES[req.shapeName ?? 'default'] ?? {};
   const profile: TerrainProfile = {
     ...profileBase,
     ...shapeOverlay,
-    ...(e.data.profileOverrides ?? {}),
+    ...(req.profileOverrides ?? {}),
   };
 
   // Resolve resource rarity weights from mode (default: 'natural')
-  const rarityMode = e.data.resourceRarityMode ?? 'natural';
+  const rarityMode = req.resourceRarityMode ?? 'natural';
   const rarityWeights = RARITY_WEIGHTS_BY_MODE[rarityMode];
 
   try {
@@ -143,4 +151,39 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });
   }
-};
+}
+
+function handleGenerateHistory(req: Extract<GenerateRequest, { type: 'GENERATE_HISTORY' }>): void {
+  const { seed, cells, width, height, rivers, numSimYears } = req;
+  const rarityMode = req.resourceRarityMode ?? 'natural';
+  const rarityWeights = RARITY_WEIGHTS_BY_MODE[rarityMode];
+
+  try {
+    post({ type: 'PROGRESS', step: 'Building physical world…', pct: 20 });
+    // Same rng prefix as the combined path so byte-identical results
+    // are produced regardless of which path was taken.
+    const rng = seededPRNG(seed + '_history');
+
+    post({ type: 'PROGRESS', step: 'Simulating history…', pct: 40 });
+    const result = historyGenerator.generate(cells, width, rng, numSimYears, rarityWeights, seed);
+
+    post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
+    post({
+      type: 'DONE',
+      data: {
+        cells,
+        rivers,
+        cities: result.cities,
+        roads: result.roads,
+        width,
+        height,
+        history: result.historyData,
+        regions: result.regions,
+        continents: result.continents,
+        historyStats: result.stats,
+      },
+    });
+  } catch (err) {
+    post({ type: 'ERROR', message: String(err) });
+  }
+}
