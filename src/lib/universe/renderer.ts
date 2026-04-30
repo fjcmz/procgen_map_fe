@@ -194,11 +194,11 @@ function drawGlow(
   ctx.fill();
 }
 
-function drawOrbitRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number): void {
+function drawOrbitRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, viewScale: number = 1): void {
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.strokeStyle = 'rgba(180, 200, 240, 0.18)';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = 1 / viewScale;
   ctx.stroke();
 }
 
@@ -329,7 +329,7 @@ export function drawSystemScene(
   // Draw orbit rings first so planets and stars layer on top
   for (const planet of system.planets) {
     const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
-    drawOrbitRing(ctx, cx, cy, ringR);
+    drawOrbitRing(ctx, cx, cy, ringR, viewScale);
   }
 
   // Stars at center — for multi-star systems space them in a tight cluster.
@@ -368,16 +368,18 @@ export function drawSystemScene(
     const angle = phase + omega * timeSec;
     const px = cx + Math.cos(angle) * ringR;
     const py = cy + Math.sin(angle) * ringR;
-    const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt');
+    // Divide by viewScale so the disk stays at a constant screen-pixel size
+    // regardless of zoom level (orbit radii still scale, only the body shrinks).
+    const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
     drawCircle(ctx, px, py, sizePx, planetFill(planet));
     if (planet.life) {
       ctx.beginPath();
-      ctx.arc(px, py, sizePx + 1.5, 0, Math.PI * 2);
+      ctx.arc(px, py, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(120,255,150,0.55)';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1 / viewScale;
       ctx.stroke();
     }
-    hit.push({ x: px, y: py, r: Math.max(sizePx * 1.6, 8), kind: 'planet', id: planet.id });
+    hit.push({ x: px, y: py, r: Math.max(sizePx * 1.6, 8 / viewScale), kind: 'planet', id: planet.id });
   }
 
   return { hit };
@@ -396,20 +398,26 @@ export function drawPlanetScene(
   stars: BackgroundStar[],
   timeSec: number,
   skipBg: boolean = false,
+  viewScale: number = 1,
 ): PlanetDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
   const cy = vh / 2;
   const minSide = Math.min(vw, vh);
 
-  // Hero planet — large central disk, optional life ring
-  const planetPx = minSide * 0.18;
+  // orbitBase drives the satellite ring layout and scales with zoom so orbits
+  // spread outward as the user zooms in (same principle as the galaxy spiral).
+  // planetPx is the visual disk radius — constant in screen pixels.
+  const orbitBase = minSide * 0.18;
+  const planetPx = orbitBase / viewScale;
+
+  // Hero planet — constant-size disk, constant-gap life ring
   drawCircle(ctx, cx, cy, planetPx, planetFill(planet));
   if (planet.life) {
     ctx.beginPath();
-    ctx.arc(cx, cy, planetPx + 6, 0, Math.PI * 2);
+    ctx.arc(cx, cy, planetPx + 6 / viewScale, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(120,255,150,0.5)';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2 / viewScale;
     ctx.stroke();
   }
 
@@ -429,16 +437,18 @@ export function drawPlanetScene(
 
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
-    const ringR = planetPx + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
-    drawOrbitRing(ctx, cx, cy, ringR);
+    // Ring radius uses orbitBase (not planetPx) so orbits scale with zoom
+    // while the planet disk itself stays small.
+    const ringR = orbitBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
+    drawOrbitRing(ctx, cx, cy, ringR, viewScale);
     const omega = orbitalAngularVelocity(ringR) * 1.5;
     const phase = phaseFromId(sat.id);
     const angle = phase + omega * timeSec;
     const sx = cx + Math.cos(angle) * ringR;
     const sy = cy + Math.sin(angle) * ringR;
-    const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt');
+    const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
     drawCircle(ctx, sx, sy, sizePx, satelliteFill(sat));
-    hit.push({ x: sx, y: sy, r: Math.max(sizePx * 2, 10), kind: 'satellite', id: sat.id });
+    hit.push({ x: sx, y: sy, r: Math.max(sizePx * 2, 10 / viewScale), kind: 'satellite', id: sat.id });
   }
   return { hit };
 }
