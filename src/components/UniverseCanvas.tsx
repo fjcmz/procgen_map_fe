@@ -4,6 +4,7 @@ import {
   drawGalaxyScene,
   drawSystemScene,
   drawPlanetScene,
+  drawBackground,
   createStarField,
   type HitCircle,
   type BackgroundStar,
@@ -27,6 +28,9 @@ export interface UniverseCanvasHandle {
   reset: () => void;
   back: () => void;
   navigateTo: (scene: UniverseScene, systemId?: string, planetId?: string) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
 }
 
 interface UniverseCanvasProps {
@@ -34,6 +38,37 @@ interface UniverseCanvasProps {
   onSceneChange?: (state: UniverseSceneState) => void;
   onEntityClick?: (entity: PopupEntity) => void;
 }
+
+// ── Zoom/pan transform helpers ────────────────────────────────────────────────
+// Transform maps canvas point (x,y) → screen point (x*scale + tx, y*scale + ty).
+// Default { scale:1, tx:0, ty:0 } = identity (scene center stays at viewport center).
+
+interface ViewTransform { scale: number; tx: number; ty: number }
+
+const MIN_SCALE = 0.15;
+const MAX_SCALE = 12;
+
+function clampScale(s: number): number {
+  return Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
+}
+
+function zoomAround(t: ViewTransform, cx: number, cy: number, factor: number): ViewTransform {
+  const newScale = clampScale(t.scale * factor);
+  const contentX = (cx - t.tx) / t.scale;
+  const contentY = (cy - t.ty) / t.scale;
+  return { scale: newScale, tx: cx - contentX * newScale, ty: cy - contentY * newScale };
+}
+
+function transformHit(hit: HitCircle[], t: ViewTransform): HitCircle[] {
+  return hit.map(h => ({
+    ...h,
+    x: h.x * t.scale + t.tx,
+    y: h.y * t.scale + t.ty,
+    r: h.r * t.scale,
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const TRANSITION_DUR = 0.55;
 
@@ -59,9 +94,13 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     const dataRef = useRef<UniverseData | null>(data);
     dataRef.current = data;
 
-    // Galaxy-view pan state
-    const panRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-    const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+    // Unified zoom/pan transform — written by interaction handlers, read by the RAF loop.
+    const transformRef = useRef<ViewTransform>({ scale: 1, tx: 0, ty: 0 });
+
+    // Per-pointer tracking for drag (single) and pinch-zoom (two fingers).
+    const activePointersRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+    const dragOriginRef = useRef<{ px: number; py: number; tx: number; ty: number } | null>(null);
+    const pinchRef = useRef<{ dist: number; mx: number; my: number } | null>(null);
     const hasDraggedRef = useRef(false);
 
     // Keep the latest onEntityClick callback in a ref so the click handler
@@ -73,11 +112,12 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       onSceneChange?.(sceneState);
     }, [sceneState, onSceneChange]);
 
+    // Reset scene + zoom when new universe data arrives.
     useEffect(() => {
       if (!data) return;
       setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
       transitionRef.current = null;
-      panRef.current = { x: 0, y: 0 };
+      transformRef.current = { scale: 1, tx: 0, ty: 0 };
     }, [data]);
 
     useEffect(() => {
@@ -96,15 +136,18 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     useImperativeHandle(ref, () => ({
       reset() {
         setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
+        transformRef.current = { scale: 1, tx: 0, ty: 0 };
       },
       back() {
         setSceneState(prev => {
           if (prev.scene === 'planet') {
             transitionRef.current = { start: performance.now() / 1000, from: 'planet', to: 'system' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
             return { scene: 'system', systemId: prev.systemId, planetId: null };
           }
           if (prev.scene === 'system') {
             transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'galaxy' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
             return { scene: 'galaxy', systemId: null, planetId: null };
           }
           return prev;
@@ -113,6 +156,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       navigateTo(scene: UniverseScene, systemId?: string, planetId?: string) {
         setSceneState(prev => {
           transitionRef.current = { start: performance.now() / 1000, from: prev.scene, to: scene };
+          transformRef.current = { scale: 1, tx: 0, ty: 0 };
           return {
             scene,
             systemId: systemId ?? null,
@@ -120,8 +164,22 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           };
         });
       },
+      zoomIn() {
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        transformRef.current = zoomAround(transformRef.current, cx, cy, 1.5);
+      },
+      zoomOut() {
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        transformRef.current = zoomAround(transformRef.current, cx, cy, 1 / 1.5);
+      },
+      resetZoom() {
+        transformRef.current = { scale: 1, tx: 0, ty: 0 };
+      },
     }), []);
 
+    // ── RAF render loop ───────────────────────────────────────────────────────
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas || !data) return;
@@ -130,20 +188,15 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
       const tick = () => {
         const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          rafId = requestAnimationFrame(tick);
-          return;
-        }
+        if (!ctx) { rafId = requestAnimationFrame(tick); return; }
+
         const now = performance.now() / 1000;
         const time = now - startTs;
         const stars = starsRef.current;
         const vw = canvas.width;
         const vh = canvas.height;
         const d = dataRef.current;
-        if (!d) {
-          rafId = requestAnimationFrame(tick);
-          return;
-        }
+        if (!d) { rafId = requestAnimationFrame(tick); return; }
 
         const state = sceneStateRef.current;
         const system: SolarSystemData | null = state.systemId
@@ -158,45 +211,155 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         const tEase = ease(tElapsed);
         if (tr && tElapsed >= 1) transitionRef.current = null;
 
-        let activeHit: HitCircle[] = [];
+        const { scale, tx, ty } = transformRef.current;
+
+        // 1. Background — always full-viewport, no transform applied.
+        drawBackground(ctx, vw, vh, stars);
+
+        // 2. Scene content under the zoom/pan transform.
+        ctx.save();
+        ctx.setTransform(scale, 0, 0, scale, tx, ty);
+
+        let rawHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          const { x: panX, y: panY } = panRef.current;
-          const res = drawGalaxyScene(ctx, d, vw, vh, stars, 1, panX, panY);
-          activeHit = res.hit;
+          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true).hit;
         } else if (state.scene === 'system' && system) {
-          const res = drawSystemScene(ctx, system, vw, vh, stars, time);
-          activeHit = res.hit;
+          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true).hit;
         } else if (state.scene === 'planet' && planet) {
-          const res = drawPlanetScene(ctx, planet, vw, vh, stars, time);
-          activeHit = res.hit;
+          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true).hit;
         }
 
+        ctx.restore();
+
+        // 3. Transition fade overlay — full-viewport, no transform.
         if (tr && tElapsed < 1) {
           ctx.fillStyle = `rgba(5, 3, 13, ${(1 - tEase) * 0.55})`;
           ctx.fillRect(0, 0, vw, vh);
         }
 
-        lastHitRef.current = activeHit;
+        // Transform hit circles from canvas space → screen space.
+        lastHitRef.current = transformHit(rawHit, { scale, tx, ty });
         rafId = requestAnimationFrame(tick);
       };
 
       rafId = requestAnimationFrame(tick);
-      return () => {
-        if (rafId !== null) cancelAnimationFrame(rafId);
-      };
+      return () => { if (rafId !== null) cancelAnimationFrame(rafId); };
     }, [data]);
 
-    // Click → open entity popup (no direct navigation)
+    // ── Wheel zoom (desktop) ──────────────────────────────────────────────────
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      let rafId: number | null = null;
+      const onWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(() => {
+          rafId = null;
+          const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+          transformRef.current = zoomAround(transformRef.current, e.clientX, e.clientY, factor);
+        });
+      };
+      canvas.addEventListener('wheel', onWheel, { passive: false });
+      return () => {
+        canvas.removeEventListener('wheel', onWheel);
+        if (rafId !== null) cancelAnimationFrame(rafId);
+      };
+    }, []);
+
+    // ── Pointer drag + pinch-zoom (mouse & touch via Pointer Events) ──────────
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const onPointerDown = (e: PointerEvent) => {
+        if (e.button > 0) return; // left / touch only
+        canvas.setPointerCapture(e.pointerId);
+        activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointersRef.current.size === 2) {
+          // Two pointers → enter pinch mode; cancel any drag.
+          dragOriginRef.current = null;
+          const pts = [...activePointersRef.current.values()];
+          pinchRef.current = {
+            dist: Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y),
+            mx: (pts[0].x + pts[1].x) / 2,
+            my: (pts[0].y + pts[1].y) / 2,
+          };
+        } else if (activePointersRef.current.size === 1) {
+          // Single pointer → drag mode.
+          dragOriginRef.current = {
+            px: e.clientX,
+            py: e.clientY,
+            tx: transformRef.current.tx,
+            ty: transformRef.current.ty,
+          };
+          hasDraggedRef.current = false;
+          pinchRef.current = null;
+          canvas.style.cursor = 'grabbing';
+        }
+      };
+
+      const onPointerMove = (e: PointerEvent) => {
+        activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointersRef.current.size >= 2 && pinchRef.current) {
+          const pts = [...activePointersRef.current.values()];
+          const newDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+          const newMx = (pts[0].x + pts[1].x) / 2;
+          const newMy = (pts[0].y + pts[1].y) / 2;
+          const factor = newDist / pinchRef.current.dist;
+          const t = transformRef.current;
+          const newScale = clampScale(t.scale * factor);
+          const contentX = (pinchRef.current.mx - t.tx) / t.scale;
+          const contentY = (pinchRef.current.my - t.ty) / t.scale;
+          transformRef.current = {
+            scale: newScale,
+            tx: pinchRef.current.mx - contentX * newScale + (newMx - pinchRef.current.mx),
+            ty: pinchRef.current.my - contentY * newScale + (newMy - pinchRef.current.my),
+          };
+          pinchRef.current = { dist: newDist, mx: newMx, my: newMy };
+        } else if (activePointersRef.current.size === 1 && dragOriginRef.current) {
+          const dx = e.clientX - dragOriginRef.current.px;
+          const dy = e.clientY - dragOriginRef.current.py;
+          if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) hasDraggedRef.current = true;
+          transformRef.current = {
+            ...transformRef.current,
+            tx: dragOriginRef.current.tx + dx,
+            ty: dragOriginRef.current.ty + dy,
+          };
+        }
+      };
+
+      const onPointerUp = (e: PointerEvent) => {
+        activePointersRef.current.delete(e.pointerId);
+        if (activePointersRef.current.size < 2) pinchRef.current = null;
+        if (activePointersRef.current.size === 0) {
+          dragOriginRef.current = null;
+          canvas.style.cursor = 'grab';
+        }
+      };
+
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', onPointerUp);
+      canvas.addEventListener('pointercancel', onPointerUp);
+      return () => {
+        canvas.removeEventListener('pointerdown', onPointerDown);
+        canvas.removeEventListener('pointermove', onPointerMove);
+        canvas.removeEventListener('pointerup', onPointerUp);
+        canvas.removeEventListener('pointercancel', onPointerUp);
+      };
+    }, []);
+
+    // ── Click → open entity popup ─────────────────────────────────────────────
     useEffect(() => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const onClick = (e: MouseEvent) => {
         if (e.button !== 0) return;
-        // Suppress click when the pointer moved enough to be a pan gesture
-        if (hasDraggedRef.current) {
-          hasDraggedRef.current = false;
-          return;
-        }
+        // Suppress click that was actually a pan gesture.
+        if (hasDraggedRef.current) { hasDraggedRef.current = false; return; }
         const rect = canvas.getBoundingClientRect();
         const px = e.clientX - rect.left;
         const py = e.clientY - rect.top;
@@ -224,66 +387,19 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       return () => canvas.removeEventListener('click', onClick);
     }, []);
 
-    // Galaxy-view drag-to-pan via Pointer Events
-    useEffect(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const onPointerDown = (e: PointerEvent) => {
-        if (e.button !== 0) return;
-        if (sceneStateRef.current.scene !== 'galaxy') return;
-        canvas.setPointerCapture(e.pointerId);
-        dragRef.current = {
-          startX: e.clientX,
-          startY: e.clientY,
-          originX: panRef.current.x,
-          originY: panRef.current.y,
-        };
-        hasDraggedRef.current = false;
-        canvas.style.cursor = 'grabbing';
-      };
-
-      const onPointerMove = (e: PointerEvent) => {
-        if (!dragRef.current) return;
-        const dx = e.clientX - dragRef.current.startX;
-        const dy = e.clientY - dragRef.current.startY;
-        if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) {
-          hasDraggedRef.current = true;
-        }
-        panRef.current = {
-          x: dragRef.current.originX + dx,
-          y: dragRef.current.originY + dy,
-        };
-      };
-
-      const onPointerUp = () => {
-        dragRef.current = null;
-        canvas.style.cursor = sceneStateRef.current.scene === 'galaxy' ? 'grab' : 'pointer';
-      };
-
-      canvas.addEventListener('pointerdown', onPointerDown);
-      canvas.addEventListener('pointermove', onPointerMove);
-      canvas.addEventListener('pointerup', onPointerUp);
-      canvas.addEventListener('pointercancel', onPointerUp);
-      return () => {
-        canvas.removeEventListener('pointerdown', onPointerDown);
-        canvas.removeEventListener('pointermove', onPointerMove);
-        canvas.removeEventListener('pointerup', onPointerUp);
-        canvas.removeEventListener('pointercancel', onPointerUp);
-      };
-    }, []);
-
-    // Escape → back (only when no popup is open; popup intercepts Escape first)
+    // ── Escape → back ─────────────────────────────────────────────────────────
     useEffect(() => {
       const onKey = (e: KeyboardEvent) => {
         if (e.key !== 'Escape') return;
         setSceneState(prev => {
           if (prev.scene === 'planet') {
             transitionRef.current = { start: performance.now() / 1000, from: 'planet', to: 'system' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
             return { scene: 'system', systemId: prev.systemId, planetId: null };
           }
           if (prev.scene === 'system') {
             transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'galaxy' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
             return { scene: 'galaxy', systemId: null, planetId: null };
           }
           return prev;
@@ -302,7 +418,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           left: 0,
           display: 'block',
           touchAction: 'none',
-          cursor: sceneState.scene === 'galaxy' ? 'grab' : 'pointer',
+          cursor: 'grab',
         }}
       />
     );

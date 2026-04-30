@@ -131,6 +131,12 @@ export function UniverseScreen() {
         onSceneChange={setSceneState}
         onEntityClick={handleEntityClick}
       />
+      {/* Zoom controls — bottom-right, space-themed to match the dark UI */}
+      <div style={styles.zoomWrap}>
+        <button style={styles.zoomBtn} onClick={() => canvasRef.current?.zoomIn()} title="Zoom in">+</button>
+        <button style={styles.zoomBtn} onClick={() => canvasRef.current?.resetZoom()} title="Reset zoom">⌂</button>
+        <button style={styles.zoomBtn} onClick={() => canvasRef.current?.zoomOut()} title="Zoom out">−</button>
+      </div>
       <UniverseOverlay
         seed={seed}
         onSeedChange={setSeed}
@@ -164,6 +170,31 @@ export function UniverseScreen() {
 }
 
 const styles: Record<string, React.CSSProperties> = {
+  zoomWrap: {
+    position: 'fixed',
+    bottom: 16,
+    right: 16,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    zIndex: 10,
+  },
+  zoomBtn: {
+    width: 36,
+    height: 36,
+    background: 'rgba(20,18,40,0.92)',
+    border: '1.5px solid #6c7ab8',
+    borderRadius: 6,
+    fontFamily: 'Georgia, serif',
+    fontSize: 18,
+    color: '#dde0ff',
+    cursor: 'pointer',
+    boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    userSelect: 'none',
+  },
   emptyHint: {
     position: 'fixed',
     left: '50%',

@@ -202,7 +202,7 @@ function drawOrbitRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r:
   ctx.stroke();
 }
 
-function drawBackground(
+export function drawBackground(
   ctx: CanvasRenderingContext2D,
   w: number, h: number,
   stars: BackgroundStar[],
@@ -251,12 +251,11 @@ export function drawGalaxyScene(
   vh: number,
   stars: BackgroundStar[],
   cameraScale: number = 1,
-  panX: number = 0,
-  panY: number = 0,
+  skipBg: boolean = false,
 ): GalaxyDrawResult {
-  drawBackground(ctx, vw, vh, stars);
-  const cx = vw / 2 + panX;
-  const cy = vh / 2 + panY;
+  if (!skipBg) drawBackground(ctx, vw, vh, stars);
+  const cx = vw / 2;
+  const cy = vh / 2;
   const spread = Math.min(vw, vh) * 0.7;
   const positions = galaxySpiralPositions(data.solarSystems.length, cx, cy, spread);
 
@@ -297,8 +296,9 @@ export function drawSystemScene(
   vh: number,
   stars: BackgroundStar[],
   timeSec: number,
+  skipBg: boolean = false,
 ): SystemDrawResult {
-  drawBackground(ctx, vw, vh, stars);
+  if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
   const cy = vh / 2;
   const minSide = Math.min(vw, vh);
@@ -384,8 +384,9 @@ export function drawPlanetScene(
   vh: number,
   stars: BackgroundStar[],
   timeSec: number,
+  skipBg: boolean = false,
 ): PlanetDrawResult {
-  drawBackground(ctx, vw, vh, stars);
+  if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
   const cy = vh / 2;
   const minSide = Math.min(vw, vh);
