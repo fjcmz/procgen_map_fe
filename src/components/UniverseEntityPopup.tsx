@@ -9,9 +9,15 @@ interface Props {
   onClose: () => void;
   onNavigateUp: () => void;
   onNavigateDown?: () => void;
+  /**
+   * When provided, rock+life planets show a "Generate World" button that
+   * hands off to the planet/world generator with locked, planet-derived
+   * params. The popup just forwards the planet + its parent system id.
+   */
+  onGenerateWorld?: (planet: PlanetData, systemId: string) => void;
 }
 
-export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown }: Props) {
+export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,6 +56,16 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'system' ? '↓ Enter System' :
     entity.kind === 'planet' ? '↓ Enter Planet' :
     null;
+
+  // The "Generate World" button is the integration point with the planet
+  // generator: only rock planets with life qualify. All other planet kinds
+  // and all non-planet entities suppress the button.
+  const canGenerateWorld =
+    !!onGenerateWorld &&
+    entity.kind === 'planet' &&
+    !!planet &&
+    planet.composition === 'ROCK' &&
+    planet.life;
 
   const headerTitle =
     entity.kind === 'system' && system ? system.humanName :
@@ -90,6 +106,15 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
         <div style={s.navRow}>
           <button style={s.navBtn} onClick={onNavigateUp}>{upLabel}</button>
+          {canGenerateWorld && planet && (
+            <button
+              style={{ ...s.navBtn, ...s.navBtnGenerate }}
+              onClick={() => onGenerateWorld!(planet, entity.systemId)}
+              title="Open the world generator with parameters derived from this planet"
+            >
+              ★ Generate World
+            </button>
+          )}
           {downLabel && onNavigateDown && (
             <button style={{ ...s.navBtn, ...s.navBtnPrimary }} onClick={onNavigateDown}>
               {downLabel}
@@ -468,6 +493,12 @@ const s: Record<string, React.CSSProperties> = {
   navBtnPrimary: {
     background: '#5a68a8',
     border: '1px solid #7a88c8',
+    fontWeight: 'bold',
+  },
+  navBtnGenerate: {
+    background: '#3a6a3a',
+    border: '1px solid #5fa86a',
+    color: '#e8ffe8',
     fontWeight: 'bold',
   },
 };

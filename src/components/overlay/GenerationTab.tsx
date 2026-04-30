@@ -1,5 +1,6 @@
 import type { ChangeEvent } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, ResourceRarityMode } from '../../lib/types';
+import type { WorldOrigin } from '../../App';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
 import { PROFILE_WATER_RATIOS } from '../../lib/terrain';
 
@@ -38,6 +39,15 @@ export interface GenerationTabProps {
   mapData: MapData | null;
   onExportWorld: () => void;
   exporting: boolean;
+  /**
+   * When set, the user reached this screen via a planet's "Generate World"
+   * button: terrain, shape, water, resources, history-checkbox, seed and
+   * cell count are locked to the predefined values, and the back button is
+   * shown above the form. Unlocking these inputs is intentionally
+   * impossible without returning to the universe first.
+   */
+  worldOrigin?: WorldOrigin | null;
+  onBackToSystem?: () => void;
 }
 
 const CELL_OPTIONS = [10000, 20000, 50000, 100000, 200000];
@@ -123,9 +133,34 @@ export function GenerationTab({
   mapData,
   onExportWorld,
   exporting,
+  worldOrigin,
+  onBackToSystem,
 }: GenerationTabProps) {
+  // When the planet flow was entered from the universe, the predefined
+  // params are read-only — the universe planet is the source of truth.
+  const locked = !!worldOrigin;
   return (
     <div style={styles.body}>
+      {worldOrigin && (
+        <div style={styles.originBanner}>
+          <div style={styles.originText}>
+            World derived from planet{' '}
+            <strong>{worldOrigin.planetName}</strong>{' '}
+            in system <strong>{worldOrigin.systemName}</strong>.
+            Generation params are locked.
+          </div>
+          {onBackToSystem && (
+            <button
+              style={styles.backBtn}
+              onClick={onBackToSystem}
+              title={`Return to ${worldOrigin.systemName}`}
+            >
+              ← Back to System
+            </button>
+          )}
+        </div>
+      )}
+
       <label style={styles.label}>
         Seed
         <input
@@ -134,7 +169,7 @@ export function GenerationTab({
           value={seed}
           onChange={(e: ChangeEvent<HTMLInputElement>) => onSeedChange(e.target.value)}
           placeholder="e.g. fantasy"
-          disabled={generating}
+          disabled={generating || locked}
         />
       </label>
 
@@ -167,7 +202,7 @@ export function GenerationTab({
                 ...(numCells === n ? styles.cellBtnActive : {}),
               }}
               onClick={() => onNumCellsChange(n)}
-              disabled={generating}
+              disabled={generating || locked}
             >
               {n >= 1000 ? `${n / 1000}k` : n}
             </button>
@@ -186,7 +221,7 @@ export function GenerationTab({
           onChange={(e: ChangeEvent<HTMLInputElement>) =>
             onWaterRatioChange(Number(e.target.value) / 100)
           }
-          disabled={generating}
+          disabled={generating || locked}
         />
       </label>
 
@@ -203,7 +238,7 @@ export function GenerationTab({
                 onWaterRatioChange(PROFILE_WATER_RATIOS[name]);
               }
             }}
-            disabled={generating}
+            disabled={generating || locked}
           >
             {PROFILE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>
@@ -219,7 +254,7 @@ export function GenerationTab({
             style={styles.input}
             value={shapeName}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => onShapeChange(e.target.value)}
-            disabled={generating}
+            disabled={generating || locked}
           >
             {SHAPE_OPTIONS.map(opt => (
               <option key={opt.value} value={opt.value}>
@@ -245,7 +280,7 @@ export function GenerationTab({
                 ...(resourceRarityMode === mode ? styles.viewBtnActive : {}),
               }}
               onClick={() => onResourceRarityModeChange(mode)}
-              disabled={generating}
+              disabled={generating || locked}
             >
               {label}
             </button>
@@ -259,7 +294,7 @@ export function GenerationTab({
             type="checkbox"
             checked={generateHistory}
             onChange={onGenerateHistoryToggle}
-            disabled={generating}
+            disabled={generating || locked}
           />
           Generate History
         </label>
@@ -616,5 +651,32 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: 'pointer',
     userSelect: 'none' as const,
     listStyle: 'none',
+  },
+  originBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: '8px 10px',
+    background: 'rgba(58,106,58,0.10)',
+    border: '1px solid #5fa86a',
+    borderRadius: 4,
+  },
+  originText: {
+    fontSize: 11,
+    color: '#2a4a2a',
+    lineHeight: 1.4,
+  },
+  backBtn: {
+    alignSelf: 'flex-start',
+    padding: '4px 10px',
+    background: '#3a6a3a',
+    color: '#e8ffe8',
+    border: '1px solid #5fa86a',
+    borderRadius: 4,
+    fontFamily: 'Georgia, serif',
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
+    cursor: 'pointer',
   },
 };
