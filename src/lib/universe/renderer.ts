@@ -252,6 +252,7 @@ export function drawGalaxyScene(
   stars: BackgroundStar[],
   cameraScale: number = 1,
   skipBg: boolean = false,
+  viewScale: number = 1,
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -270,7 +271,10 @@ export function drawGalaxyScene(
   for (let i = 0; i < data.solarSystems.length; i++) {
     const ss = data.solarSystems[i];
     const pos = positions[i];
-    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale;
+    // Divide by viewScale so the glyph stays at a constant screen-pixel size
+    // regardless of the canvas zoom level (the canvas transform already
+    // multiplies everything by viewScale, so dividing here cancels it out).
+    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
 
     // Mass-weighted compositional palette: ANTIMATTER vs MATTER systems read
     // visually distinct in the galaxy view.
@@ -279,7 +283,7 @@ export function drawGalaxyScene(
     drawGlow(ctx, pos.x, pos.y, sizePx, palette.inner, palette.outer);
     drawCircle(ctx, pos.x, pos.y, sizePx * 0.6, palette.core);
 
-    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8), kind: 'system', id: ss.id });
+    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
   }
   return { hit };
 }
@@ -297,6 +301,7 @@ export function drawSystemScene(
   stars: BackgroundStar[],
   timeSec: number,
   skipBg: boolean = false,
+  viewScale: number = 1,
 ): SystemDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -327,21 +332,23 @@ export function drawSystemScene(
     drawOrbitRing(ctx, cx, cy, ringR);
   }
 
-  // Stars at center — for multi-star systems space them in a tight cluster
+  // Stars at center — for multi-star systems space them in a tight cluster.
+  // Sizes divided by viewScale to stay constant in screen pixels regardless
+  // of how far the user has zoomed in.
   if (system.stars.length === 1) {
     const star = system.stars[0];
-    const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt');
+    const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale;
     const palette = starFill(star);
     drawGlow(ctx, cx, cy, starPx, palette.inner, palette.outer);
     drawCircle(ctx, cx, cy, starPx, palette.core);
   } else {
-    const clusterR = STAR_MIN_PX * 1.2;
+    const clusterR = STAR_MIN_PX * 1.2 / viewScale;
     for (let i = 0; i < system.stars.length; i++) {
       const star = system.stars[i];
       const angle = (i / system.stars.length) * Math.PI * 2;
       const sx = cx + Math.cos(angle) * clusterR;
       const sy = cy + Math.sin(angle) * clusterR;
-      const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') * 0.7;
+      const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') * 0.7 / viewScale;
       const palette = starFill(star);
       drawGlow(ctx, sx, sy, starPx, palette.inner, palette.outer);
       drawCircle(ctx, sx, sy, starPx, palette.core);
