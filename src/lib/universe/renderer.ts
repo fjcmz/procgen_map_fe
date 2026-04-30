@@ -26,10 +26,10 @@ import type {
 const STAR_FIELD_COUNT = 900;
 const STAR_FIELD_SEED = 42;
 
-const PLANET_MIN_PX = 3;
-const PLANET_MAX_PX = 18;
-const STAR_MIN_PX = 16;
-const STAR_MAX_PX = 48;
+const PLANET_MIN_PX = 1;
+const PLANET_MAX_PX = 6;
+const STAR_MIN_PX = 5;
+const STAR_MAX_PX = 16;
 const SAT_MIN_PX = 2;
 const SAT_MAX_PX = 10;
 
