@@ -1,6 +1,7 @@
 import { Star } from './Star';
 import type { SolarSystem } from './SolarSystem';
 import type { Universe } from './Universe';
+import { generateStarName } from './universeNameGenerator';
 
 export class StarGenerator {
   generate(solarSystem: SolarSystem, rng: () => number, universe: Universe): Star {
@@ -11,6 +12,10 @@ export class StarGenerator {
     star.composition = rng() < 0.5 ? 'MATTER' : 'ANTIMATTER';
     solarSystem.stars.push(star);
     universe.mapStars.set(star.id, star);
+    // Isolated sub-stream — no physics RNG perturbed
+    const { human, scientific } = generateStarName(universe.seed, star.id, universe.usedStarNames);
+    star.humanName = human;
+    star.scientificName = scientific;
     return star;
   }
 }

@@ -1,6 +1,7 @@
 import { Universe } from './Universe';
 import { solarSystemGenerator } from './SolarSystemGenerator';
 import { rndSize } from './helpers';
+import { generateGalaxyName } from './universeNameGenerator';
 
 export interface UniverseGenerateOptions {
   /**
@@ -28,6 +29,11 @@ export class UniverseGenerator {
         opts.onProgress((i + 1) / solarSystemCount);
       }
     }
+    // Galaxy name uses an isolated sub-stream — placed after physics generation
+    // so it never perturbs any physics RNG calls.
+    const galaxyName = generateGalaxyName(seed);
+    universe.humanName = galaxyName.human;
+    universe.scientificName = galaxyName.scientific;
     return universe;
   }
 }

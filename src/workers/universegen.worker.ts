@@ -21,21 +21,29 @@ function post(msg: UniverseWorkerMessage): void {
 function serializeUniverse(universe: Universe): UniverseData {
   const solarSystems: SolarSystemData[] = universe.solarSystems.map(ss => ({
     id: ss.id,
+    humanName: ss.humanName,
+    scientificName: ss.scientificName,
     composition: ss.composition,
     stars: ss.stars.map(star => ({
       id: star.id,
+      humanName: star.humanName,
+      scientificName: star.scientificName,
       radius: star.radius,
       brightness: star.brightness,
       composition: star.composition,
     })),
     planets: ss.planets.map(planet => ({
       id: planet.id,
+      humanName: planet.humanName,
+      scientificName: planet.scientificName,
       radius: planet.radius,
       orbit: planet.orbit,
       life: planet.life,
       composition: planet.composition,
       satellites: planet.satellites.map(sat => ({
         id: sat.id,
+        humanName: sat.humanName,
+        scientificName: sat.scientificName,
         radius: sat.radius,
         composition: sat.composition,
       })),
@@ -43,6 +51,8 @@ function serializeUniverse(universe: Universe): UniverseData {
   }));
   return {
     id: universe.id,
+    humanName: universe.humanName,
+    scientificName: universe.scientificName,
     seed: universe.seed,
     solarSystems,
   };

@@ -15,12 +15,16 @@ import type { SolarSystemComposition } from './SolarSystem';
  */
 export interface SatelliteData {
   id: string;
+  humanName: string;
+  scientificName: string;
   radius: number;
   composition: SatelliteComposition;
 }
 
 export interface PlanetData {
   id: string;
+  humanName: string;
+  scientificName: string;
   radius: number;
   orbit: number;
   life: boolean;
@@ -30,6 +34,8 @@ export interface PlanetData {
 
 export interface StarData {
   id: string;
+  humanName: string;
+  scientificName: string;
   radius: number;
   brightness: number;
   composition: StarComposition;
@@ -37,6 +43,8 @@ export interface StarData {
 
 export interface SolarSystemData {
   id: string;
+  humanName: string;
+  scientificName: string;
   composition: SolarSystemComposition;
   stars: StarData[];
   planets: PlanetData[];
@@ -44,6 +52,8 @@ export interface SolarSystemData {
 
 export interface UniverseData {
   id: string;
+  humanName: string;
+  scientificName: string;
   seed: string;
   solarSystems: SolarSystemData[];
 }
