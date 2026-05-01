@@ -26,6 +26,10 @@ import type {
 const STAR_FIELD_COUNT = 900;
 const STAR_FIELD_SEED = 42;
 
+// ── Orbital animation speeds ───────────────────────────────────────────────
+const GALAXY_SPIN_SPEED = 0.018;  // rad/s — full rotation ≈ 5.8 min
+const STAR_ORBIT_SPEED = 0.08;    // rad/s — multi-star binary orbit ≈ 79 s
+
 const PLANET_MIN_PX = 1;
 const PLANET_MAX_PX = 6;
 const STAR_MIN_PX = 5;
@@ -253,12 +257,23 @@ export function drawGalaxyScene(
   cameraScale: number = 1,
   skipBg: boolean = false,
   viewScale: number = 1,
+  timeSec: number = 0,
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
   const cy = vh / 2;
   const spread = Math.min(vw, vh) * 0.7;
-  const positions = galaxySpiralPositions(data.solarSystems.length, cx, cy, spread);
+  const rawPositions = galaxySpiralPositions(data.solarSystems.length, cx, cy, spread);
+
+  // Rotate the entire galaxy around its center
+  const galaxyAngle = timeSec * GALAXY_SPIN_SPEED;
+  const cosG = Math.cos(galaxyAngle);
+  const sinG = Math.sin(galaxyAngle);
+  const positions = rawPositions.map(pos => {
+    const dx = pos.x - cx;
+    const dy = pos.y - cy;
+    return { x: cx + dx * cosG - dy * sinG, y: cy + dx * sinG + dy * cosG };
+  });
 
   // Pre-compute domain for fair sizing across orders of magnitude.
   const maxStarRadii = data.solarSystems.map(ss =>
@@ -345,7 +360,9 @@ export function drawSystemScene(
     const clusterR = STAR_MIN_PX * 1.2 / viewScale;
     for (let i = 0; i < system.stars.length; i++) {
       const star = system.stars[i];
-      const angle = (i / system.stars.length) * Math.PI * 2;
+      const baseAngle = (i / system.stars.length) * Math.PI * 2;
+      const phase = phaseFromId(star.id);
+      const angle = baseAngle + phase + STAR_ORBIT_SPEED * timeSec;
       const sx = cx + Math.cos(angle) * clusterR;
       const sy = cy + Math.sin(angle) * clusterR;
       const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') * 0.7 / viewScale;
