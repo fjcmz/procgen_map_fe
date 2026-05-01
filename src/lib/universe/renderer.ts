@@ -28,7 +28,13 @@ const STAR_FIELD_SEED = 42;
 
 // ── Orbital animation speeds ───────────────────────────────────────────────
 const GALAXY_SPIN_SPEED = 0.018;  // rad/s — full rotation ≈ 5.8 min
-const STAR_ORBIT_SPEED = 0.08;    // rad/s — multi-star binary orbit ≈ 79 s
+const STAR_ORBIT_SPEED  = 0.08;   // rad/s — multi-star binary orbit ≈ 79 s
+// k constants for orbitalAngularVelocity — tuned so the range of orbit/index
+// values used by each body type yields visible periods (seconds, not hours):
+//   planet.orbit is in ~[0, 20] → innermost ≈ 13 s, outermost ≈ 2–8 min
+//   satellite index (1+i)  in [1…]  → innermost ≈  8 s, each outer ring slower
+const PLANET_K = 0.5;
+const SAT_K    = 0.8;
 
 const PLANET_MIN_PX = 1;
 const PLANET_MAX_PX = 6;
@@ -102,6 +108,19 @@ function phaseFromId(id: string): number {
     h = Math.imul(h, 0x01000193);
   }
   return ((h >>> 0) / 0x100000000) * Math.PI * 2;
+}
+
+/**
+ * Deterministic per-body speed factor in [0, 1). Uses a different FNV-1a IV
+ * from phaseFromId so phase and speed are uncorrelated.
+ */
+function speedFromId(id: string): number {
+  let h = 0xdeadbeef;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) / 0x100000000;
 }
 
 // ── Galaxy spiral layout ──────────────────────────────────────────────────
@@ -372,7 +391,11 @@ export function drawSystemScene(
     }
   }
 
-  // Planets — Kepler ω ∝ r^-1.5 with seeded phase
+  // Planets — Kepler ω ∝ r^-1.5 with seeded phase.
+  // omega uses planet.orbit (simulation units ~[0,20]) not the pixel ringR so
+  // the Kepler exponent produces human-scale periods (seconds, not hours).
+  // speedFromId multiplies by [0.8, 1.2) so two planets at the same orbit
+  // value still have distinct periods.
   // Star hit circle — clicking the central star(s) opens the system popup.
   // Added first so planet disks (appended later) take priority on any overlap.
   const hit: HitCircle[] = [
@@ -380,7 +403,8 @@ export function drawSystemScene(
   ];
   for (const planet of system.planets) {
     const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
-    const omega = orbitalAngularVelocity(ringR);
+    const omega = orbitalAngularVelocity(planet.orbit, PLANET_K)
+                * (0.8 + speedFromId(planet.id) * 0.4);
     const phase = phaseFromId(planet.id);
     const angle = phase + omega * timeSec;
     const px = cx + Math.cos(angle) * ringR;
@@ -456,7 +480,11 @@ export function drawPlanetScene(
     const sat = planet.satellites[i];
     const ringR = orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
     drawOrbitRing(ctx, cx, cy, ringR, viewScale);
-    const omega = orbitalAngularVelocity(ringR) * 1.5;
+    // Use (1+i) as the orbital rank so inner satellites are meaningfully faster
+    // than outer ones; speedFromId gives each satellite a unique [0.7, 1.3)
+    // multiplier so siblings at adjacent rings have distinct periods.
+    const omega = orbitalAngularVelocity(1 + i, SAT_K)
+                * (0.7 + speedFromId(sat.id) * 0.6);
     const phase = phaseFromId(sat.id);
     const angle = phase + omega * timeSec;
     const sx = cx + Math.cos(angle) * ringR;
