@@ -74,7 +74,6 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'satellite' &&
     !!satellite &&
     !!planet &&
-    satellite.composition === 'ROCK' &&
     satellite.life;
 
   const headerTitle =
