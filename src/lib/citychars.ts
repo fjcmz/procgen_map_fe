@@ -167,17 +167,17 @@ const DOMINANT_DEITY_MULT = 8;
 // thumbprint quarter, the residential weights handle them.
 
 const CLASS_LANDMARK_AFFINITY: Partial<Record<PcClassType, LandmarkKind[]>> = {
-  cleric:    ['temple', 'temple_quarter'],
-  paladin:   ['temple', 'temple_quarter', 'citadel', 'barracks'],
-  monk:      ['temple', 'temple_quarter', 'archive'],
-  wizard:    ['academia', 'archive'],
-  sorcerer:  ['academia', 'theater'],
-  bard:      ['theater', 'festival', 'pleasure', 'bathhouse'],
-  fighter:   ['barracks', 'citadel', 'arsenal', 'watchmen'],
+  cleric:    ['temple', 'temple_quarter', 'civic_square', 'necropolis', 'plague_ward'],
+  paladin:   ['temple', 'temple_quarter', 'citadel', 'barracks', 'civic_square', 'necropolis'],
+  monk:      ['temple', 'temple_quarter', 'archive', 'civic_square'],
+  wizard:    ['academia', 'archive', 'necropolis', 'plague_ward'],
+  sorcerer:  ['academia', 'theater', 'wonder'],
+  bard:      ['theater', 'festival', 'pleasure', 'bathhouse', 'civic_square', 'wonder'],
+  fighter:   ['barracks', 'citadel', 'arsenal', 'watchmen', 'warehouse'],
   barbarian: ['barracks', 'foreign_quarter', 'gallows'],
   ranger:    ['park', 'caravanserai'],
   druid:     ['park'],
-  rogue:     ['ghetto_marker', 'foreign_quarter', 'market', 'pleasure', 'gallows'],
+  rogue:     ['ghetto_marker', 'foreign_quarter', 'market', 'pleasure', 'gallows', 'bankers_row', 'warehouse'],
 };
 
 const CLASS_DISTRICT_AFFINITY: Partial<Record<PcClassType, DistrictType[]>> = {
@@ -223,15 +223,32 @@ interface AffiliationCandidate {
 }
 
 /**
- * Landmarks that MUST get at least one character pointing at them when the
- * roster is large enough to cover them — palace / castle / temple. The
- * guarantee pass below runs before the per-character `pickAffiliation` and
- * pre-claims one character per landmark (best fit, ties broken by RNG).
- * Remaining characters then run through the normal affinity-weighted pick,
- * so a single landmark CAN end up with multiple characters once everyone
- * gets a roll.
+ * Landmarks classified as craft / production sites — characters are NOT
+ * guaranteed here (smiths and weavers aren't adventurers).
  */
-const GUARANTEED_LANDMARK_KINDS: readonly LandmarkKind[] = ['palace', 'castle', 'temple'];
+const CRAFT_INDUSTRY_LANDMARK_KINDS = new Set<LandmarkKind>([
+  'forge', 'tannery', 'textile', 'potters', 'mill', 'workhouse',
+]);
+
+/**
+ * Priority ordering for the guaranteed-coverage pass: all non-craft/industry
+ * landmark kinds, highest-priority first. When the roster is smaller than the
+ * number of qualifying landmarks the most important locations are filled first.
+ */
+const GUARANTEED_LANDMARK_PRIORITY: readonly LandmarkKind[] = [
+  'palace', 'castle',
+  'temple', 'temple_quarter',
+  'civic_square', 'wonder',
+  'barracks', 'citadel', 'watchmen',
+  'academia', 'archive',
+  'market', 'foreign_quarter', 'caravanserai',
+  'theater', 'festival', 'bathhouse', 'pleasure',
+  'arsenal',
+  'park',
+  'bankers_row', 'warehouse',
+  'necropolis', 'plague_ward',
+  'gallows', 'ghetto_marker',
+];
 
 function makeLandmarkAffiliation(cityMap: CityMapDataV2, lmIndex: number): CharacterAffiliation {
   const lm = cityMap.landmarks[lmIndex];
@@ -258,16 +275,32 @@ function scoreCharForLandmark(c: CityCharacter, lmKind: LandmarkKind): number {
   if (lmKind === 'temple' && c.deity !== 'none') s += 3 + c.level * 0.4;
   // Palaces / castles bias toward higher-level characters (rulers, captains).
   if (lmKind === 'palace' || lmKind === 'castle') s += c.level * 0.5;
+  // Civic square: important public figures skew higher-level.
+  if (lmKind === 'civic_square') s += c.level * 0.3;
+  // Wonders: prestige sites skew higher-level and sorcerers / bards.
+  if (lmKind === 'wonder') s += c.level * 0.2;
+  // Necropolis: clerics / paladins with a deity feel at home here.
+  if (lmKind === 'necropolis' && c.deity !== 'none' &&
+      (c.pcClass === 'cleric' || c.pcClass === 'paladin')) s += 2 + c.level * 0.3;
+  // Plague ward: healers are the obvious fit.
+  if (lmKind === 'plague_ward' && c.deity !== 'none' && c.pcClass === 'cleric') {
+    s += 2 + c.level * 0.3;
+  }
   return s;
 }
 
 /**
- * First-pass guarantee — for each palace / castle / temple in the city, try
- * to assign one character (best-fit, RNG tie-break). Returns the set of
+ * First-pass guarantee — for every non-craft/industry landmark in the city,
+ * try to assign one character (best-fit, RNG tie-break). Returns the set of
  * character indices that have been pre-claimed; the caller skips them in the
- * regular affinity-weighted pass. Iterates landmark KINDS round-robin so a
- * city with N palaces + 1 temple still covers the temple before doubling up
- * on palaces.
+ * regular affinity-weighted pass.
+ *
+ * Landmarks are processed in `GUARANTEED_LANDMARK_PRIORITY` order so when the
+ * roster is too small to cover every landmark (e.g. a small city with 3
+ * characters and 8 qualifying landmarks), the most important locations are
+ * filled first. Remaining characters then run through the normal
+ * affinity-weighted `pickAffiliation` pass and may land at any landmark,
+ * including ones already covered by this guarantee.
  */
 function assignGuaranteedLandmarks(
   out: CityCharacter[],
@@ -277,43 +310,35 @@ function assignGuaranteedLandmarks(
   const assigned = new Set<number>();
   if (out.length === 0) return assigned;
 
-  const byKind = new Map<LandmarkKind, number[]>();
-  for (const k of GUARANTEED_LANDMARK_KINDS) byKind.set(k, []);
-  for (let i = 0; i < cityMap.landmarks.length; i++) {
-    const lm = cityMap.landmarks[i];
-    const queue = byKind.get(lm.kind);
-    if (queue) queue.push(i);
-  }
+  const priorityIndex = new Map<LandmarkKind, number>(
+    GUARANTEED_LANDMARK_PRIORITY.map((k, i) => [k, i] as [LandmarkKind, number]),
+  );
 
-  // Round-robin queues by kind so each guaranteed kind gets one slot covered
-  // before any single kind doubles up — fair coverage regardless of how many
-  // palaces / castles / temples the city happens to have.
-  const queues = GUARANTEED_LANDMARK_KINDS.map(k => byKind.get(k) ?? []);
-  let progress = true;
-  while (progress) {
-    progress = false;
-    for (const queue of queues) {
-      if (queue.length === 0) continue;
-      const lmIdx = queue.shift()!;
-      const lm = cityMap.landmarks[lmIdx];
+  // Collect all non-craft/industry landmarks and sort by priority.
+  const qualifying = cityMap.landmarks
+    .map((lm, i) => ({ lm, i }))
+    .filter(({ lm }) => !CRAFT_INDUSTRY_LANDMARK_KINDS.has(lm.kind))
+    .sort((a, b) =>
+      (priorityIndex.get(a.lm.kind) ?? 999) - (priorityIndex.get(b.lm.kind) ?? 999),
+    );
 
-      // Pick the best unassigned character for this slot. Tie-break by RNG.
-      let bestChar = -1;
-      let bestScore = -1;
-      for (let ci = 0; ci < out.length; ci++) {
-        if (assigned.has(ci)) continue;
-        const score = scoreCharForLandmark(out[ci], lm.kind) + rng() * 0.01;
-        if (score > bestScore) { bestScore = score; bestChar = ci; }
-      }
-      if (bestChar < 0) {
-        // No characters left — bail out; remaining guaranteed slots stay empty,
-        // which is the explicit "may not have a character" allowance.
-        return assigned;
-      }
-      out[bestChar].affiliation = makeLandmarkAffiliation(cityMap, lmIdx);
-      assigned.add(bestChar);
-      progress = true;
+  for (const { lm, i: lmIdx } of qualifying) {
+    // Pick the best unassigned character for this slot. Tie-break by RNG.
+    let bestChar = -1;
+    let bestScore = -1;
+    for (let ci = 0; ci < out.length; ci++) {
+      if (assigned.has(ci)) continue;
+      const score = scoreCharForLandmark(out[ci], lm.kind) + rng() * 0.01;
+      if (score > bestScore) { bestScore = score; bestChar = ci; }
     }
+    if (bestChar < 0) {
+      // Roster exhausted — remaining landmarks stay uncovered by the guarantee
+      // pass, but may still receive characters from the regular affiliation
+      // pass that runs afterward.
+      return assigned;
+    }
+    out[bestChar].affiliation = makeLandmarkAffiliation(cityMap, lmIdx);
+    assigned.add(bestChar);
   }
   return assigned;
 }
