@@ -9,6 +9,9 @@ function rngHex(rng: () => number): string {
 
 export type PlanetComposition = 'GAS' | 'ROCK';
 
+/** Terrain profile subtypes — only assigned to ROCK planets/satellites with life. */
+export type PlanetBiome = 'default' | 'desert' | 'ice' | 'forest' | 'swamp' | 'mountains' | 'ocean';
+
 export class Planet {
   readonly id: string;
   humanName: string = '';
@@ -17,6 +20,7 @@ export class Planet {
   orbit: number = 0;
   life: boolean = false;
   composition: PlanetComposition = 'ROCK';
+  biome?: PlanetBiome;
   satellites: Satellite[] = [];
   // Transient
   solarSystemId: string = '';

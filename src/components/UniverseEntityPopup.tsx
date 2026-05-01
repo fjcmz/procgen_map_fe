@@ -15,9 +15,14 @@ interface Props {
    * params. The popup just forwards the planet + its parent system id.
    */
   onGenerateWorld?: (planet: PlanetData, systemId: string) => void;
+  /**
+   * When provided, rock+life satellites show a "Generate World" button
+   * similar to planets. Forwards satellite + parent planet + system id.
+   */
+  onGenerateSatelliteWorld?: (satellite: SatelliteData, planet: PlanetData, systemId: string) => void;
 }
 
-export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld }: Props) {
+export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -57,15 +62,20 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'planet' ? '↓ Enter Planet' :
     null;
 
-  // The "Generate World" button is the integration point with the planet
-  // generator: only rock planets with life qualify. All other planet kinds
-  // and all non-planet entities suppress the button.
   const canGenerateWorld =
     !!onGenerateWorld &&
     entity.kind === 'planet' &&
     !!planet &&
     planet.composition === 'ROCK' &&
     planet.life;
+
+  const canGenerateSatelliteWorld =
+    !!onGenerateSatelliteWorld &&
+    entity.kind === 'satellite' &&
+    !!satellite &&
+    !!planet &&
+    satellite.composition === 'ROCK' &&
+    satellite.life;
 
   const headerTitle =
     entity.kind === 'system' && system ? system.humanName :
@@ -115,6 +125,15 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
               ★ Generate World
             </button>
           )}
+          {canGenerateSatelliteWorld && satellite && planet && (
+            <button
+              style={{ ...s.navBtn, ...s.navBtnGenerate }}
+              onClick={() => onGenerateSatelliteWorld!(satellite, planet, entity.systemId)}
+              title="Open the world generator with parameters derived from this moon"
+            >
+              ★ Generate World
+            </button>
+          )}
           {downLabel && onNavigateDown && (
             <button style={{ ...s.navBtn, ...s.navBtnPrimary }} onClick={onNavigateDown}>
               {downLabel}
@@ -151,6 +170,7 @@ function SystemDetails({ system }: { system: SolarSystemData }) {
             <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
             <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
             {planet.life && <span style={s.life}> ★life</span>}
+            {planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
             {planet.satellites.length > 0 && (
               <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
             )}
@@ -186,6 +206,9 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
       <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
       <Row label="Composition">{planet.composition.toLowerCase()}</Row>
       <Row label="Life">{planet.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {planet.biome && (
+        <Row label="Biome"><span style={s.biome}>{planet.biome}</span></Row>
+      )}
       <Row label="Radius">{planet.radius.toFixed(2)}</Row>
       <Row label="Orbit">{planet.orbit.toFixed(2)}</Row>
 
@@ -201,6 +224,8 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
           <Item key={sat.id}>
             <EntityLabel humanName={sat.humanName} scientificName={sat.scientificName} />
             <span style={s.dim}> — {sat.composition.toLowerCase()}, r={sat.radius.toFixed(2)}</span>
+            {sat.life && <span style={s.life}> ★life</span>}
+            {sat.biome && <span style={s.biome}> [{sat.biome}]</span>}
           </Item>
         ))}
         {planet.satellites.length === 0 && <Item><span style={s.dim}>none</span></Item>}
@@ -220,6 +245,10 @@ function SatelliteDetails({
     <>
       <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
       <Row label="Composition">{satellite.composition.toLowerCase()}</Row>
+      <Row label="Life">{satellite.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {satellite.biome && (
+        <Row label="Biome"><span style={s.biome}>{satellite.biome}</span></Row>
+      )}
       <Row label="Radius">{satellite.radius.toFixed(2)}</Row>
 
       <Section title="Parent Planet">
@@ -227,6 +256,7 @@ function SatelliteDetails({
           <EntityLabel humanName={parentPlanet.humanName} scientificName={parentPlanet.scientificName} />
           <span style={s.dim}> — {parentPlanet.composition.toLowerCase()}</span>
           {parentPlanet.life && <span style={s.life}> ★life</span>}
+          {parentPlanet.biome && <span style={s.biome}> [{parentPlanet.biome}]</span>}
         </Item>
       </Section>
 
@@ -242,7 +272,6 @@ function SatelliteDetails({
 
 // ── Name display helpers ──────────────────────────────────────────────────
 
-/** Prominent name row shown at the top of each entity detail panel. */
 function NameRow({ humanName, scientificName }: { humanName: string; scientificName: string }) {
   return (
     <div style={s.nameRow}>
@@ -252,7 +281,6 @@ function NameRow({ humanName, scientificName }: { humanName: string; scientificN
   );
 }
 
-/** Compact inline name label used in parent/child lists. */
 function EntityLabel({ humanName, scientificName }: { humanName: string; scientificName: string }) {
   return (
     <>
@@ -430,14 +458,6 @@ const s: Record<string, React.CSSProperties> = {
     lineHeight: 1.5,
     color: '#e8e8ff',
   },
-  code: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-    color: '#c8d0ff',
-    background: 'rgba(108,122,184,0.15)',
-    padding: '1px 4px',
-    borderRadius: 3,
-  },
   nameRow: {
     display: 'flex',
     alignItems: 'baseline',
@@ -470,6 +490,11 @@ const s: Record<string, React.CSSProperties> = {
   life: {
     color: '#5fa86a',
     fontWeight: 'bold',
+  },
+  biome: {
+    color: '#c8a04a',
+    fontStyle: 'italic',
+    fontSize: 11,
   },
   navRow: {
     display: 'flex',
