@@ -71,13 +71,6 @@ function satelliteMatches(sat: SatelliteData, f: Filters): boolean {
   return true;
 }
 
-function planetMatches(planet: PlanetData, f: Filters): boolean {
-  if (f.planet !== 'any' && planet.composition !== f.planet) return false;
-  if (f.lifeOnly && !planet.life) return false;
-  if (f.biome !== 'any' && planet.biome !== f.biome) return false;
-  return true;
-}
-
 /**
  * A planet is visible when it, or one of its satellites, satisfies all active
  * filters. Specifically:
