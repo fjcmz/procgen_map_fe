@@ -101,6 +101,10 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     // Touch tracking for pinch-zoom (two fingers) and pan (one finger).
     const lastTouchDistRef = useRef(0);
     const lastTouchMidRef = useRef({ x: 0, y: 0 });
+    // Tap candidate (single finger that hasn't moved) — used to fire entity
+    // click on touchend, since preventDefault() on touchstart suppresses the
+    // browser's synthesized click event.
+    const tapCandidateRef = useRef<{ x: number; y: number } | null>(null);
     // Mouse drag tracking (desktop pan).
     const isMouseDraggingRef = useRef(false);
     const lastMouseRef = useRef({ x: 0, y: 0 });
@@ -292,8 +296,11 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         if (e.touches.length === 2) {
           lastTouchDistRef.current = getDist(e.touches[0], e.touches[1]);
           lastTouchMidRef.current = getMid(e.touches[0], e.touches[1]);
+          // Two fingers down — never a tap.
+          tapCandidateRef.current = null;
         } else if (e.touches.length === 1) {
           lastTouchMidRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          tapCandidateRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
         }
       };
 
@@ -322,7 +329,10 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           const ty = e.touches[0].clientY;
           const dx = tx - lastTouchMidRef.current.x;
           const dy = ty - lastTouchMidRef.current.y;
-          if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) hasDraggedRef.current = true;
+          if (!hasDraggedRef.current && Math.hypot(dx, dy) > 4) {
+            hasDraggedRef.current = true;
+            tapCandidateRef.current = null;
+          }
           transformRef.current = {
             ...transformRef.current,
             tx: transformRef.current.tx + dx,
@@ -336,6 +346,37 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         if (e.touches.length === 1) {
           // Pinch ended but one finger remains — re-anchor pan.
           lastTouchMidRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+          tapCandidateRef.current = null;
+          return;
+        }
+        if (e.touches.length !== 0) return;
+        // All fingers lifted. If this was a stationary single-finger tap,
+        // run the same hit-test as the desktop click handler — preventDefault
+        // on touchstart suppresses the browser's synthesized click event.
+        const tap = tapCandidateRef.current;
+        tapCandidateRef.current = null;
+        if (!tap || hasDraggedRef.current) return;
+        const rect = canvas.getBoundingClientRect();
+        const px = tap.x - rect.left;
+        const py = tap.y - rect.top;
+        const hit = pickHit(lastHitRef.current, px, py);
+        if (!hit) return;
+        const state = sceneStateRef.current;
+        if (hit.kind === 'system') {
+          onEntityClickRef.current?.({ kind: 'system', systemId: hit.id });
+        } else if (hit.kind === 'planet') {
+          onEntityClickRef.current?.({
+            kind: 'planet',
+            systemId: state.systemId!,
+            planetId: hit.id,
+          });
+        } else if (hit.kind === 'satellite') {
+          onEntityClickRef.current?.({
+            kind: 'satellite',
+            systemId: state.systemId!,
+            planetId: state.planetId!,
+            satelliteId: hit.id,
+          });
         }
       };
 
