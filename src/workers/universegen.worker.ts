@@ -40,12 +40,15 @@ function serializeUniverse(universe: Universe): UniverseData {
       orbit: planet.orbit,
       life: planet.life,
       composition: planet.composition,
+      biome: planet.biome,
       satellites: planet.satellites.map(sat => ({
         id: sat.id,
         humanName: sat.humanName,
         scientificName: sat.scientificName,
         radius: sat.radius,
         composition: sat.composition,
+        life: sat.life,
+        biome: sat.biome,
       })),
     })),
   }));

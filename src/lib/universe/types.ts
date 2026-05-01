@@ -1,5 +1,5 @@
 import type { StarComposition } from './Star';
-import type { PlanetComposition } from './Planet';
+import type { PlanetComposition, PlanetBiome } from './Planet';
 import type { SatelliteComposition } from './Satellite';
 import type { SolarSystemComposition } from './SolarSystem';
 
@@ -19,6 +19,8 @@ export interface SatelliteData {
   scientificName: string;
   radius: number;
   composition: SatelliteComposition;
+  life: boolean;
+  biome?: PlanetBiome;
 }
 
 export interface PlanetData {
@@ -29,6 +31,7 @@ export interface PlanetData {
   orbit: number;
   life: boolean;
   composition: PlanetComposition;
+  biome?: PlanetBiome;
   satellites: SatelliteData[];
 }
 

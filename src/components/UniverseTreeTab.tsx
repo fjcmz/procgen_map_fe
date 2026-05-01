@@ -7,7 +7,7 @@ import type {
   SatelliteData,
 } from '../lib/universe/types';
 import type { StarComposition } from '../lib/universe/Star';
-import type { PlanetComposition } from '../lib/universe/Planet';
+import type { PlanetComposition, PlanetBiome } from '../lib/universe/Planet';
 import type { SatelliteComposition } from '../lib/universe/Satellite';
 import type { PopupEntity } from './UniverseCanvas';
 
@@ -19,11 +19,13 @@ interface UniverseTreeTabProps {
 type StarFilter = 'any' | StarComposition;
 type PlanetFilter = 'any' | PlanetComposition;
 type SatelliteFilter = 'any' | SatelliteComposition;
+type BiomeFilter = 'any' | PlanetBiome;
 
 interface Filters {
   star: StarFilter;
   planet: PlanetFilter;
   satellite: SatelliteFilter;
+  biome: BiomeFilter;
   lifeOnly: boolean;
 }
 
@@ -31,14 +33,25 @@ const DEFAULT_FILTERS: Filters = {
   star: 'any',
   planet: 'any',
   satellite: 'any',
+  biome: 'any',
   lifeOnly: false,
 };
+
+const BIOME_OPTIONS: ReadonlyArray<readonly [BiomeFilter, string]> = [
+  ['any', 'Any'],
+  ['default', 'Default'],
+  ['desert', 'Desert'],
+  ['ice', 'Ice'],
+  ['forest', 'Forest'],
+  ['swamp', 'Swamp'],
+  ['mountains', 'Mountains'],
+  ['ocean', 'Ocean'],
+];
 
 function pluralize(n: number, singular: string): string {
   return n === 1 ? singular : `${singular}s`;
 }
 
-/** "3 stars" when nothing was filtered out; "2/5 stars" when it was. */
 function formatCount(visible: number, total: number, noun: string): string {
   if (visible === total) return `${total} ${pluralize(total, noun)}`;
   return `${visible}/${total} ${pluralize(total, noun)}`;
@@ -53,31 +66,42 @@ function starMatches(star: StarData, f: Filters): boolean {
 
 function satelliteMatches(sat: SatelliteData, f: Filters): boolean {
   if (f.satellite !== 'any' && sat.composition !== f.satellite) return false;
+  if (f.lifeOnly && !sat.life) return false;
+  if (f.biome !== 'any' && sat.biome !== f.biome) return false;
   return true;
 }
 
 function planetMatches(planet: PlanetData, f: Filters): boolean {
   if (f.planet !== 'any' && planet.composition !== f.planet) return false;
   if (f.lifeOnly && !planet.life) return false;
+  if (f.biome !== 'any' && planet.biome !== f.biome) return false;
   return true;
 }
 
-/** A planet shows iff:
- *  - the planet itself passes (composition + life filters), AND
- *  - if the satellite filter is active, the planet has at least one matching
- *    satellite. (Inactive sat filter = planets without satellites still show.)
- *  This is the "hide parents without matching children" rule applied to
- *  planet → satellite. */
+/**
+ * A planet is visible when it, or one of its satellites, satisfies all active
+ * filters. Specifically:
+ *  - satellite composition filter → planet must have a matching satellite
+ *  - life filter → planet has life OR has a satellite with life
+ *  - biome filter → planet has matching biome OR has a satellite with matching biome
+ *  - planet composition filter → always applies to the planet itself
+ */
 function planetPasses(planet: PlanetData, f: Filters): boolean {
-  if (!planetMatches(planet, f)) return false;
+  if (f.planet !== 'any' && planet.composition !== f.planet) return false;
+
   if (f.satellite !== 'any') {
     return planet.satellites.some(sat => satelliteMatches(sat, f));
   }
+
+  const hasSatLife = planet.satellites.some(s => s.life);
+  const hasSatBiome = (b: BiomeFilter) => planet.satellites.some(s => s.biome === b);
+
+  if (f.lifeOnly && !planet.life && !hasSatLife) return false;
+  if (f.biome !== 'any' && planet.biome !== f.biome && !hasSatBiome(f.biome)) return false;
+
   return true;
 }
 
-/** A system shows iff at least one direct child (matching star or passing
- *  planet) is visible. Same "hide parents without matching children" rule. */
 function systemPasses(system: SolarSystemData, f: Filters): boolean {
   if (system.stars.some(s => starMatches(s, f))) return true;
   if (system.planets.some(p => planetPasses(p, f))) return true;
@@ -142,13 +166,19 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
           ]}
           onChange={v => setFilter('satellite', v as SatelliteFilter)}
         />
+        <FilterRow
+          label="Biome"
+          value={filters.biome}
+          options={BIOME_OPTIONS}
+          onChange={v => setFilter('biome', v as BiomeFilter)}
+        />
         <label style={s.lifeRow}>
           <input
             type="checkbox"
             checked={filters.lifeOnly}
             onChange={e => setFilter('lifeOnly', e.target.checked)}
           />
-          <span>Life only</span>
+          <span>Life only (planets &amp; moons)</span>
         </label>
       </div>
 
@@ -303,6 +333,7 @@ function PlanetNode({
             {' '}— {planet.composition.toLowerCase()}
           </span>
           {planet.life && <span style={s.life}> ★life</span>}
+          {planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
           <span style={s.dim}>
             {hasChildren && `, ${satCountLabel}`}
           </span>
@@ -356,6 +387,8 @@ function SatelliteNode({
           <span style={s.dim}>
             {' '}— {satellite.composition.toLowerCase()}, r={satellite.radius.toFixed(2)}
           </span>
+          {satellite.life && <span style={s.life}> ★life</span>}
+          {satellite.biome && <span style={s.biome}> [{satellite.biome}]</span>}
         </button>
       </div>
     </div>
@@ -571,14 +604,6 @@ const s: Record<string, React.CSSProperties> = {
     fontStyle: 'italic',
     fontSize: 11,
   },
-  code: {
-    fontFamily: 'monospace',
-    fontSize: 11,
-    color: '#c8d0ff',
-    background: 'rgba(108,122,184,0.15)',
-    padding: '1px 4px',
-    borderRadius: 3,
-  },
   dim: {
     color: '#a0a8d0',
     fontSize: 11,
@@ -586,6 +611,11 @@ const s: Record<string, React.CSSProperties> = {
   life: {
     color: '#5fa86a',
     fontWeight: 'bold',
+    fontSize: 11,
+  },
+  biome: {
+    color: '#c8a04a',
+    fontStyle: 'italic',
     fontSize: 11,
   },
 };

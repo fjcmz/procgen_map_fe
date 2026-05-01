@@ -1,4 +1,5 @@
 import { IdUtil } from '../history/IdUtil';
+import type { PlanetBiome } from './Planet';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -14,6 +15,8 @@ export class Satellite {
   scientificName: string = '';
   radius: number = 0;
   composition: SatelliteComposition = 'ROCK';
+  life: boolean = false;
+  biome?: PlanetBiome;
   // Transient
   planetId: string = '';
 

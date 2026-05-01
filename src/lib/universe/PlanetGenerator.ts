@@ -1,9 +1,35 @@
 import { Planet } from './Planet';
+import type { PlanetBiome } from './Planet';
 import type { SolarSystem } from './SolarSystem';
 import type { Universe } from './Universe';
 import { satelliteGenerator } from './SatelliteGenerator';
 import { rndSize } from './helpers';
 import { generatePlanetName } from './universeNameGenerator';
+
+/**
+ * Probability that a planet at `orbit` is rocky.
+ * orbit < 10  → 100% rock; orbit > 20 → 100% gas; linear in between.
+ */
+function rockProbability(orbit: number): number {
+  if (orbit <= 10) return 1.0;
+  if (orbit >= 20) return 0.0;
+  return 1 - (orbit - 10) / 10;
+}
+
+/**
+ * Pick a terrain biome subtype for a ROCK planet with life.
+ * default: 40%; each of the other 6 profiles: 10%.
+ */
+function pickBiome(rng: () => number): PlanetBiome {
+  const r = rng();
+  if (r < 0.40) return 'default';
+  if (r < 0.50) return 'desert';
+  if (r < 0.60) return 'ice';
+  if (r < 0.70) return 'forest';
+  if (r < 0.80) return 'swamp';
+  if (r < 0.90) return 'mountains';
+  return 'ocean';
+}
 
 export class PlanetGenerator {
   generate(solarSystem: SolarSystem, rng: () => number, universe: Universe): Planet {
@@ -14,8 +40,12 @@ export class PlanetGenerator {
     const orbitIndex = solarSystem.planets.length;
     planet.orbit =
       (Math.floor(rng() * 20000000) + orbitIndex * 20000000) / 10000000;
-    planet.composition = rng() > 0.5 ? 'GAS' : 'ROCK';
+    // Composition driven by orbit distance: inner planets rock, outer gas.
+    planet.composition = rng() < rockProbability(planet.orbit) ? 'ROCK' : 'GAS';
     planet.life = rng() < 0.1;
+    if (planet.composition === 'ROCK' && planet.life) {
+      planet.biome = pickBiome(rng);
+    }
     solarSystem.planets.push(planet);
     universe.mapPlanets.set(planet.id, planet);
     // Isolated sub-stream — no physics RNG perturbed; primary star's scientific

@@ -6,6 +6,7 @@ import { UniverseEntityPopup } from './UniverseEntityPopup';
 import type {
   UniverseData,
   PlanetData,
+  SatelliteData,
   SolarSystemData,
   UniverseGenerateRequest,
   UniverseWorkerMessage,
@@ -31,6 +32,13 @@ interface UniverseScreenProps {
     system: SolarSystemData,
     universe: UniverseData,
   ) => void;
+  /** Called when the user presses "Generate World" in a satellite popup. */
+  onGenerateWorldFromSatellite?: (
+    satellite: SatelliteData,
+    planet: PlanetData,
+    system: SolarSystemData,
+    universe: UniverseData,
+  ) => void;
 }
 
 /**
@@ -50,6 +58,7 @@ export function UniverseScreen({
   returnTo,
   onReturnToConsumed,
   onGenerateWorldFromPlanet,
+  onGenerateWorldFromSatellite,
 }: UniverseScreenProps) {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numSolarSystems, setNumSolarSystems] = useState(DEFAULT_SOLAR_SYSTEMS);
@@ -138,6 +147,16 @@ export function UniverseScreen({
       onGenerateWorldFromPlanet(planet, system, data);
     },
     [data, onGenerateWorldFromPlanet],
+  );
+
+  const handleGenerateSatelliteWorldFromPopup = useCallback(
+    (satellite: SatelliteData, planet: PlanetData, systemId: string) => {
+      if (!data || !onGenerateWorldFromSatellite) return;
+      const system = data.solarSystems.find(s => s.id === systemId);
+      if (!system) return;
+      onGenerateWorldFromSatellite(satellite, planet, system, data);
+    },
+    [data, onGenerateWorldFromSatellite],
   );
 
   const handleBack = useCallback(() => {
@@ -236,6 +255,9 @@ export function UniverseScreen({
           }
           onGenerateWorld={
             onGenerateWorldFromPlanet ? handleGenerateWorldFromPopup : undefined
+          }
+          onGenerateSatelliteWorld={
+            onGenerateWorldFromSatellite ? handleGenerateSatelliteWorldFromPopup : undefined
           }
         />
       )}
