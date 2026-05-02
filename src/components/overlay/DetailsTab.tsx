@@ -893,6 +893,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           precomputedData={cityMapV2 ?? undefined}
           characters={characters}
           onSelectCharacter={setSelectedCharacter}
+          npcSummary={npcSummary}
         />
       )}
       <CharacterPopup

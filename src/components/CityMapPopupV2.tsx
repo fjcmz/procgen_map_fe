@@ -4,6 +4,7 @@ import type { CityEnvironment, CityMapDataV2, DistrictType, LandmarkKind } from 
 import { generateCityMapV2, renderCityMapV2 } from '../lib/citymap';
 import type { CityCharacter } from '../lib/citychars';
 import { alignmentBadge, raceLabel } from '../lib/citychars';
+import type { NpcClassSummary, NpcPlace } from '../lib/cityNpcs';
 
 interface CityMapPopupV2Props {
   isOpen: boolean;
@@ -29,6 +30,13 @@ interface CityMapPopupV2Props {
    * selection back up.
    */
   onSelectCharacter?: (c: CityCharacter) => void;
+  /**
+   * Bulk NPC-class population keyed by place id (`landmark:<index>` /
+   * `block:<index>`). The DistrictModal looks up the clicked district's
+   * matching entry to render the class+level+count rows alongside the named
+   * characters.
+   */
+  npcSummary?: NpcClassSummary;
 }
 
 const INTERNAL_SIZE = 1000;
@@ -206,7 +214,7 @@ function pointInPolygon(px: number, py: number, verts: [number, number][]): bool
   return inside;
 }
 
-export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed, precomputedData, characters, onSelectCharacter }: CityMapPopupV2Props) {
+export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed, precomputedData, characters, onSelectCharacter, npcSummary }: CityMapPopupV2Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const mapDataRef = useRef<CityMapDataV2 | null>(null);
@@ -977,6 +985,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed, p
           districtKey={selectedDistrict}
           data={mapDataRef.current}
           characters={charactersByDistrict.get(`${selectedDistrict.kind}:${selectedDistrict.index}`) ?? []}
+          npcPlace={npcSummary?.placesById.get(`${selectedDistrict.kind}:${selectedDistrict.index}`)}
           onClose={() => setSelectedDistrict(null)}
           onSelectCharacter={onSelectCharacter}
         />
@@ -998,11 +1007,25 @@ interface DistrictModalProps {
   districtKey: DistrictKey;
   data: CityMapDataV2;
   characters: CityCharacter[];
+  /**
+   * Bulk NPC-class population assigned to this place. Resolved by the parent
+   * via `npcSummary.placesById.get(...)` against the same district key the
+   * `characters` list was filtered by, so the totals always agree.
+   */
+  npcPlace?: NpcPlace;
   onClose: () => void;
   onSelectCharacter?: (c: CityCharacter) => void;
 }
 
-function DistrictModal({ districtKey, data, characters, onClose, onSelectCharacter }: DistrictModalProps) {
+const NPC_CLASS_LABELS: Record<string, string> = {
+  warrior: 'Warrior', expert: 'Expert', adept: 'Adept', aristocrat: 'Aristocrat',
+};
+
+const NPC_CLASS_COLORS: Record<string, string> = {
+  warrior: '#943030', expert: '#5a3a10', adept: '#1f6a55', aristocrat: '#8a6a00',
+};
+
+function DistrictModal({ districtKey, data, characters, npcPlace, onClose, onSelectCharacter }: DistrictModalProps) {
   // ESC-to-close. Keying it on `districtKey` rather than mount lets the user
   // jump from one district to another without remounting and re-binding.
   useEffect(() => {
@@ -1063,43 +1086,65 @@ function DistrictModal({ districtKey, data, characters, onClose, onSelectCharact
           <button style={styles.modalCloseBtn} onClick={onClose} title="Close (Esc)">&times;</button>
         </div>
         <div style={styles.modalBody}>
-          {characters.length === 0 ? (
+          {characters.length === 0 && !npcPlace ? (
             <div style={styles.modalEmpty}>No notable inhabitants.</div>
           ) : (
-            <div style={styles.modalCharList}>
-              {characters.map((c, i) => {
-                const alignColor =
-                  c.alignment.endsWith('_good') ? '#4a7a4a' :
-                  c.alignment.endsWith('_evil') ? '#943030' :
-                  '#5a3a10';
-                const tooltip = `HP ${c.hitPoints} | ${c.deity === 'none' ? 'No deity' : c.deity}`;
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    style={styles.modalCharRow}
-                    onClick={() => {
-                      // Close the district modal first so the parent's
-                      // CharacterPopup opens cleanly on top (no z-index war
-                      // — both share the same modal stacking context).
-                      onClose();
-                      onSelectCharacter?.(c);
-                    }}
-                    disabled={!onSelectCharacter}
-                    title={onSelectCharacter ? `Open ${c.name}'s sheet — ${tooltip}` : tooltip}
-                  >
-                    <span style={styles.modalCharName}>{c.name}</span>
-                    <span style={styles.modalCharMeta}>
-                      L{c.level} {raceLabel(c.race)}{' '}
-                      <span style={{ textTransform: 'capitalize' }}>{c.pcClass}</span>
-                    </span>
-                    <span style={{ ...styles.modalCharAlign, color: alignColor }}>
-                      {alignmentBadge(c.alignment)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              {characters.length > 0 && (
+                <div style={styles.modalCharList}>
+                  {characters.map((c, i) => {
+                    const alignColor =
+                      c.alignment.endsWith('_good') ? '#4a7a4a' :
+                      c.alignment.endsWith('_evil') ? '#943030' :
+                      '#5a3a10';
+                    const tooltip = `HP ${c.hitPoints} | ${c.deity === 'none' ? 'No deity' : c.deity}`;
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        style={styles.modalCharRow}
+                        onClick={() => {
+                          // Close the district modal first so the parent's
+                          // CharacterPopup opens cleanly on top (no z-index war
+                          // — both share the same modal stacking context).
+                          onClose();
+                          onSelectCharacter?.(c);
+                        }}
+                        disabled={!onSelectCharacter}
+                        title={onSelectCharacter ? `Open ${c.name}'s sheet — ${tooltip}` : tooltip}
+                      >
+                        <span style={styles.modalCharName}>{c.name}</span>
+                        <span style={styles.modalCharMeta}>
+                          L{c.level} {raceLabel(c.race)}{' '}
+                          <span style={{ textTransform: 'capitalize' }}>{c.pcClass}</span>
+                        </span>
+                        <span style={{ ...styles.modalCharAlign, color: alignColor }}>
+                          {alignmentBadge(c.alignment)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {npcPlace && (
+                <div style={styles.modalNpcSection}>
+                  <div style={styles.modalNpcHeader}>
+                    NPC Class Characters ({npcPlace.total})
+                  </div>
+                  <div style={styles.modalNpcList}>
+                    {npcPlace.entries.map((entry, i) => (
+                      <div key={i} style={styles.modalNpcRow}>
+                        <span style={{ ...styles.modalNpcClass, color: NPC_CLASS_COLORS[entry.npcClass] }}>
+                          {NPC_CLASS_LABELS[entry.npcClass]}
+                        </span>
+                        <span style={styles.modalNpcLevel}>L{entry.level}</span>
+                        <span style={styles.modalNpcCount}>×{entry.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1563,6 +1608,50 @@ const styles: Record<string, React.CSSProperties> = {
   modalCharAlign: {
     fontSize: 11,
     fontWeight: 700,
+    textAlign: 'right',
+  },
+  modalNpcSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 4,
+    marginTop: 10,
+    paddingTop: 8,
+    borderTop: '1px solid #c8a868',
+  },
+  modalNpcHeader: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#5a3a10',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    paddingLeft: 2,
+  },
+  modalNpcList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  modalNpcRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 0.4fr 0.5fr',
+    gap: 8,
+    padding: '3px 10px',
+    fontSize: 12,
+    color: '#2a1a00',
+    background: '#f4ead0',
+    border: '1px solid #d8c088',
+    borderRadius: 3,
+    alignItems: 'baseline',
+  },
+  modalNpcClass: {
+    fontWeight: 600,
+  },
+  modalNpcLevel: {
+    color: '#5a3a10',
+  },
+  modalNpcCount: {
+    color: '#2a1a00',
+    fontWeight: 600,
     textAlign: 'right',
   },
 };
