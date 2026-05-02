@@ -105,15 +105,17 @@ function SlotRow({ slot, item }: { slot: EquipmentSlot; item: Equipment | undefi
   const summary = item ? equipBonusSummary(item) : '—';
 
   return (
-    <div style={{ ...styles.slotRow, opacity: hasItem ? 1 : 0.45 }}>
-      <span style={styles.slotLabel}>{label}</span>
-      <span style={styles.slotName}>{item ? item.name : '—'}</span>
-      <span style={{
-        ...styles.slotBonus,
-        color: summary === '—' ? '#9a7a50' : '#2a5a2a',
-      }}>
-        {summary}
-      </span>
+    <div style={{ ...styles.slotBlock, opacity: hasItem ? 1 : 0.45 }}>
+      <div style={styles.slotRow}>
+        <span style={styles.slotLabel}>{label}</span>
+        <span style={styles.slotName}>{item ? item.name : '—'}</span>
+        <span style={{ ...styles.slotBonus, color: summary === '—' ? '#9a7a50' : '#2a5a2a' }}>
+          {summary}
+        </span>
+      </div>
+      {item?.description && (
+        <div style={styles.slotDesc}>{item.description}</div>
+      )}
     </div>
   );
 }
@@ -269,6 +271,11 @@ const styles: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
     gap: 1,
   },
+  slotBlock: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+  },
   slotRow: {
     display: 'grid',
     gridTemplateColumns: '72px 1fr auto',
@@ -276,6 +283,14 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: 'baseline',
     padding: '2px 0',
     fontSize: 11,
+  },
+  slotDesc: {
+    paddingLeft: 78,
+    fontSize: 9,
+    color: '#7a5a30',
+    fontStyle: 'italic',
+    lineHeight: 1.4,
+    paddingBottom: 2,
   },
   slotLabel: {
     color: '#7a5a30',
