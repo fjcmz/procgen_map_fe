@@ -5,6 +5,8 @@ import type {
   PlanetData,
   SatelliteData,
 } from './types';
+import type { PlanetSubtype, PlanetBiome } from './Planet';
+import type { SatelliteSubtype } from './Satellite';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -253,15 +255,195 @@ function starFill(s: StarData): { inner: string; outer: string; core: string } {
   return { inner: `rgba(${r},${g},${b},0.95)`, outer: `rgba(${r},${g},${b},0)`, core };
 }
 
-function planetFill(p: PlanetData): string {
-  if (p.life) return '#5fa86a';
-  return p.composition === 'GAS' ? '#c89a64' : '#9a7a5a';
+// ── Composition-driven palettes (planets / satellites) ───────────────────
+//
+// Each palette carries:
+//   base    — disk midtone (also the legacy single-color fallback for tiny disks)
+//   accent  — highlight color (lit hemisphere of the radial gradient, or band
+//             accents for gas giants)
+//   shadow  — limb shadow (lower-right of the radial gradient)
+//   bands?  — extra color stops for banded gas giants (3+ values, including base)
+//   hot?    — molten / volcanic spot color drawn over the disk for lava /
+//             volcanic subtypes
+//
+// Colors were tuned by eye to read distinctly at the system view's tiny
+// pixel sizes (1–6 px planet disks) AND look good blown up in the planet
+// scene's 6%-of-min-side hero disk.
+
+interface BodyPalette {
+  base: string;
+  accent: string;
+  shadow: string;
+  bands?: string[];
+  hot?: string;
 }
 
-function satelliteFill(s: SatelliteData): string {
-  if (s.life) return '#5fa86a';
-  return s.composition === 'ICE' ? '#dde8f0' : '#9a8e80';
+const PLANET_PALETTES: Record<PlanetSubtype, BodyPalette> = {
+  // ROCK
+  terrestrial: { base: '#4a8ab8', accent: '#9ad0c8', shadow: '#1f3850' },
+  desert:      { base: '#d4a06a', accent: '#f0c890', shadow: '#5a3818' },
+  volcanic:    { base: '#3a2418', accent: '#7a4830', shadow: '#100804', hot: '#e84818' },
+  lava:        { base: '#c83a18', accent: '#ffb040', shadow: '#400808', hot: '#ffd060' },
+  iron:        { base: '#a05538', accent: '#d08868', shadow: '#3a1808' },
+  carbon:      { base: '#2c2a2a', accent: '#5a5858', shadow: '#0c0c0c' },
+  ocean:       { base: '#2a6aa8', accent: '#6ac0e8', shadow: '#0a2848' },
+  ice_rock:    { base: '#a8c0d0', accent: '#e8f4fc', shadow: '#506878' },
+  // GAS — bands ordered from north pole to south, listed lighter→darker→light
+  jovian:        { base: '#c89a64', accent: '#f0d4a0', shadow: '#583820',
+                   bands: ['#e8c898', '#a87848', '#d4a878', '#8a5828', '#e0bc88'] },
+  hot_jupiter:   { base: '#b8401c', accent: '#ffa050', shadow: '#380808',
+                   bands: ['#e88840', '#982818', '#d8602c', '#601808', '#f09858'] },
+  ice_giant:     { base: '#7ab8d0', accent: '#ccecf8', shadow: '#1a4858',
+                   bands: ['#bce0ec', '#5a98b8', '#9acce0', '#3878a0', '#a8d8e8'] },
+  methane_giant: { base: '#3868b8', accent: '#90b8e8', shadow: '#08183f',
+                   bands: ['#7aa8e0', '#1848a0', '#5888d0', '#0a2870', '#88b0e0'] },
+  ammonia_giant: { base: '#e8d8a0', accent: '#fff4c8', shadow: '#604818',
+                   bands: ['#fff0c0', '#c8b878', '#f0e0a8', '#a89848', '#fff8d0'] },
+};
+
+const SATELLITE_PALETTES: Record<SatelliteSubtype, BodyPalette> = {
+  // ICE
+  water_ice:    { base: '#dde8f0', accent: '#fafdff', shadow: '#90a0b0' },
+  methane_ice:  { base: '#e8c0c0', accent: '#fadcdc', shadow: '#806060' },
+  sulfur_ice:   { base: '#f0e088', accent: '#fff8c0', shadow: '#807038' },
+  nitrogen_ice: { base: '#c0d0d8', accent: '#e8f0f4', shadow: '#607080' },
+  dirty_ice:    { base: '#b8b0a0', accent: '#d8d0c0', shadow: '#605850' },
+  // ROCK
+  terrestrial:  { base: '#9a8e80', accent: '#c8bcaa', shadow: '#403828' },
+  cratered:     { base: '#7a7470', accent: '#a8a098', shadow: '#302820' },
+  volcanic:     { base: '#3c2c20', accent: '#785838', shadow: '#100804', hot: '#d04018' },
+  iron_rich:    { base: '#a06848', accent: '#c89070', shadow: '#402010' },
+  desert_moon:  { base: '#c89868', accent: '#e8bc88', shadow: '#604018' },
+};
+
+/**
+ * Life-bearing rock planets/satellites get a biome-tinted palette so an
+ * "ocean" world reads as deep blue instead of inheriting whatever rock
+ * subtype was rolled underneath. Mirrors the existing biome → terrain
+ * profile mapping so the universe disk previews the world the user would
+ * generate inside.
+ */
+const BIOME_PALETTES: Record<PlanetBiome, BodyPalette> = {
+  default:   { base: '#5fa86a', accent: '#a0e0a8', shadow: '#1a3820' },
+  forest:    { base: '#3a7a3c', accent: '#7ac870', shadow: '#0a2810' },
+  ocean:     { base: '#2a6aa8', accent: '#6ac0e8', shadow: '#0a2848' },
+  desert:    { base: '#d4a06a', accent: '#f0c890', shadow: '#5a3818' },
+  swamp:     { base: '#5a6a3a', accent: '#90a868', shadow: '#1a2010' },
+  ice:       { base: '#a8c0d0', accent: '#e8f4fc', shadow: '#506878' },
+  mountains: { base: '#8a8478', accent: '#c0baa8', shadow: '#403830' },
+};
+
+function planetPalette(p: PlanetData): BodyPalette {
+  if (p.life && p.biome && p.composition === 'ROCK') return BIOME_PALETTES[p.biome];
+  return PLANET_PALETTES[p.subtype] ?? PLANET_PALETTES.terrestrial;
 }
+
+function satellitePalette(s: SatelliteData): BodyPalette {
+  if (s.life && s.biome && s.composition === 'ROCK') return BIOME_PALETTES[s.biome];
+  return SATELLITE_PALETTES[s.subtype] ?? SATELLITE_PALETTES.terrestrial;
+}
+
+// Legacy single-color fallbacks — kept for the hit-test layer / any caller
+// that wants a flat color (currently unused; the new disk drawers handle
+// every render path).
+function planetFill(p: PlanetData): string { return planetPalette(p).base; }
+function satelliteFill(s: SatelliteData): string { return satellitePalette(s).base; }
+
+// ── Body disk drawing ─────────────────────────────────────────────────────
+//
+// drawBodyDisk renders a planet or satellite using a 3-stop radial gradient
+// (lit hemisphere → midtone → limb shadow) so any disk ≥ ~3 px reads as a
+// 3D sphere rather than a flat dot. For gas giants (palette.bands) we
+// additionally clip to the disk and stroke horizontal bands across it. For
+// volcanic/lava palettes (palette.hot) we add a small offset hot spot.
+//
+// Tiny disks (r < 1.6 px) skip the gradient and bands entirely — the cost
+// of createRadialGradient is wasted on a sub-pixel splat — and just paint
+// the base color. This keeps the galaxy-spread system view fast even with
+// hundreds of bodies.
+
+const TINY_DISK_PX = 1.6;
+
+function drawBodyDisk(
+  ctx: CanvasRenderingContext2D,
+  x: number, y: number, r: number,
+  palette: BodyPalette,
+): void {
+  if (r < TINY_DISK_PX) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fillStyle = palette.base;
+    ctx.fill();
+    return;
+  }
+
+  // Clip to the disk so band strokes / hot spots stay inside the sphere.
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.clip();
+
+  // 3-stop radial gradient — light source from upper-left at ~(-0.45 r, -0.45 r).
+  const lightX = x - r * 0.45;
+  const lightY = y - r * 0.45;
+  const grd = ctx.createRadialGradient(lightX, lightY, r * 0.05, x, y, r * 1.15);
+  grd.addColorStop(0, palette.accent);
+  grd.addColorStop(0.55, palette.base);
+  grd.addColorStop(1, palette.shadow);
+  ctx.fillStyle = grd;
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+
+  // Gas-giant horizontal bands — only at meaningful disk size (≥ 4 px) so
+  // tiny disks don't get muddied by sub-pixel band strokes.
+  if (palette.bands && r >= 4) {
+    const n = palette.bands.length;
+    const bandH = (r * 2) / n;
+    for (let i = 0; i < n; i++) {
+      const top = y - r + i * bandH;
+      ctx.fillStyle = palette.bands[i];
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(x - r, top, r * 2, bandH);
+    }
+    ctx.globalAlpha = 1;
+    // Re-apply the limb shadow on top of bands so the sphere illusion holds.
+    const shadowGrd = ctx.createRadialGradient(lightX, lightY, r * 0.4, x, y, r * 1.15);
+    shadowGrd.addColorStop(0, 'rgba(255,255,255,0)');
+    shadowGrd.addColorStop(0.7, 'rgba(0,0,0,0)');
+    shadowGrd.addColorStop(1, palette.shadow);
+    ctx.fillStyle = shadowGrd;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+
+  // Hot spot (volcanic / lava) — small offset glow, only for disks large
+  // enough to read it.
+  if (palette.hot && r >= 3) {
+    const hotR = Math.max(1.2, r * 0.35);
+    const hotX = x + r * 0.18;
+    const hotY = y + r * 0.22;
+    const hotGrd = ctx.createRadialGradient(hotX, hotY, 0, hotX, hotY, hotR);
+    hotGrd.addColorStop(0, palette.hot);
+    hotGrd.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hotGrd;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+
+  ctx.restore();
+}
+
+function drawPlanetBody(
+  ctx: CanvasRenderingContext2D, x: number, y: number, r: number, p: PlanetData,
+): void {
+  drawBodyDisk(ctx, x, y, r, planetPalette(p));
+}
+
+function drawSatelliteBody(
+  ctx: CanvasRenderingContext2D, x: number, y: number, r: number, s: SatelliteData,
+): void {
+  drawBodyDisk(ctx, x, y, r, satellitePalette(s));
+}
+
+// Re-export legacy fills so any external module pulling them keeps compiling.
+export { planetFill, satelliteFill };
 
 // ── Galaxy scene ──────────────────────────────────────────────────────────
 export interface GalaxyDrawResult {
@@ -413,7 +595,7 @@ export function drawSystemScene(
     // Divide by viewScale so the disk stays at a constant screen-pixel size
     // regardless of zoom level (orbit radii still scale, only the body shrinks).
     const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
-    drawCircle(ctx, px, py, sizePx, planetFill(planet));
+    drawPlanetBody(ctx, px, py, sizePx, planet);
     if (planet.life) {
       ctx.beginPath();
       ctx.arc(px, py, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
@@ -453,8 +635,8 @@ export function drawPlanetScene(
   // planetPx is the visual disk radius, kept constant in screen pixels.
   const planetPx = minSide * 0.06 / viewScale;
 
-  // Hero planet — constant-size disk, constant-gap life ring
-  drawCircle(ctx, cx, cy, planetPx, planetFill(planet));
+  // Hero planet — constant-size disk with composition-driven texture
+  drawPlanetBody(ctx, cx, cy, planetPx, planet);
   if (planet.life) {
     ctx.beginPath();
     ctx.arc(cx, cy, planetPx + 6 / viewScale, 0, Math.PI * 2);
@@ -491,7 +673,7 @@ export function drawPlanetScene(
     const sx = cx + Math.cos(angle) * ringR;
     const sy = cy + Math.sin(angle) * ringR;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
-    drawCircle(ctx, sx, sy, sizePx, satelliteFill(sat));
+    drawSatelliteBody(ctx, sx, sy, sizePx, sat);
     if (sat.life) {
       ctx.beginPath();
       ctx.arc(sx, sy, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
