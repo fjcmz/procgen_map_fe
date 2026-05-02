@@ -151,11 +151,29 @@ This is the only piece of glue between the universe pipeline and the world-map p
 
 **Galaxy scene — `drawGalaxySpiral`**
 
-Systems are placed on a 2-arm logarithmic spiral by `galaxySpiralPositions` (adaptive tightness `b = min(0.18, 2.42 / (maxK × angleStep))` so outer arms stay within ~45 % of `spread` for large counts). A full-galaxy rigid-body rotation is applied each frame at `GALAXY_SPIN_SPEED = 0.018 rad/s` (≈ 5.8 min per revolution). Each system renders as a single solid `drawCircle` call sized by `scaleMap` on the dominant star's radius. **There is no glow** — `drawGlow` (`ctx.createRadialGradient` per system) was removed; `starFill` returns a plain color string.
+Systems are placed on a 2-arm logarithmic spiral by `galaxySpiralPositions` (adaptive tightness `b = min(0.18, 2.42 / (maxK × angleStep))` so outer arms stay within ~45 % of `spread` for large counts). A full-galaxy rigid-body rotation is applied each frame at `GALAXY_SPIN_SPEED = 0.018 rad/s` (≈ 5.8 min per revolution). Each in-view system renders as a cached glow stamp (`ctx.drawImage`) + a solid core circle (`drawCircle`). `starFill` returns `{ core, glowInner, glowOuter }`.
+
+**Star glow cache — `getOrBuildGlowCanvas`**
+
+Each unique star color gets a 64×64 `HTMLCanvasElement` with the radial gradient pre-rendered once (`createRadialGradient` called once per color, not per frame). Subsequent frames stamp it via `ctx.drawImage` — a cheap GPU blit. The cache is a module-level `Map<string, HTMLCanvasElement>` keyed by `glowInner` color. Outer glow radius = `sizePx * GLOW_OUTER_MULT` (`1.1` — half the original `2.2`).
 
 **Spiral layout cache — `getOrBuildLayout`**
 
-`rawPositions` (computed by `galaxySpiralPositions`, which calls `Math.exp` per system) and `maxStarRadii / minR / maxR` are expensive to recompute every animation frame but never change for a fixed galaxy. They are cached in a module-level `Map<string, SpiralLayout>` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction) keyed by `"${count}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id}"`. The rotation is inlined per-iteration in the draw loop rather than `.map()`-ing an intermediate `positions[]` array.
+`rawPositions` (from `galaxySpiralPositions`, which calls `Math.exp` per system) and `maxStarRadii / minR / maxR` are cached in a module-level `Map<string, SpiralLayout>` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction) keyed by `"${count}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id}"`. The rotation is inlined per-iteration in the draw loop rather than `.map()`-ing an intermediate `positions[]` array.
+
+**O(1) system lookup — `systemById`**
+
+Focus mode and multi-galaxy mode previously rebuilt the per-galaxy `systems` array each frame using `data.solarSystems.find(s => s.id === id)` — O(N) per lookup, O(N²) overall at large counts. `drawGalaxyScene` now builds `Map<string, SolarSystemData>` once per call from `data.solarSystems` and uses `systemById.get(id)` (O(1)) for all galaxy system lookups.
+
+**Per-system cull pipeline in `drawGalaxySpiral`**
+
+For each system, work is gated behind three checks in cheapest-first order:
+
+1. **Distance pre-cull** (no trig): `dx² + dy²` of the raw (pre-rotation) position vs `maxViewDistSq`. Rotation is a rigid-body transform so distance from centre is invariant — systems too far away are skipped before any trig runs.
+2. **Inline rotation**: `px = cx + dx*cosG - dy*sinG` — only computed for systems that pass step 1.
+3. **Viewport bounds check**: `circleIntersectsViewBounds(px, py, cullMargin, viewBounds)` using a conservative `maxSizePx = 14 * cameraScale / viewScale` margin (upper bound of `scaleMap`'s output range).
+
+`scaleMap` (which calls `Math.sqrt`) and all draw calls are deferred until after step 3. Hit circles are only pushed for systems that pass all three checks.
 
 **Frustum culling — `ViewBounds`**
 
@@ -166,7 +184,7 @@ x0 = -tx / scale,  x1 = (vw - tx) / scale
 y0 = -ty / scale,  y1 = (vh - ty) / scale
 ```
 
-This is passed through `drawGalaxyScene` → `drawGalaxySpiral`. Each system is tested with `circleIntersectsViewBounds` before any work is done — systems outside the viewport are skipped entirely (no draw call, no hit circle push). Galaxy glyphs in the multi-galaxy view are also culled when their bounding circle falls outside `ViewBounds`. At the identity transform `{scale:1, tx:0, ty:0}` bounds equal the canvas dimensions and nothing is culled.
+This is passed through `drawGalaxyScene` → `drawGalaxySpiral`. Galaxy glyphs in the multi-galaxy view are also culled when their bounding circle falls outside `ViewBounds`. At the identity transform `{scale:1, tx:0, ty:0}` bounds equal the canvas dimensions and nothing is culled.
 
 **Multi-galaxy LOD**
 
@@ -191,7 +209,8 @@ Single star: solid circle at canvas center. Multi-star binary: stars orbit a tig
 - **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.
 - **Do NOT call `galaxySpiralPositions` outside `getOrBuildLayout`.** The function calls `Math.exp` per system — at 10 000 systems this is significant. `getOrBuildLayout` caches the result; bypassing it reintroduces an O(N) cost every animation frame.
 - **Do NOT allocate a `positions[]` array per frame.** The rotation is intentionally inlined in the draw loop (`px = cx + dx*cosG - dy*sinG`) to avoid a 10 000-object allocation + GC hit every tick. Keep it that way.
-- **Do NOT push hit circles before the cull check.** Offscreen systems cannot be clicked; accumulating hit circles for them wastes memory and GC budget at large system counts. The hit push must stay after `circleIntersectsViewBounds`.
-- **Do NOT reintroduce `ctx.createRadialGradient` per visible system.** At high system counts this dominates per-frame GPU state cost. If a glow effect is ever needed again, gate it on a zoom-level threshold and batch it.
+- **Do NOT push hit circles before the cull check.** Offscreen systems cannot be clicked; accumulating hit circles for them wastes memory and GC budget at large system counts. The hit push must stay after the viewport bounds check (step 3 of the cull pipeline).
+- **Do NOT call `ctx.createRadialGradient` per visible system per frame.** The glow is rendered via `ctx.drawImage` from a pre-built offscreen canvas cached in `glowCanvasCache`. Adding a new per-frame `createRadialGradient` call would reintroduce the GPU state cost that made large universes slow. New glow variants must go through `getOrBuildGlowCanvas`.
+- **Do NOT use `data.solarSystems.find()` inside the per-galaxy or per-frame draw loop.** That is O(N) per lookup; at 10k systems it becomes O(N²) per frame. Use the `systemById` Map built once per `drawGalaxyScene` call.
 - **`npm run sweep` does NOT run the universe pipeline.** The sweep harness (`scripts/sweep-history.ts`) is purely world-map / world-history. Universe-package changes can never produce a non-zero sweep diff. Conversely, a universe-package change that accidentally touches `src/lib/terrain/` or `src/lib/history/` WILL show up in the sweep — treat any non-zero diff after a universe-only change as evidence of an unintended cross-layer edit.
 - **Universe package has no test suite of its own.** Verify changes by `npm run build` (catches type errors, including the `PLANET_SUBTYPE_COMPOSITION` / `SATELLITE_SUBTYPE_COMPOSITION` exhaustiveness checks that fire when a subtype is added to one table but not the other) and visual inspection in `npm run dev` → "Universe generation" on the landing screen.

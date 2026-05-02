@@ -42,7 +42,7 @@ The simulation is split into five layers, each documented in its own `claude_spe
 
 | Spec | Scope |
 |------|-------|
-| **[`claude_specs/universe_map.md`](claude_specs/universe_map.md)** | `src/lib/universe/` — Universe → Galaxy → SolarSystem → Star/Planet → Satellite. Generators, naming, galaxy layout, subtype tables, drill-down renderer (frustum culling, spiral layout cache, no-glow invariants, zoom 0.15–2000×), hand-off to the world-map flow |
+| **[`claude_specs/universe_map.md`](claude_specs/universe_map.md)** | `src/lib/universe/` — Universe → Galaxy → SolarSystem → Star/Planet → Satellite. Generators, naming, galaxy layout, subtype tables, drill-down renderer (frustum culling, distance pre-cull, spiral layout cache, per-color offscreen glow canvas cache, zoom 0.15–2000×), hand-off to the world-map flow |
 | **[`claude_specs/world_map.md`](claude_specs/world_map.md)** | Physical terrain pipeline (Voronoi → biomes → rivers → erosion), terrain profiles (7 biome presets) + landmass shapes (4 partial overlays), canvas renderer, world-map UI panels (MapCanvas, Minimap, Legend, Generation tab) |
 | **[`claude_specs/world_history.md`](claude_specs/world_history.md)** | Phase 6 HistoryGenerator orchestration, `buildPhysicalWorld`, Timeline + 12 Phase 5 generators, tech / religion / cataclysm / war / conquer / empire mechanics, HistoryStats + sweep harness, render-time concerns (overlay tabs, Timeline panel, ownership reconstruction) |
 | **[`claude_specs/city_map.md`](claude_specs/city_map.md)** | City-map popups: V1 (tile, frozen) + V2 (Voronoi-polygon, in-progress through PR 5). Polygon graph, walls, river, roads, streets, bridges, open spaces, blocks, landmarks, buildings, sprawl |
