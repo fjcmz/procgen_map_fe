@@ -27,7 +27,7 @@ import { computeLayoutExtent } from './galaxyLayout';
  */
 
 // ── Background star field constants ───────────────────────────────────────
-const STAR_FIELD_COUNT = 200;
+const STAR_FIELD_COUNT = 500;
 const STAR_FIELD_SEED = 42;
 
 // ── Orbital animation speeds ───────────────────────────────────────────────
@@ -184,7 +184,7 @@ export function createStarField(viewportW: number, viewportH: number): Backgroun
       x: rng() * viewportW,
       y: rng() * viewportH,
       r: rng() * 0.8 + 0.15,
-      alpha: rng() * 0.15 + 0.03,
+      alpha: rng() * 0.5 + 0.1,
     });
   }
   return stars;
