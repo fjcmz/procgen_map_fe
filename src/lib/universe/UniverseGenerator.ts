@@ -4,6 +4,7 @@ import { solarSystemGenerator } from './SolarSystemGenerator';
 import { rndSize } from './helpers';
 import { generateGalaxyName, generateUniverseName } from './universeNameGenerator';
 import { layoutGalaxies } from './galaxyLayout';
+import { seededPRNG } from '../terrain/noise';
 
 export interface UniverseGenerateOptions {
   /**
@@ -54,6 +55,7 @@ export class UniverseGenerator {
       const name = generateGalaxyName(`${seed}_galaxy_${i}`);
       galaxy.humanName = name.human;
       galaxy.scientificName = name.scientific;
+      galaxy.shape = seededPRNG(`${seed}_galaxy_shape_${i}`)() < 0.5 ? 'spiral' : 'oval';
       universe.galaxies.push(galaxy);
       universe.mapGalaxies.set(galaxy.id, galaxy);
     }

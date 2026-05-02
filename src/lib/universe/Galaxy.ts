@@ -20,6 +20,7 @@ export class Galaxy {
   cy: number = 0;
   radius: number = 0;
   spread: number = 0;
+  shape: 'spiral' | 'oval' = 'spiral';
 
   constructor(index: number) {
     this.id = IdUtil.id('gal', index) ?? `gal_${index}`;

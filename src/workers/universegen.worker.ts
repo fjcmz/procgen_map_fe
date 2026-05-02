@@ -64,6 +64,7 @@ function serializeUniverse(universe: Universe): UniverseData {
     cy: g.cy,
     radius: g.radius,
     spread: g.spread,
+    shape: g.shape,
   }));
   return {
     id: universe.id,
