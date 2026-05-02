@@ -24,7 +24,6 @@ import type { Galaxy } from './Galaxy';
 const SPREAD_AT_FULL_GALAXY = 1.0;
 const RADIUS_FACTOR = 0.45;
 const MIN_CENTER_DIST = 10;
-const MAX_CENTER_DIST = 50;
 const PLACEMENT_ATTEMPTS = 800;
 
 export function layoutGalaxies(galaxies: Galaxy[], universeSeed: string): void {
