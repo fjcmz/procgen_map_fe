@@ -182,6 +182,16 @@ const SIZE_PROFILES: Record<City['size'], SizeProfile> = {
   megalopolis: { count: 48, minLevel: 1, maxLevel: 15, dominantBias: 0.15 },
 };
 
+/**
+ * Read the year-aware roster size + max level for a given city tier. Exposed
+ * so adjacent generators (currently `cityNpcs.ts`) stay in lockstep with the
+ * PC table without duplicating the constants.
+ */
+export function resolveCityRosterMax(size: City['size']): { count: number; maxLevel: number } {
+  const p = SIZE_PROFILES[size];
+  return { count: p.count, maxLevel: p.maxLevel };
+}
+
 /** How heavily to weight the "dominant" race / deity above their base prob. */
 const DOMINANT_RACE_MULT = 12;
 const SECONDARY_RACE_MULT = 4;

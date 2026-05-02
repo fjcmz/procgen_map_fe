@@ -13,6 +13,8 @@ import { CityMapPopupV2 } from '../CityMapPopupV2';
 import { deriveCityEnvironment, generateCityMapV2 } from '../../lib/citymap/cityMapGeneratorV2';
 import { generateCityCharacters, alignmentBadge, raceLabel, deriveCityAlignment } from '../../lib/citychars';
 import type { CityCharacter } from '../../lib/citychars';
+import { generateCityNpcs } from '../../lib/cityNpcs';
+import type { NpcClassSummary, NpcPlace } from '../../lib/cityNpcs';
 import { CharacterPopup } from '../CharacterPopup';
 
 interface DetailsTabProps {
@@ -497,6 +499,8 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const cityAlignment = useMemo(() => deriveCityAlignment(cityReligionDetails), [cityReligionDetails]);
 
   const [charactersOpen, setCharactersOpen] = useState(false);
+  const [npcClassesOpen, setNpcClassesOpen] = useState(false);
+  const [npcPlacesOpen, setNpcPlacesOpen] = useState(false);
   const [religionsOpen, setReligionsOpen] = useState(false);
   const [selectedCharacter, setSelectedCharacter] = useState<CityCharacter | null>(null);
 
@@ -565,7 +569,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   // every section sequentially. Keyed on env fields that affect block
   // layout (size, coastal, mountains) rather than year-varying wonder /
   // religion counts which only affect landmarks.
-  const needsCityMapV2 = quartersOpen || charactersOpen || showCityMapV2;
+  const needsCityMapV2 = quartersOpen || charactersOpen || npcClassesOpen || npcPlacesOpen || showCityMapV2;
   const cityMapV2 = useMemo(() => {
     if (!needsCityMapV2 || !city || !cityEnvironment) return null;
     return generateCityMapV2(seed, city.name, cityEnvironment);
@@ -610,6 +614,31 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
       history.illustrateDetails,
     );
   }, [charactersNeeded, city, country, cityReligionDetails, history.worldSeed, history.illustrateDetails, cityMapV2, selectedYear, mapData, citySizesAtYear]);
+
+  // Bulk NPC-class population layer — ~10× the PC roster, drawn from
+  // warrior/expert/aristocrat/adept and capped at half the PC max level.
+  // Stored as (class, level, place) → count aggregates with no individual
+  // entities, names, or popups. Rolled lazily once any of the three
+  // consumers (Characters expand, NPC expand, V2 popup) opens, since the
+  // place pool depends on `cityMapV2`.
+  const npcSummary: NpcClassSummary = useMemo(() => {
+    if (!charactersNeeded && !npcClassesOpen && !npcPlacesOpen) {
+      return { total: 0, byClassLevel: [], places: [], placesById: new Map() };
+    }
+    if (!city || city.foundedYear > selectedYear) {
+      return { total: 0, byClassLevel: [], places: [], placesById: new Map() };
+    }
+    const worldSeed = history.worldSeed ?? '';
+    const sizeAtYear = resolveCitySize(city, mapData, citySizesAtYear);
+    const cityForRoll = sizeAtYear === city.size ? city : { ...city, size: sizeAtYear };
+    return generateCityNpcs(
+      worldSeed,
+      cityForRoll,
+      characters.length,
+      selectedYear,
+      cityMapV2 ?? undefined,
+    );
+  }, [charactersNeeded, npcClassesOpen, npcPlacesOpen, city, characters.length, history.worldSeed, cityMapV2, selectedYear, mapData, citySizesAtYear]);
 
   return (
     <div style={styles.root}>
@@ -781,7 +810,10 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           </>
         )}
 
-        {/* Characters \u2014 procedurally generated D&D 3.5e roster, year-aware. */}
+        {/* Characters \u2014 procedurally generated D&D 3.5e roster, year-aware.
+            Toggle text carries the combined PC + NPC count so a single line
+            summarises the city's full population layer; the NPC drill-down
+            lives in the sibling expand directly below. */}
         {city && !city.isRuin && history.worldSeed && city.foundedYear <= selectedYear && (
           <>
             <button
@@ -791,7 +823,11 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
               aria-expanded={charactersOpen}
             >
               {charactersOpen ? '\u25be' : '\u25b8'} Characters
-              {charactersOpen && characters.length > 0 ? ` (${characters.length})` : ''}
+              {charactersOpen
+                ? ` (${characters.length})`
+                : (characters.length > 0 || npcSummary.total > 0
+                    ? ` (${characters.length} PC, ${npcSummary.total} NPC)`
+                    : '')}
             </button>
             {charactersOpen && characters.length === 0 && (
               <div style={styles.loadingNote}>No roster.</div>
@@ -799,6 +835,39 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
             {charactersOpen && characters.length > 0 && (
               <CharacterList characters={characters} onSelect={setSelectedCharacter} />
             )}
+          </>
+        )}
+
+        {/* NPC Class Characters \u2014 bulk population (warrior/expert/aristocrat/adept),
+            grouped class+level+count. No individual entities or popups. */}
+        {city && !city.isRuin && history.worldSeed && city.foundedYear <= selectedYear && npcSummary.total > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setNpcClassesOpen(v => !v)}
+              aria-expanded={npcClassesOpen}
+            >
+              {npcClassesOpen ? '\u25be' : '\u25b8'} NPC Class Characters ({npcSummary.total})
+            </button>
+            {npcClassesOpen && <NpcClassList summary={npcSummary} />}
+          </>
+        )}
+
+        {/* Landmarks & Quarters \u2014 the place-side surface for NPC class
+            assignments. Each entry is a V2 landmark or non-residential block
+            with the NPC class+level+count rows attached at the place level. */}
+        {city && !city.isRuin && history.worldSeed && city.foundedYear <= selectedYear && npcSummary.places.length > 0 && (
+          <>
+            <button
+              type="button"
+              style={styles.sectionToggle}
+              onClick={() => setNpcPlacesOpen(v => !v)}
+              aria-expanded={npcPlacesOpen}
+            >
+              {npcPlacesOpen ? '\u25be' : '\u25b8'} Landmarks & Quarters ({npcSummary.places.length})
+            </button>
+            {npcPlacesOpen && <NpcPlacesList places={npcSummary.places} />}
           </>
         )}
 
@@ -1563,6 +1632,80 @@ function CharacterList({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// ── NPC Class Characters (bulk population layer) ──
+
+const NPC_CLASS_LABELS: Record<string, string> = {
+  warrior: 'Warrior', expert: 'Expert', adept: 'Adept', aristocrat: 'Aristocrat',
+};
+
+const NPC_CLASS_COLORS: Record<string, string> = {
+  warrior: '#c47878', expert: '#cbb89a', adept: '#7ab8a3', aristocrat: '#d4a800',
+};
+
+function NpcClassList({ summary }: { summary: NpcClassSummary }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '2px 0', fontSize: 11 }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 0.4fr 0.5fr',
+        gap: 4,
+        color: '#9b8a6e',
+        fontWeight: 600,
+        paddingLeft: 8,
+        paddingBottom: 2,
+        borderBottom: '1px solid rgba(155,138,110,0.3)',
+      }}>
+        <span>Class</span>
+        <span>Lv</span>
+        <span style={{ textAlign: 'right', paddingRight: 8 }}>Count</span>
+      </div>
+      {summary.byClassLevel.map((entry, i) => (
+        <div key={i} style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 0.4fr 0.5fr',
+          gap: 4,
+          paddingLeft: 8,
+          lineHeight: '16px',
+          alignItems: 'center',
+        }}>
+          <span style={{ color: NPC_CLASS_COLORS[entry.npcClass], fontWeight: 500 }}>
+            {NPC_CLASS_LABELS[entry.npcClass]}
+          </span>
+          <span style={{ color: '#9b8a6e' }}>{entry.level}</span>
+          <span style={{ color: '#cbb89a', textAlign: 'right', paddingRight: 8 }}>{entry.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NpcPlacesList({ places }: { places: NpcPlace[] }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '4px 0 2px' }}>
+      {places.map(place => (
+        <div key={place.id} style={{ paddingLeft: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#cbb89a', lineHeight: '16px' }}>
+            {place.name}
+            <span style={{ color: '#9b8a6e', fontWeight: 400, marginLeft: 6 }}>
+              {place.kind.replace(/_/g, ' ')} · {place.total}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingLeft: 12 }}>
+            {place.entries.map((entry, i) => (
+              <div key={i} style={{ fontSize: 11, color: '#9b8a6e', lineHeight: '15px' }}>
+                <span style={{ color: NPC_CLASS_COLORS[entry.npcClass] }}>
+                  {NPC_CLASS_LABELS[entry.npcClass]}
+                </span>
+                {' '}L{entry.level} <span style={{ color: '#cbb89a' }}>×{entry.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
