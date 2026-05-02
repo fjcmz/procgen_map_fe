@@ -57,11 +57,7 @@ interface UniverseCanvasProps {
 interface ViewTransform { scale: number; tx: number; ty: number }
 
 const MIN_SCALE = 0.15;
-// Generous max zoom so users can dive into a single galaxy in the multi-
-// galaxy view without forcing them through focus mode. At MAX_SCALE the
-// embedded spiral of a single 100-system galaxy comfortably overruns the
-// viewport, exposing individual stars at near-system-scene scale.
-const MAX_SCALE = 40;
+const MAX_SCALE = 2000;
 
 function clampScale(s: number): number {
   return Math.max(MIN_SCALE, Math.min(MAX_SCALE, s));
