@@ -750,7 +750,11 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities);
+    // Equipment uses an isolated PRNG sub-stream so adding new gear / scoring
+    // weights never shifts the main character roll. Same `(worldSeed,
+    // cellIndex, ordinal)` pair always produces the same loadout.
+    const eqRng = seededPRNG(`${worldSeed}_chareq_${city.cellIndex}_${out.length}${yearKey}`);
+    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities, eqRng);
     const char: CityCharacter = {
       name: il.name,
       race: pc.race,
@@ -803,7 +807,8 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities);
+    const eqRng = seededPRNG(`${worldSeed}_chareq_${city.cellIndex}_${out.length}${yearKey}`);
+    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities, eqRng);
     const char: CityCharacter = {
       name: generateIllustrateName(rng, usedNames),
       race: pc.race,
