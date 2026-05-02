@@ -207,8 +207,8 @@ export interface HitCircle {
 // the glyph is at all visible, and the per-system hits are pushed after
 // (so direct hits on a star dot win during overlap, while empty galaxy
 // space still opens the galaxy popup).
-const LOD_BLEND_START = 50;
-const LOD_BLEND_END = 110;
+const LOD_BLEND_START = 15;
+const LOD_BLEND_END = 35;
 // Viewport fit factor: leave a 10% margin on each side so the outermost
 // galaxy doesn't kiss the canvas edge.
 const VIEWPORT_FIT_FRACTION = 0.45;
