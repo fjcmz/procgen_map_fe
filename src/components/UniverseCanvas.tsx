@@ -8,6 +8,7 @@ import {
   createStarField,
   type HitCircle,
   type BackgroundStar,
+  type ViewBounds,
 } from '../lib/universe/renderer';
 import { pickHit } from '../lib/universe/hitTest';
 
@@ -245,6 +246,14 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
         const { scale, tx, ty } = transformRef.current;
 
+        // Viewport bounds in canvas content-space, used for frustum culling.
+        const viewBounds: ViewBounds = {
+          x0: -tx / scale,
+          y0: -ty / scale,
+          x1: (vw - tx) / scale,
+          y1: (vh - ty) / scale,
+        };
+
         // 1. Background — always full-viewport, no transform applied.
         drawBackground(ctx, vw, vh, stars);
 
@@ -254,7 +263,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
         let rawHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId).hit;
+          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId, viewBounds).hit;
         } else if (state.scene === 'system' && system) {
           rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
         } else if (state.scene === 'planet' && planet) {

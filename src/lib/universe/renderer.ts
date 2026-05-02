@@ -486,6 +486,13 @@ export interface GalaxyDrawResult {
   hit: HitCircle[];
 }
 
+/** Viewport bounds in canvas content-space (pre-transform coordinates). */
+export interface ViewBounds { x0: number; y0: number; x1: number; y1: number }
+
+function circleIntersectsViewBounds(cx: number, cy: number, r: number, b: ViewBounds): boolean {
+  return cx + r >= b.x0 && cx - r <= b.x1 && cy + r >= b.y0 && cy - r <= b.y1;
+}
+
 /**
  * Top-level scene dispatcher.
  *
@@ -509,6 +516,7 @@ export function drawGalaxyScene(
   viewScale: number = 1,
   timeSec: number = 0,
   focusGalaxyId: string | null = null,
+  viewBounds?: ViewBounds,
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
 
@@ -522,7 +530,7 @@ export function drawGalaxyScene(
       const cx = vw / 2;
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale) };
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
@@ -532,7 +540,7 @@ export function drawGalaxyScene(
     const cx = vw / 2;
     const cy = vh / 2;
     const spreadPx = Math.min(vw, vh) * 0.7;
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale) };
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -557,10 +565,13 @@ export function drawGalaxyScene(
     const systemsAlpha = blend;
 
     if (glyphAlpha > 0) {
-      ctx.save();
-      ctx.globalAlpha = glyphAlpha;
-      drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale);
-      ctx.restore();
+      // Skip entirely if this galaxy's bounding circle is offscreen.
+      if (!viewBounds || circleIntersectsViewBounds(gcx, gcy, gRadiusCanvas, viewBounds)) {
+        ctx.save();
+        ctx.globalAlpha = glyphAlpha;
+        drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale);
+        ctx.restore();
+      }
       // Galaxy hit pushed FIRST so per-system hits (drawn next) win on
       // direct overlap. Below the blend zone systems aren't drawn at all,
       // so the galaxy hit is the only target — exactly what we want.
@@ -579,7 +590,7 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds);
       ctx.restore();
       hit.push(...subHit);
     }
@@ -602,6 +613,7 @@ function drawGalaxySpiral(
   timeSec: number,
   viewScale: number,
   cameraScale: number,
+  viewBounds?: ViewBounds,
 ): HitCircle[] {
   const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
 
@@ -625,11 +637,15 @@ function drawGalaxySpiral(
     const ss = systems[i];
     const pos = positions[i];
     const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
+    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
+
+    // Skip draw calls for systems outside the visible viewport.
+    if (viewBounds && !circleIntersectsViewBounds(pos.x, pos.y, sizePx * 1.5, viewBounds)) continue;
+
     const dominant = ss.stars[0] ?? null;
     const palette = dominant ? starFill(dominant) : { inner: '#fff', outer: 'rgba(255,255,255,0)', core: '#fff' };
     drawGlow(ctx, pos.x, pos.y, sizePx, palette.inner, palette.outer);
     drawCircle(ctx, pos.x, pos.y, sizePx * 0.6, palette.core);
-    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
   }
   return hit;
 }
