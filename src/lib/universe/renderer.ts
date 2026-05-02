@@ -357,19 +357,28 @@ function satelliteFill(s: SatelliteData): string { return satellitePalette(s).ba
 // additionally clip to the disk and stroke horizontal bands across it. For
 // volcanic/lava palettes (palette.hot) we add a small offset hot spot.
 //
-// Tiny disks (r < 1.6 px) skip the gradient and bands entirely — the cost
-// of createRadialGradient is wasted on a sub-pixel splat — and just paint
-// the base color. This keeps the galaxy-spread system view fast even with
-// hundreds of bodies.
+// Tiny disks (under ~1.6 screen px) skip the gradient and bands entirely —
+// the cost of createRadialGradient is wasted on a sub-pixel splat — and just
+// paint the base color.
+//
+// All thresholds are checked against `screenR = r * viewScale` (the on-screen
+// pixel size) rather than `r` (map units), so bands and the gradient stay
+// visible when the user zooms in: as `viewScale` grows, callers shrink `r`
+// proportionally to keep on-screen size constant, but the LOD decision should
+// follow the visual size, not the map-unit size.
 
 const TINY_DISK_PX = 1.6;
+const BANDS_MIN_PX = 4;
+const HOTSPOT_MIN_PX = 3;
 
 function drawBodyDisk(
   ctx: CanvasRenderingContext2D,
   x: number, y: number, r: number,
   palette: BodyPalette,
+  viewScale: number = 1,
 ): void {
-  if (r < TINY_DISK_PX) {
+  const screenR = r * viewScale;
+  if (screenR < TINY_DISK_PX) {
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fillStyle = palette.base;
@@ -393,9 +402,9 @@ function drawBodyDisk(
   ctx.fillStyle = grd;
   ctx.fillRect(x - r, y - r, r * 2, r * 2);
 
-  // Gas-giant horizontal bands — only at meaningful disk size (≥ 4 px) so
-  // tiny disks don't get muddied by sub-pixel band strokes.
-  if (palette.bands && r >= 4) {
+  // Gas-giant horizontal bands — only at meaningful on-screen size so tiny
+  // disks don't get muddied by sub-pixel band strokes.
+  if (palette.bands && screenR >= BANDS_MIN_PX) {
     const n = palette.bands.length;
     const bandH = (r * 2) / n;
     for (let i = 0; i < n; i++) {
@@ -415,9 +424,10 @@ function drawBodyDisk(
   }
 
   // Hot spot (volcanic / lava) — small offset glow, only for disks large
-  // enough to read it.
-  if (palette.hot && r >= 3) {
-    const hotR = Math.max(1.2, r * 0.35);
+  // enough on screen to read it. Inner radius floor is 1.2 SCREEN px, so it
+  // converts back into map units via viewScale.
+  if (palette.hot && screenR >= HOTSPOT_MIN_PX) {
+    const hotR = Math.max(1.2 / viewScale, r * 0.35);
     const hotX = x + r * 0.18;
     const hotY = y + r * 0.22;
     const hotGrd = ctx.createRadialGradient(hotX, hotY, 0, hotX, hotY, hotR);
@@ -432,14 +442,16 @@ function drawBodyDisk(
 
 function drawPlanetBody(
   ctx: CanvasRenderingContext2D, x: number, y: number, r: number, p: PlanetData,
+  viewScale: number = 1,
 ): void {
-  drawBodyDisk(ctx, x, y, r, planetPalette(p));
+  drawBodyDisk(ctx, x, y, r, planetPalette(p), viewScale);
 }
 
 function drawSatelliteBody(
   ctx: CanvasRenderingContext2D, x: number, y: number, r: number, s: SatelliteData,
+  viewScale: number = 1,
 ): void {
-  drawBodyDisk(ctx, x, y, r, satellitePalette(s));
+  drawBodyDisk(ctx, x, y, r, satellitePalette(s), viewScale);
 }
 
 // Re-export legacy fills so any external module pulling them keeps compiling.
@@ -595,7 +607,7 @@ export function drawSystemScene(
     // Divide by viewScale so the disk stays at a constant screen-pixel size
     // regardless of zoom level (orbit radii still scale, only the body shrinks).
     const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
-    drawPlanetBody(ctx, px, py, sizePx, planet);
+    drawPlanetBody(ctx, px, py, sizePx, planet, viewScale);
     if (planet.life) {
       ctx.beginPath();
       ctx.arc(px, py, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
@@ -636,7 +648,7 @@ export function drawPlanetScene(
   const planetPx = minSide * 0.06 / viewScale;
 
   // Hero planet — constant-size disk with composition-driven texture
-  drawPlanetBody(ctx, cx, cy, planetPx, planet);
+  drawPlanetBody(ctx, cx, cy, planetPx, planet, viewScale);
   if (planet.life) {
     ctx.beginPath();
     ctx.arc(cx, cy, planetPx + 6 / viewScale, 0, Math.PI * 2);
@@ -673,7 +685,7 @@ export function drawPlanetScene(
     const sx = cx + Math.cos(angle) * ringR;
     const sy = cy + Math.sin(angle) * ringR;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
-    drawSatelliteBody(ctx, sx, sy, sizePx, sat);
+    drawSatelliteBody(ctx, sx, sy, sizePx, sat, viewScale);
     if (sat.life) {
       ctx.beginPath();
       ctx.arc(sx, sy, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
