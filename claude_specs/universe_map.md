@@ -1,164 +1,164 @@
-# Universe / Simulation Framework
+# Universe Map (Galaxies / Systems / Stars / Planets / Satellites)
 
-This file documents the **simulation universe** — the framework that holds every layer of the procgen map together: the entity model that the simulation populates, the worker/main-thread boundary, the random-number contract, the data shapes that cross between threads, and the sweep harness that guards determinism. All five concrete layers (`world_map.md`, `world_history.md`, `city_map.md`, `characters.md`, plus the renderer) plug into the conventions described here. Read this file first when you need to understand *how a system fits in*; read the layer-specific file when you need to understand *what a system does*.
+This file documents the **universe package** under `src/lib/universe/` — the outermost generation layer that produces a galaxy → solar system → star/planet → satellite hierarchy. The user picks "Universe generation" on the landing screen, drills into a system, picks a habitable rock planet or moon, and clicks "Generate World" to hand off to the world-map flow (`world_map.md`) with the chosen body's seed + biome locked in.
 
-## Mental Model
+Read `CLAUDE.md` first for the framework conventions (worker boundary, RNG sub-streams, sweep stability) — the universe pipeline follows the same playbook as the world-map / world-history pipelines but lives in its own worker (`universegen.worker.ts`).
 
-The simulation produces a **deterministic, seeded universe** in three nested layers:
+## Entity Hierarchy
 
-1. **Physical world** — Voronoi cells with terrain attributes (`Cell`s in `src/lib/terrain/`), grouped into Continents and Regions and seeded with Resources and Cities (`src/lib/history/physical/`). Always built — even when history is disabled.
-2. **Timeline** — 5000 years of civilizational events layered on top of the physical world (`src/lib/history/timeline/`). Opt-in via `GenerateRequest.generateHistory`.
-3. **Zoom-ins** — city maps (`src/lib/citymap/`) and character rosters (`src/lib/citychars.ts` + `src/lib/fantasy/`) generated lazily on demand from the simulation state.
+```
+Universe
+└── Galaxy[]                  (1 if N ≤ 100; ceil(N/100) chunks otherwise)
+    └── SolarSystem[]
+        ├── Star[]            (1–3 per system, MATTER or ANTIMATTER)
+        └── Planet[]          (orbit-ordered; ROCK inner, GAS outer)
+            └── Satellite[]   (0..15, ICE or ROCK)
+```
 
-Everything heavy runs in `src/workers/mapgen.worker.ts` (a Web Worker). The main thread receives plain serialized data via `postMessage`.
+The universe entity instances live **only inside `universegen.worker.ts`** — they carry `Map<string, …>` indexes (`mapSolarSystems`, `mapStars`, `mapPlanets`, `mapSatellites`, `mapGalaxies`) that aren't structured-clone safe. The worker flattens them into plain `UniverseData` before `postMessage` (same pattern as `World` → `RegionData[]`/`ContinentData[]`). See `CLAUDE.md`'s "Worker / Main-Thread Boundary" section.
 
-## File Organization
+## Files
 
-`src/lib/` is split by concern; each subdirectory has an `index.ts` barrel exporting its public API.
+| File | Responsibility |
+|------|---------------|
+| `types.ts` | Plain structured-clone-safe shapes that cross the worker boundary — `UniverseData`, `GalaxyData`, `SolarSystemData`, `StarData`, `PlanetData`, `SatelliteData`, `UniverseGenerateRequest`, `UniverseWorkerMessage`. **Start here when looking up a serialized field** |
+| `Universe.ts` | Top-level entity. Owns the per-tier `usedNames: Set<string>` dedup sets, the runtime indexes (`mapSolarSystems`/`mapStars`/`mapPlanets`/`mapSatellites`/`mapGalaxies`), and the captured worker `seed: string` so generators can derive isolated PRNG sub-streams via `seededPRNG(`${seed}_<purpose>_<id>`)`. Mirrors `World.seed` (see `world_history.md`). Empty-string seed is supported (sub-stream draws are still deterministic) |
+| `Galaxy.ts` | Runtime galaxy entity. Carries `solarSystems: SolarSystem[]` reference list + baked layout fields (`cx`, `cy`, `radius`, `spread`). No `Map`/`Set` of its own but lives next to entities that have them, so it stays inside the worker too |
+| `SolarSystem.ts` | System entity: composition (`'ROCK' \| 'GAS'`), star list, planet list, parent universe id |
+| `Star.ts` | Star entity: composition (`'MATTER' \| 'ANTIMATTER'`), radius, brightness, parent system id |
+| `Planet.ts` | Planet entity: composition (`'ROCK' \| 'GAS'`), 13 fine-grained subtypes (`PlanetSubtype` = `RockPlanetSubtype` ∪ `GasPlanetSubtype`), radius, orbit, life flag, optional `biome: PlanetBiome` (only for ROCK + life), satellites, parent system id. Exports the `PLANET_SUBTYPE_COMPOSITION` enforcement table — every subtype belongs to exactly one composition |
+| `Satellite.ts` | Satellite entity: composition (`'ICE' \| 'ROCK'`), 10 fine-grained subtypes (`SatelliteSubtype` = `IceSatelliteSubtype` ∪ `RockSatelliteSubtype`), radius, life flag, optional biome (only for ROCK + life), parent planet id. Exports the `SATELLITE_SUBTYPE_COMPOSITION` enforcement table |
+| `UniverseGenerator.ts` | Top-level orchestrator + galaxy grouping. Generates `numSolarSystems` solar systems (defaulting to `rndSize(rng, 5, 1)` when no override is supplied), then chunks them into galaxies (≤100 → 1 galaxy; >100 → `ceil(N/100)` chunks), names them, lays them out via `layoutGalaxies`, and names the universe (single galaxy → reuse galaxy name; multi-galaxy → `generateUniverseName`) |
+| `SolarSystemGenerator.ts` | Per-system generator: rolls composition (50/50 ROCK/GAS), generates `rndSize(rng, 3, 1)` stars, sets the system's name from the **primary star** (no separate RNG draw), then generates `stars.length * 2 + floor(rng() * 15)` planets |
+| `StarGenerator.ts` | Per-star: rolls radius (400 000–900 000), brightness (100–999), composition (50/50). Names via `generateStarName` (isolated sub-stream) |
+| `PlanetGenerator.ts` | Per-planet: rolls radius (1 000–31 000), orbit (monotonic in insertion index — read **before** push), composition driven by orbit (`rockProbability`: <10 → 100% rock, >20 → 100% gas, linear in between), life flag (10%), biome (only ROCK + life, 7 weighted profiles), subtype via isolated sub-stream `${seed}_planetsubtype_${planet.id}`, then `rndSize(rng, 15, -5)` satellites |
+| `SatelliteGenerator.ts` | Per-satellite: rolls radius (relative to parent planet), composition (50/50 ICE/ROCK), life (10%), biome (ROCK + life only), subtype via isolated sub-stream `${seed}_satsubtype_${satellite.id}` (parent-orbit aware: inner → volcanic/iron_rich/sulfur_ice; outer → cratered/methane_ice) |
+| `galaxyLayout.ts` | Sunflower-disc + relaxation layout for multi-galaxy universes. Bakes per-galaxy `cx`, `cy`, `radius`, `spread` in **normalized world units** so the renderer can apply a single viewport-fit factor at draw time. RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams. Also exports `computeLayoutExtent(galaxies)` for the renderer's viewport fit |
+| `universeNameGenerator.ts` | Procedural names for every tier: `generateGalaxyName`, `generateUniverseName`, `generateStarName`, `generatePlanetName`, `generateSatelliteName`. Two layers per name: **scientific** (catalog-style: NGC, HD, HIP, GJ, KOI, Roman numerals) + **human** (proper names with a tier-distinct phonetic feel). Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entityId>` — name generation never perturbs physics RNG. Per-tier dedup via the `usedNames: Set<string>` that callers pass in (lives on `Universe`) |
+| `helpers.ts` | `rndSize(rng, max, min)` — uniform integer in `[min, min + max)`, clamped at 0. Mirrors the `ReferenceSizeConfig.RandomSizeConfig.rndSize(max, min)` helper from the upstream Java framework. Used everywhere in this package for child-count rolls |
+| `renderer.ts` | Canvas-2D renderer with three drill-down scenes (galaxy / system / planet). Ports `galaxySpiralPositions` (2-arm logarithmic spiral system layout), `OrbitalMechanics.angularVelocity` (Kepler's 3rd law, ω ∝ r⁻¹·⁵), `StarField` (seeded LCG background), `ScaleMapper` (linear/sqrt/log domain → pixel mapping for fair size perception across orders of magnitude) verbatim from `github.com/fjcmz/procen_universe_viz`. **Background star field uses an INDEPENDENT LCG seed (`STAR_FIELD_SEED = 42`)** so the backdrop is identical regardless of universe contents — same as the reference repo |
+| `hitTest.ts` | `pickHit(circles, px, py)` — picks the topmost circle whose disk contains the click point. Iterates back-to-front so later-drawn entities win ties (same convention as the reference repo's HitTester) |
+| `index.ts` | Public barrel: re-exports every entity class, every generator singleton (`universeGenerator`, `solarSystemGenerator`, `starGenerator`, `planetGenerator`, `satelliteGenerator`), every type, and `rndSize` |
 
-| Path | Layer | Spec |
-|------|-------|------|
-| `src/lib/types.ts` | Shared TypeScript types — `Cell`, `MapData`, `HistoryData`, `GenerateRequest`, `TerrainProfile`, etc. **Start here when looking up a type.** | (this file) |
-| `src/lib/terrain/` | Physical terrain pipeline | `world_map.md` |
-| `src/lib/history/` | Civilizational simulation + physical world model | `world_history.md` |
-| `src/lib/history/physical/` | Entity classes + generators (World, Continent, Region, CityEntity, Resource) | `world_history.md` |
-| `src/lib/history/timeline/` | Temporal simulation (Timeline, Year, Phase 5 generators) | `world_history.md` |
-| `src/lib/renderer/` | Canvas 2D rendering for the world map | `world_map.md` |
-| `src/lib/citymap/` | City map V1 (tile-based) + V2 (Voronoi-polygon-based) generators & renderers | `city_map.md` |
-| `src/lib/fantasy/` | Race/Deity/Alignment specs + `generatePcChar` D&D 3.5e roller | `characters.md` |
-| `src/lib/citychars.ts` | UI-only lazy roster roller for the Details tab | `characters.md` |
-| `src/workers/mapgen.worker.ts` | Pipeline orchestrator (terrain → physical world → optional history) | this file + `world_map.md` + `world_history.md` |
-| `src/components/` | React UI (canvas, overlays, timeline panel, popups) | `world_map.md` (rendering panels) + `world_history.md` (history panels) |
+## Worker (`universegen.worker.ts`)
 
-## Worker / Main-Thread Boundary
+Sister of `mapgen.worker.ts`. Receives `UniverseGenerateRequest { seed, numSolarSystems }`, posts `PROGRESS` events through generation, calls `serializeUniverse(universe)` to flatten into structured-clone-safe `UniverseData`, then posts `DONE`. The progress callback in `UniverseGenerateOptions` maps `[0, 1]` generator progress onto `[15, 85]` of the bar and throttles to whole-percent steps to avoid `postMessage` spam on large counts.
 
-`src/workers/mapgen.worker.ts` is the single producer of every simulation artifact. It posts progress events and a final `MapData` payload to the main thread.
+The worker seeds the main RNG with `seededPRNG(seed + '_universe')` — using a `_universe` suffix on the user seed keeps the universe pipeline's draws isolated from the world-map pipeline's draws (which seed with the bare user seed). This is the same isolation discipline used by every other sub-stream in the codebase.
 
-**Hard rule: class instances stay inside the worker.** `World`, `Continent`, `Region`, `CityEntity`, `Resource`, `Timeline`, `Year`, and every Phase 5 entity instance use `Map` and `Set` internally — those types are NOT structured-clone safe and cannot cross `postMessage`. The worker serializes them to plain `RegionData[]`, `ContinentData[]`, `City[]`, `HistoryData`, `HistoryStats` arrays/records before posting.
+## Composition vs Subtype
 
-Anything you want to expose to the UI must be:
-- a primitive,
-- a typed array (`Int16Array`, `Uint8Array`, `Float32Array` — structured-clone safe),
-- a plain object/array tree of the above, or
-- a `Record<number, TypedArray>` (used for `snapshots`, `tradeSnapshots`, `empireSnapshots`, `techTimeline.byField`).
+Both `Planet` and `Satellite` carry a coarse `composition` AND a fine-grained `subtype`. The subtype enforces a single composition via the lookup tables `PLANET_SUBTYPE_COMPOSITION` and `SATELLITE_SUBTYPE_COMPOSITION` — every subtype belongs to exactly one composition; mismatches are forbidden.
 
-Keep the `WorkerMessage` schema in sync with `App.tsx`'s `onmessage` handler — drift here causes silent data loss.
+Subtype rolls run on **isolated sub-streams** keyed on `(universe.seed, entity.id)`:
+- `${universe.seed}_planetsubtype_${planet.id}` (in `PlanetGenerator.ts`)
+- `${universe.seed}_satsubtype_${satellite.id}` (in `SatelliteGenerator.ts`)
 
-## The Cell
+This means **adding new subtypes does not perturb existing seeds** — a new subtype landing in `pickPlanetSubtype` only changes the output for runs that draw under the new probability bucket; every other entity in the universe stays byte-identical. Same convention as the world-map terrain profiles' "additive shifts default to 0.0 = no-op" rule (see `world_map.md`).
 
-`Cell` (in `types.ts`) is the universal terrain primitive. Every terrain step in `src/lib/terrain/` annotates cells with new fields:
+### Planet subtypes (13)
 
-- `elevation`, `moisture` → `terrain/elevation.ts` / `terrain/moisture.ts`
-- `temperature` → `terrain/temperature.ts` (0 = coldest polar, 1 = hottest equatorial; accounts for latitude, continentality, windward ocean proximity, lapse rate)
-- `biome` → `terrain/biomes.ts` (Whittaker classification with 5 elevation bands + LAKE)
-- `river`, `flow` → `terrain/rivers.ts`
-- `isLake` → `terrain/depressionFill.ts` (small closed basins materialized as inland lakes; also flips `isWater = true`, `biome = 'LAKE'`)
-- `regionId` → `history/history.ts::buildPhysicalWorld` (always present after generation)
-- `kingdom` → `history/history.ts` (year-0 BFS baseline; renderer overlays live ownership at the selected year but must NEVER mutate this field)
+```
+ROCK: terrestrial, desert, volcanic, lava, iron, carbon, ocean, ice_rock
+GAS:  jovian, hot_jupiter, ice_giant, methane_giant, ammonia_giant
+```
 
-Renderer-only types like `Season` (0–3, four seasons) are NOT stored on cells — they're applied at draw time via `getSeasonalBiome()` and `getPermafrostAlpha()`.
+Roll bias (in `pickPlanetSubtype`):
+- ROCK + life + biome → biome-driven map (`forest`/`default`/`swamp`/`mountains` → `terrestrial`, `ocean` → `ocean`, `desert` → `desert`, `ice` → `ice_rock`) so a "forest" world looks lush rather than getting a random subtype underneath
+- ROCK + no life: orbit-banded rolls — orbit < 6 → lava-favored; orbit < 12 → desert/volcanic/iron heavy; orbit ≥ 12 → carbon / ice_rock heavy
+- GAS: orbit < 12 → hot_jupiter dominant; orbit < 18 → jovian / ammonia_giant; orbit ≥ 18 → outer trio (ice_giant / methane_giant / ammonia_giant) uniform
 
-## Data Model — `MapData`
+### Satellite subtypes (10)
 
-`MapData` is the single payload returned by the worker. Always present:
+```
+ICE:  water_ice, methane_ice, sulfur_ice, nitrogen_ice, dirty_ice
+ROCK: terrestrial, cratered, volcanic, iron_rich, desert_moon
+```
 
-- `cells: Cell[]` — fully annotated by the terrain pipeline
-- `regions: RegionData[]`, `continents: ContinentData[]` — built unconditionally by `buildPhysicalWorld`
+Roll bias (in `pickSatelliteSubtype`, parent-orbit aware):
+- ROCK + life + biome === 'desert' → `desert_moon`; ROCK + life otherwise → `terrestrial`
+- ROCK + no life: parentOrbit < 8 → volcanic / iron_rich / cratered (Io-like tidal heating); else uniform over `cratered, terrestrial, iron_rich, desert_moon`
+- ICE: parentOrbit < 10 → water_ice / sulfur_ice / dirty_ice (inner ice sublimates / sulfur-coats); else uniform over the 5-element ice subtype set
 
-Present only when `generateHistory = true`:
+## Galaxy Grouping
 
-- `cities: City[]` — render-type cities (distinct from `CityEntity` simulation entities)
-- `roads: Road[]` — A* paths between cities
-- `history: HistoryData` — countries, years (events), ownership snapshots
-- `historyStats: HistoryStats` — aggregate metrics (peak population, totals per event type, tech aggregates, etc.)
+`UniverseGenerator` chunks systems into galaxies based on `MAX_SYSTEMS_PER_GALAXY = 100`:
 
-`HistoryData` carries:
-- `countries: Country[]` — id, name, capitalCellIndex, isAlive
-- `years: HistoryYear[]` — per-year events (15 types) + sparse `ownershipDeltas`
-- `snapshots: Record<number, Int16Array>` — full cell→countryId every 20th year (fast scrubbing)
-- `tradeSnapshots: Record<number, TradeRouteEntry[]>` — every 20 years; each entry has `cell1`, `cell2`, optional A* `path: number[]` for coastline-hugging maritime routes
-- `empireSnapshots: Record<number, EmpireSnapshotEntry[]>` — every 20 years + final year; aligned with `snapshots` cadence (`Math.floor(year / 20) * 20`); each entry: `empireId`, display `name`, `founderCountryIndex`, sorted `memberCountryIndices`
-- `techTimeline?: { byField: Record<TechField, Uint8Array> }` — per-field running-max tech level indexed by year offset (monotonic; see `world_history.md` for invariants)
-- `religionDetails`, `cityReligions`, `worldSeed` — used by the character roster (`characters.md`)
+- **N ≤ 100** — single galaxy `gal_0` wraps every system. The UI hides the galaxy level entirely and the renderer falls back to legacy single-spiral rendering (byte-identical to pre-grouping). Universe display name is reused from the single galaxy's name so existing labels ("↑ Galaxy", breadcrumb "Galaxy") still make sense.
+- **N > 100** — split into `numGalaxies = ceil(N / 100)` equal sequential chunks, `groupSize = ceil(N / numGalaxies)`. Group sizes differ by at most 1.
 
-## Data Model — `GenerateRequest`
+Galaxy generation is placed **after** all physics generation in `UniverseGenerator.generate` so naming/layout RNG never perturbs any physics RNG calls.
 
-Every user-controlled input flows through `GenerateRequest` (in `types.ts`). The worker resolves these in a fixed order: biome profile → shape overlay → user overrides.
+## Galaxy Layout (`galaxyLayout.ts`)
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `seed` | `string` | Deterministic seed string |
-| `numCells` | `number` | Voronoi cell count (500–100,000) |
-| `waterRatio` | `number` | Fraction of cells marked water (0–1, default 0.4) |
-| `width` / `height` | `number` | Canvas dimensions |
-| `generateHistory` | `boolean` | Run the timeline simulation (default false) |
-| `numSimYears` | `number` | Years to simulate (50–5000, default 5000); only when history is on |
-| `profileName` | `string?` | Named **biome** preset (e.g. `'desert'`, `'ice'`, `'default'`) |
-| `shapeName` | `string?` | Named **landmass shape** preset (`'default'`, `'pangaea'`, `'continents'`, `'islands'`, `'archipelago'`) — applied as a `Partial<TerrainProfile>` overlay |
-| `profileOverrides` | `Partial<TerrainProfile>?` | Fine-tuning overrides on top of the named presets |
+For multi-galaxy universes, `layoutGalaxies(galaxies, universeSeed)` positions galaxies in 2D world units so pairwise nearest-neighbor center-to-center distance falls in `[5×, 10×]` of the average galaxy diameter.
 
-`waterRatio` is implemented by ranking cells by elevation and marking the lowest `waterRatio * N` as water. Exact ratio regardless of terrain shape — see `world_map.md`.
+Algorithm:
+1. Per-galaxy `spread = sqrt(groupSize / 100)` — a half-full galaxy reads as ~0.7× the diameter of a full one.
+2. `radius = 0.45 × spread` — matches the cap baked into `galaxySpiralPositions` (`b = 2.42 / (maxK × angleStep)`, outer arm reaches 0.45 × spread).
+3. **Initial positions**: golden-angle sunflower disc with `r = target × √(i/π)` so nearest-neighbor distance starts close to the target separation (6× avgDiameter, mid-band of `[5, 10]`).
+4. **Relaxation pass**: push pairs apart if `dist < 5×avgDiameter`. Capped at 40 iterations; the sunflower seed already satisfies the bound for typical N so the loop usually exits on iter 0.
+5. **Recenter** so centroid is `(0, 0)`.
 
-## TerrainProfile Threading
+All RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams.
 
-`TerrainProfile` (in `types.ts`) is the single source of truth for ~40 tunable terrain constants. Every terrain function (`assignElevation`, `computeOceanCurrents`, `assignMoisture`, `assignTemperature`, `assignBiomes`, `hydraulicErosion`) takes the profile as its last parameter. The worker resolves it from `profileName + shapeName + profileOverrides` (three-way spread merge) and passes it down.
+`computeLayoutExtent(galaxies)` returns the maximum extent from origin (`max(|center| + radius)`), used by the renderer to compute the viewport fit factor. Accepts a structural type so both runtime `Galaxy` and serialized `GalaxyData` work.
 
-When adding a new tunable terrain constant: add it to `TerrainProfile`, set its default in `DEFAULT_PROFILE` (in `terrain/profiles.ts`), and read it from the profile parameter — do **NOT** add a new file-local const. See `world_map.md` for the full list of profiles + shapes.
+## Naming
 
-## Generators & Visitors Pattern
+Every entity carries two names: `humanName` (proper / distinctive) and `scientificName` (catalog-style). Generators in `universeNameGenerator.ts`:
 
-The physical world model uses two complementary patterns:
+| Tier | Scientific | Human |
+|------|-----------|-------|
+| Galaxy | `NGC-XXXX` | 3-syllable composition (Andromeda / Velarion / Orysseia feel) |
+| Universe | reuses galaxy name when N=1; otherwise galaxy phonetic + suffix `Cluster / Expanse / Reach / Local Group / Vault / Sea / Veil` | same |
+| Star | `HD #####` / `HIP #####` / `GJ ###` / `KOI-###.##` mix | distinctive proper names |
+| Planet | `<primaryStar.scientific> <RomanNumeral>` (e.g. `HD 12345 III`) | distinctive proper names |
+| Satellite | `<planet.scientific>-<RomanLowercase>` | distinctive proper names |
 
-- **Generator singletons** (one per entity class) encapsulate object creation and runtime-index insertion: `worldGenerator`, `continentGenerator`, `regionGenerator`, `resourceGenerator`, `cityGenerator`. Same idea in the timeline layer: `foundationGenerator`, `contactGenerator`, …, `empireGenerator`. Each Phase 5 file in `src/lib/history/timeline/` exports both an entity interface and a generator singleton.
-- **Visitor singletons** provide iteration + predicate-based selection over the world's runtime index maps: `cityVisitor` (iterate all/usable cities, random selection with predicate via Fisher-Yates), `regionVisitor` (iterate all regions, `selectUpToN` / `selectOne` with predicate). Used heavily by Phase 5 generators.
+Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entityId>`. **Names never perturb physics RNG** — they are generated immediately after the entity's physics fields are rolled, but on a separate stream.
 
-The runtime indexes themselves live on `World` as typed `Map`s: `mapRegions`, `mapCities`, `mapUsableCities`, `mapCountries`, `mapDeadCountries`, `mapIllustrates`, `mapWonders`, `mapReligions`, `mapWars`, `mapAliveWars`, etc.
+Per-tier dedup uses `Set<string>` instances on the `Universe` (`usedStarNames`, `usedPlanetNames`, `usedSatelliteNames`) — generators retry on collision until they find an unused name.
 
-## Randomness
+## Hand-off to World Map
 
-**All randomness goes through the seeded `mulberry32` PRNG in `terrain/noise.ts`.** Never use `Math.random()` directly anywhere in `src/lib/` or `src/workers/`. A single `Math.random` call breaks reproducibility for the whole run and silently desyncs the sweep harness.
+The user can drill `galaxy → system → planet` (or `satellite`) in the universe canvas. When they click "Generate World" on a habitable rock body in `UniverseEntityPopup`, `App.tsx`'s `handleGenerateWorldFromPlanet` / `handleGenerateWorldFromSatellite` callbacks:
 
-The codebase uses **isolated PRNG sub-streams** liberally — they're how new behaviors get added without perturbing existing seeded outputs. Sub-streams are spawned via `seededPRNG(`${seed}_<purpose>_<entityId>`)` and consumed locally; their draws never leak back into the main `rng` parameter. Examples (non-exhaustive):
+1. Tear down any existing world worker / `mapData` / params.
+2. Compute the world seed: `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) — an isolated PRNG sub-stream, same convention as `_racebias_<id>` / `_chars_<cellIndex>` (`characters.md`).
+3. Pull the chosen body's `biome` (defaulting to `'default'`) and snap the world generator's params to a matching biome profile (`PROFILE_WATER_RATIOS[biome]`, `setProfileName(biome)`, `setShapeName('default')`, `setResourceRarityMode('natural')`, `setGenerateHistory(false)`) — the user still has to press "Generate Map", but the form is pre-populated.
+4. Set `numCells = cellCountForPlanetRadius(planet.radius)` so bigger worlds get more cells.
+5. Capture `worldOrigin: { universeSeed, systemId, systemName, planetId, planetName }` so the back button works.
+6. Set `universeReturnTo = { systemId, planetId }` so when the user clicks "← Back to system" the universe canvas can navigate straight back to the planet they came from.
+7. Switch screens.
 
-- `${seed}_racebias_<countryId>` (country race bias — `characters.md`)
-- `${seed}_deity_<religionId>` (religion deity binding — `characters.md`)
-- `${seed}_chars_<cellIndex>` (character roster roll — `characters.md`)
-- `${seed}_city_<cityName>_voronoi` (V2 city polygon graph — `city_map.md`)
-- `${seed}_city_<cityName>_walls` / `_river` / `_roads` / `_streets` / `_openspaces_*` / `_blocks_names` / `_landmarks_*` / `_buildings` / `_sprawl` (V2 city slices — `city_map.md`)
+This is the only piece of glue between the universe pipeline and the world-map pipeline. The two pipelines never share RNG state otherwise — the world-map worker seeds with the bare planet/satellite seed, while the universe worker seeded with `${userSeed}_universe`.
 
-The discipline is: **a new feature that adds a behavioral roll must use its own sub-stream, OR be a no-op when its inputs are zero/default**. Otherwise the sweep baseline shifts.
+## Renderer + UI
 
-## The Sweep Harness
-
-`scripts/sweep-history.ts` is a single-file Node CLI run via `tsx` (dev dep) — `npm run sweep`. It runs the full pipeline (terrain + history) across 5 fixed seeds and writes `scripts/results/<label>.json`. Use `npm run sweep -- --label foo` to tag.
-
-The sweep is **byte-deterministic** — re-running with the same args produces byte-identical JSON modulo timestamps. Any non-zero diff against `scripts/results/baseline-a.json` is a real behavior change. Diff after history-simulation tuning to catch regressions.
-
-**Hard rules:**
-- The harness must remain browser-free. Do NOT import from `src/components/`, `src/workers/`, or any DOM-dependent module — it must run in a bare Node shell.
-- If the terrain or history pipeline grows a new step, mirror it in both `mapgen.worker.ts` and `sweep-history.ts` (same order, same arguments) or future sweeps will silently drift from in-browser behavior.
-- The sweep currently uses `DEFAULT_PROFILE` directly with no biome/shape overlay — sweep baselines stay byte-identical. If the harness ever gains `--profile`/`--shape` flags, mirror the three-way merge from `mapgen.worker.ts` exactly.
-
-City-map generation (`city_map.md`) and character rosters (`characters.md`) are render-only and never reached by the sweep harness. Any non-zero sweep diff after a citymap-only or characters-only change means an accidental simulation-layer edit.
-
-## Verification
-
-There is no test suite. Verify changes by:
-
-1. `npm run build` — TypeScript type-check + Vite production build (catches type errors).
-2. Visual inspection in `npm run dev` — hot-reload dev server.
-3. `npm run sweep -- --label <experiment>` for any history-simulation change; diff against `scripts/results/baseline-a.json`.
-
-For UI/frontend changes, exercise the feature in a browser — type-checking and sweep don't catch render-only regressions. If a UI feature can't be tested (e.g. mobile-only behavior in a desktop session), say so explicitly rather than claiming success.
+| File | Purpose |
+|------|---------|
+| `renderer.ts` | Three scenes (galaxy / system / planet), Kepler-driven orbital animation, scale mapping, hit-test circles. Reference-repo helpers ported verbatim |
+| `hitTest.ts` | Pick topmost circle under cursor (back-to-front iteration) |
+| `LandingScreen.tsx` | Choose between "Planet generation" (world-map flow) and "Universe generation" (universe flow) |
+| `UniverseScreen.tsx` | Top-level screen that owns the worker lifecycle + canvas state |
+| `UniverseCanvas.tsx` | Canvas component; manages scene state (`'galaxy' \| 'system' \| 'planet'`), zoom/pan, drill-down navigation, and reset on new universe data |
+| `UniverseOverlay.tsx` | Tabbed overlay (Generation + Tree); persists position to `localStorage` (`universe.overlay.position`) and active tab to `universe.activeTab`; mirrors the world-map `UnifiedOverlay.tsx` UX |
+| `UniverseTreeTab.tsx` | Hierarchical browser of the generated universe (Galaxy → System → Star/Planet → Satellite). Single-galaxy universes hide the galaxy level by spec |
+| `UniverseEntityPopup.tsx` | Detail popup for a clicked entity. Shows physics fields and (for habitable rock planets / moons) a "Generate World" button that triggers the hand-off |
 
 ## Pitfalls
 
-- **Don't postMessage class instances.** `World`, `Region`, `Continent`, `CityEntity`, `Timeline`, `Year`, and Phase 5 entities all use `Map`/`Set` and won't structured-clone. Serialize to plain data inside the worker.
-- **`buildPhysicalWorld` always runs.** `MapData.regions` and `MapData.continents` are populated for every generation, terrain-only or full-history. Do not gate region/resource rendering on `mapData.history`.
-- **History is the source of cities and kingdoms when enabled.** Don't call `placeCities` or `drawKingdomBorders` from the worker when `generateHistory` is true — `HistoryGenerator` owns that responsibility (see `world_history.md`). Doing both double-places cities and corrupts state.
-- **`HistoryStats` is forwarded, not recomputed.** New code that wants tech aggregates, total wars/trades/conquests, peak population, or tech-loss totals should read `mapData.historyStats` instead of re-walking `historyData.years` on the main thread.
-- **Sub-stream isolation is the contract that keeps the sweep stable.** When adding a new randomness-driven feature, route it through `seededPRNG(`${seed}_<purpose>_<id>`)` and never let its draws fall back into the main `rng`. A non-zero sweep diff after a "decorative" change usually means a sub-stream draw leaked.
-- **High-DPI canvas.** `MapCanvas.tsx` scales by `devicePixelRatio`. Don't set canvas width/height via CSS — use the component's resize logic.
-- **Cell count performance.** Generation above ~10,000 cells is slow. Default 5,000. Test UI changes at low cell counts.
-- **Base path.** Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source. Vite `base` config must stay `/procgen_map_fe/` to match the GitHub Pages deploy at `/procgen_map_fe/` (`.github/workflows/deploy.yml`).
-- **Worker message schema.** Keep `WorkerMessage` in sync between `mapgen.worker.ts` and `App.tsx`'s `onmessage` handler. Drift causes silent data loss.
+- **Universe class instances stay inside `universegen.worker.ts`.** `Universe`, `Galaxy`, `SolarSystem`, `Star`, `Planet`, `Satellite` use `Map<string, …>` indexes which are NOT structured-clone safe. Same pitfall as the `World` model — flatten to `UniverseData` / `GalaxyData` / etc. before `postMessage`.
+- **Subtype rolls MUST use isolated sub-streams.** `${universe.seed}_planetsubtype_${planet.id}` and `${universe.seed}_satsubtype_${satellite.id}` keep subtype additions from perturbing existing seeds. **Do NOT roll subtypes off the main `rng` parameter** — adding a subtype would shift every subsequent entity's draws.
+- **Naming RNG is also isolated** (`${universe.seed}_<tier>name_<entityId>`). Same rule: never let name generation read from the main physics RNG. Generators in this package generate the entity's physics fields first, then the names — the order matters because the entity id (which is rolled from the main RNG) is part of the name sub-stream key.
+- **`Star` / `Planet` / `Satellite` IDs come from `IdUtil.id` with a `rngHex(rng)` payload.** That `rngHex` call DOES draw from the main RNG (3 hex draws per id). This is intentional — the id is part of the entity's "physics" identity and seed-stable across runs of the same universe.
+- **`Planet.orbit` is monotonic in insertion index** — `PlanetGenerator` reads `solarSystem.planets.length` BEFORE pushing the new planet so `orbit` increases through the planet list. Same convention for `moonIndex` in `SatelliteGenerator`. **Do NOT reorder these reads** — orbit values would scramble and the renderer's spiral / orbit animations would break.
+- **Galaxy layout RNG is isolated** (`${universeSeed}_galaxy_layout`). Layout changes never perturb system / star / planet generation. If you tune layout constants (`TARGET_SEPARATION_MULT`, `MIN_SEPARATION_MULT`, `RELAX_ITERS`), only the layout output shifts; physics output stays byte-identical.
+- **Single-galaxy universes (N ≤ 100) reuse the galaxy's name as the universe name.** This preserves existing UI labels ("↑ Galaxy", breadcrumb "Galaxy") that were written before galaxy grouping landed. If you change the universe-naming branch, mirror that decision in `UniverseTreeTab.tsx` (which hides the galaxy level when `N === 1`).
+- **The background star field uses an INDEPENDENT LCG seed (`STAR_FIELD_SEED = 42`)** in `renderer.ts`. This is **deliberate** — the backdrop is identical across universes for visual continuity (same as the reference repo). Do NOT thread `universe.seed` into it; the star field is decorative chrome, not part of the universe's seeded content.
+- **Planet / satellite biomes are only assigned when `composition === 'ROCK' && life`.** Other planets / moons have `biome === undefined`. The hand-off code in `App.tsx` falls back to `'default'` for the world-map profile when biome is undefined — keep that fallback if you ever extend biome assignment.
+- **Hand-off seed format is part of the determinism contract.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on. Changing this format would break "the same universe seed always gives the same world for a given planet". Treat it like a stable interface.
+- **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.
+- **`npm run sweep` does NOT run the universe pipeline.** The sweep harness (`scripts/sweep-history.ts`) is purely world-map / world-history. Universe-package changes can never produce a non-zero sweep diff. Conversely, a universe-package change that accidentally touches `src/lib/terrain/` or `src/lib/history/` WILL show up in the sweep — treat any non-zero diff after a universe-only change as evidence of an unintended cross-layer edit.
+- **Universe package has no test suite of its own.** Verify changes by `npm run build` (catches type errors, including the `PLANET_SUBTYPE_COMPOSITION` / `SATELLITE_SUBTYPE_COMPOSITION` exhaustiveness checks that fire when a subtype is added to one table but not the other) and visual inspection in `npm run dev` → "Universe generation" on the landing screen.
