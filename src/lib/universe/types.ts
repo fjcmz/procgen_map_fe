@@ -78,6 +78,7 @@ export interface GalaxyData {
   cy: number;
   radius: number;
   spread: number;
+  shape: 'spiral' | 'oval';
 }
 
 export interface UniverseData {

@@ -139,46 +139,113 @@ function speedFromId(id: string): number {
   return (h >>> 0) / 0x100000000;
 }
 
-// ── Galaxy spiral layout ──────────────────────────────────────────────────
+// ── Galaxy layout functions ───────────────────────────────────────────────
+
+/**
+ * 2-arm logarithmic spiral with a ~15% central cluster. The central systems
+ * are packed in a small nucleus around the galaxy core; the remaining 85% are
+ * distributed across two outward-spiralling arms.
+ */
 export function galaxySpiralPositions(
   count: number,
   cx: number,
   cy: number,
   spread: number,
 ): Array<{ x: number; y: number }> {
-  // 2-arm logarithmic spiral. Per-arm we step radius outward and angle by a
-  // fixed delta; small per-step noise (deterministic from index) breaks the
-  // visible regularity without needing an RNG instance.
   const positions: Array<{ x: number; y: number }> = [];
+  const centralCount = Math.round(count * 0.15);
+  const armCount = count - centralCount;
+
   const arms = 2;
   const armOffset = Math.PI;
-  const a = 8;       // logarithmic spiral inner radius
+  const a = 8;
   const angleStep = 0.42;
-  // Adaptive tightness: for high star counts the fixed b=0.18 pushes outer
-  // arms far outside the viewport. Compute the maximum b that keeps the last
-  // arm within ~45% of `spread` (a * exp(b * maxAngle) * spread/200 ≤ spread*0.45
-  // ⟹ b ≤ ln(11.25) / maxAngle ≈ 2.42 / maxAngle). For count ≤ ~64 the cap
-  // has no effect and the original value 0.18 is preserved.
-  const maxK = Math.max(1, Math.floor(count / 2));
+  // Adaptive tightness — same cap as before, but computed for armCount so the
+  // outer arms stay within viewport regardless of cluster size.
+  const maxK = Math.max(1, Math.floor(armCount / 2));
   const b = Math.min(0.18, 2.42 / (maxK * angleStep));
 
-  for (let i = 0; i < count; i++) {
+  // Central cluster radius: half the innermost arm step's radial distance.
+  const centralMaxR = (a * Math.exp(b * angleStep * 0.5)) * (spread / 200) * 0.8;
+
+  // Central cluster — quasi-random angle (golden angle) + CDF-biased radius.
+  for (let i = 0; i < centralCount; i++) {
+    const angle = i * 2.399963229; // golden angle ≈ 2π/φ
+    const uRaw = (i * 0.7548776662) % 1;
+    // Inverse CDF for density ∝ (1-r/R): r/R = 1 - sqrt(1-u)
+    const r = centralMaxR * (1 - Math.sqrt(1 - uRaw));
+    const jx = Math.sin(i * 127.1 + 99.3);
+    const jy = Math.sin(i * 269.5 + 43.7);
+    const posJitter = 0.15 * Math.max(r, 1);
+    positions.push({
+      x: cx + Math.cos(angle) * r + jx * posJitter,
+      y: cy + Math.sin(angle) * r + jy * posJitter,
+    });
+  }
+
+  // Two spiral arms.
+  for (let i = 0; i < armCount; i++) {
     const arm = i % arms;
     const k = Math.floor(i / arms);
     const angle = armOffset * arm + k * angleStep;
     const radius = (a * Math.exp(b * angle)) * (spread / 200);
-    // deterministic jitter from index so neighbours don't align on the spiral
     const jitterAngle = ((i * 12.9898) % Math.PI) * 0.05;
     const jitterRadius = ((i * 78.233) % 23) - 11;
     const finalAngle = angle + jitterAngle;
     const finalRadius = radius + jitterRadius;
-    // ±20% of the system's distance from centre, derived from index.
     const posJitter = 0.2 * Math.abs(finalRadius);
     const jx = Math.sin(i * 127.1 + 311.7);
     const jy = Math.sin(i * 269.5 + 183.3);
     positions.push({
       x: cx + Math.cos(finalAngle) * finalRadius + jx * posJitter,
       y: cy + Math.sin(finalAngle) * finalRadius + jy * posJitter,
+    });
+  }
+  return positions;
+}
+
+/**
+ * Oval (elliptical) galaxy layout. Systems are distributed inside an ellipse
+ * with a linear density falloff from centre to edge — the centre is the
+ * densest region and density decreases to zero at the oval boundary.
+ *
+ * Angular coverage uses the golden-angle quasi-random sequence for even
+ * fill with no visible banding. The ellipse aspect ratio is derived
+ * deterministically from the galaxy id hash so each oval galaxy looks
+ * distinct.
+ */
+export function galaxyOvalPositions(
+  count: number,
+  cx: number,
+  cy: number,
+  spread: number,
+  galaxyId: string = '',
+): Array<{ x: number; y: number }> {
+  const positions: Array<{ x: number; y: number }> = [];
+  const maxR = spread * 0.3;
+
+  // Per-galaxy aspect ratio [1.4, 2.2] derived from id hash.
+  const h = hashId(galaxyId);
+  const aspectX = 1.4 + (h & 0xfff) / 0xfff * 0.8;
+
+  for (let i = 0; i < count; i++) {
+    // Golden angle gives uniform angular coverage without visible spokes.
+    const angle = i * 2.399963229;
+
+    // Linear density falloff in the radial cross-section:
+    //   density(r) ∝ (1 − r/R)  →  CDF: F(t) = 2t − t²  (t = r/R)
+    //   Inverse CDF: r/R = 1 − sqrt(1 − u)
+    const uRaw = (i * 0.6180339887) % 1;
+    const r = maxR * (1 - Math.sqrt(1 - uRaw));
+
+    const jitterAngle = ((i * 12.9898) % Math.PI) * 0.04;
+    const jitterR = ((i * 78.233) % 15) - 7.5;
+    const finalAngle = angle + jitterAngle;
+    const finalR = Math.max(0, r + jitterR * 0.4);
+
+    positions.push({
+      x: cx + Math.cos(finalAngle) * finalR * aspectX,
+      y: cy + Math.sin(finalAngle) * finalR,
     });
   }
   return positions;
@@ -570,7 +637,7 @@ export function drawGalaxyScene(
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
       const rotOff = galaxyRotationOffset(focus.id);
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff) };
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
@@ -581,7 +648,9 @@ export function drawGalaxyScene(
     const cy = vh / 2;
     const spreadPx = Math.min(vw, vh) * 0.7;
     const rotOff = data.galaxies.length === 1 ? galaxyRotationOffset(data.galaxies[0].id) : 0;
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff) };
+    const singleShape = data.galaxies[0]?.shape ?? 'spiral';
+    const singleId = data.galaxies[0]?.id ?? '';
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -642,7 +711,7 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id);
       ctx.restore();
       hit.push(...subHit);
     }
@@ -656,18 +725,17 @@ function galaxyRotationOffset(galaxyId: string): number {
   return h2 / 0x100000000 * Math.PI * 2;
 }
 
-// ── Spiral layout cache ───────────────────────────────────────────────────
-// rawPositions and star-radius stats are pure functions of (count, cx, cy,
-// spread, firstSystemId) — they never change between frames for the same
-// galaxy layout. Caching them avoids O(N) Math.exp calls and per-system
-// star-radius scans every animation frame.
-interface SpiralLayout {
+// ── Galaxy layout cache ───────────────────────────────────────────────────
+// rawPositions and star-radius stats are pure functions of (shape, galaxyId,
+// count, cx, cy, spread) — they never change between frames for the same
+// galaxy. Caching avoids O(N) Math.exp calls and star-radius scans per frame.
+interface GalaxyLayout {
   rawPositions: Array<{ x: number; y: number }>;
   maxStarRadii: number[];
   minR: number;
   maxR: number;
 }
-const spiralLayoutCache = new Map<string, SpiralLayout>();
+const spiralLayoutCache = new Map<string, GalaxyLayout>();
 const SPIRAL_CACHE_MAX = 10;
 
 function getOrBuildLayout(
@@ -675,12 +743,16 @@ function getOrBuildLayout(
   cx: number,
   cy: number,
   spread: number,
-): SpiralLayout {
-  const key = `${systems.length}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id ?? ''}`;
+  shape: 'spiral' | 'oval' = 'spiral',
+  galaxyId: string = '',
+): GalaxyLayout {
+  const key = `${shape}|${galaxyId}|${systems.length}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}`;
   const cached = spiralLayoutCache.get(key);
   if (cached) return cached;
 
-  const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
+  const rawPositions = shape === 'oval'
+    ? galaxyOvalPositions(systems.length, cx, cy, spread, galaxyId)
+    : galaxySpiralPositions(systems.length, cx, cy, spread);
   const maxStarRadii = systems.map(ss =>
     ss.stars.length > 0 ? Math.max(...ss.stars.map(s => s.radius)) : 0
   );
@@ -690,16 +762,16 @@ function getOrBuildLayout(
   if (spiralLayoutCache.size >= SPIRAL_CACHE_MAX) {
     spiralLayoutCache.delete(spiralLayoutCache.keys().next().value!);
   }
-  const layout: SpiralLayout = { rawPositions, maxStarRadii, minR, maxR };
+  const layout: GalaxyLayout = { rawPositions, maxStarRadii, minR, maxR };
   spiralLayoutCache.set(key, layout);
   return layout;
 }
 
 /**
- * Per-galaxy spiral renderer. Extracted from the original `drawGalaxyScene`
- * so it can be reused for the single-galaxy legacy path, focus mode, and
- * each above-LOD galaxy in the multi-galaxy view. Returns hit circles in
- * canvas coordinates (the canvas transform applies separately).
+ * Per-galaxy renderer. Handles both spiral and oval layout depending on the
+ * galaxy's shape. Extracted from `drawGalaxyScene` so it can be reused for
+ * the single-galaxy legacy path, focus mode, and each above-LOD galaxy in
+ * the multi-galaxy view. Returns hit circles in canvas coordinates.
  */
 function drawGalaxySpiral(
   ctx: CanvasRenderingContext2D,
@@ -712,8 +784,10 @@ function drawGalaxySpiral(
   cameraScale: number,
   viewBounds?: ViewBounds,
   rotationOffset: number = 0,
+  shape: 'spiral' | 'oval' = 'spiral',
+  galaxyId: string = '',
 ): HitCircle[] {
-  const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread);
+  const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread, shape, galaxyId);
 
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
   const cosG = Math.cos(galaxyAngle);
@@ -801,9 +875,11 @@ function drawGalaxyGlyph(
   const dominantStar = sampleSystem?.stars[0] ?? null;
   const dotColor = dominantStar ? starFill(dominantStar).core : '#dde0ff';
 
-  // Low-res spiral dots — same algorithm as the full spiral but with a
-  // fixed dot count so the glyph reads as a "compressed" galaxy.
-  const dotPositions = galaxySpiralPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6);
+  // Low-res dots — same shape as the full layout but with a fixed dot count
+  // so the glyph reads as a "compressed" galaxy.
+  const dotPositions = galaxy.shape === 'oval'
+    ? galaxyOvalPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6, galaxy.id)
+    : galaxySpiralPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6);
   const angle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
   const cosG = Math.cos(angle);
   const sinG = Math.sin(angle);
