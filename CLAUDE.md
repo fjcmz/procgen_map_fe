@@ -93,7 +93,7 @@ UniverseGenerator
   │              └─ subtype on isolated sub-stream `${seed}_satsubtype_${satellite.id}`
   ├─ chunk into ceil(N/100) galaxies (single galaxy when N ≤ 100 — legacy single-spiral path)
   ├─ name galaxies + universe (each entity's name on its own isolated sub-stream)
-  └─ layoutGalaxies via `${universeSeed}_galaxy_layout` (sunflower disc + relaxation)
+  └─ layoutGalaxies via `${universeSeed}_galaxy_layout` (random rejection-sampling, min centre distance 10 world units)
 ```
 
 See `universe_map.md` for the full breakdown.
