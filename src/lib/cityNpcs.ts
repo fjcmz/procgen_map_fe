@@ -38,14 +38,14 @@ export interface NpcEntry {
 }
 
 export interface NpcPlace {
-  /** Stable identifier — `landmark:<index>` or `block:<index>` or `common`. */
+  /** Stable identifier — `landmark:<index>` or `block:<index>`. */
   id: string;
   /** Display name shown in the place row. Falls back to kind-uppercased. */
   name: string;
   /** Coarse kind label for UI grouping — landmark `kind` or block `role`. */
   kind: string;
-  /** Either 'landmark' or 'block' (or 'common' for the synthetic fallback). */
-  source: 'landmark' | 'block' | 'common';
+  /** Either 'landmark' or 'block'. */
+  source: 'landmark' | 'block';
   entries: NpcEntry[];
   total: number;
 }
@@ -62,8 +62,15 @@ export interface NpcClassSummary {
 
 // ─── Tunables ───────────────────────────────────────────────────────────────
 
-/** NPC-to-PC ratio per spec ("about 10 times as many"). */
-const NPC_PER_PC = 10;
+/**
+ * Top-level (highest-level) NPC count is `pcCount × NPC_TOP_LEVEL_COEFF`. Each
+ * level below has TWICE as many — so a `maxNpcLevel = 7` city ends up with
+ * `topCount × (2^7 − 1) = topCount × 127` NPCs total. The geometric decay
+ * mirrors a real population pyramid (lots of level-1 townsfolk, very few
+ * level-N veterans) and matches the user's brief: "top levels have good
+ * amounts; but each level below should have twice as many".
+ */
+const NPC_TOP_LEVEL_COEFF = 4;
 
 // Stable iteration order for class buckets — rare/prestigious classes first
 // so they get first pick of the prestigious place pool when generation runs
@@ -73,14 +80,11 @@ const CLASS_ITER_ORDER: readonly NpcClassType[] = ['aristocrat', 'adept', 'warri
 // Iteration / sort order for `byClassLevel` rows. Keeps the UI stable.
 const CLASS_DISPLAY_ORDER: readonly NpcClassType[] = ['warrior', 'expert', 'adept', 'aristocrat'];
 
-// Residential-tier blocks aren't proper "places of work" — exclude them so
-// the place pool doesn't drown in generic dwellings. The user's brief calls
-// out "industrial quarters/places, and harbors" specifically; the remaining
-// roles (civic / market / harbor / agricultural / slum / dock / industry /
-// education_faith / military / trade / entertainment) are all retained.
-const EXCLUDED_BLOCK_ROLES = new Set<DistrictType>([
-  'residential_high', 'residential_medium', 'residential_low', 'excluded',
-]);
+// The only block role we never assign NPCs to — `excluded` is the V2
+// district sentinel for water / mountain / unbuildable polygons. Residential
+// blocks ARE candidates: most townsfolk live there, and the user's directive
+// is to distribute across ALL candidate places, not a curated subset.
+const EXCLUDED_BLOCK_ROLES = new Set<DistrictType>(['excluded']);
 
 // Landmark kinds that read as "punitive" or "marker" rather than employment
 // places. The user's request emphasises positive places of work.
@@ -97,7 +101,7 @@ const ARISTOCRAT_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
   foreign_quarter: 2, theater: 2, festival: 2, bathhouse: 2, archive: 2,
 };
 const ARISTOCRAT_DISTRICT_AFFINITY: Partial<Record<DistrictType, number>> = {
-  civic: 5, trade: 3, entertainment: 2, market: 2,
+  residential_high: 6, civic: 5, trade: 3, entertainment: 2, market: 2,
 };
 
 const ADEPT_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
@@ -105,7 +109,7 @@ const ADEPT_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
   academia: 3, civic_square: 2,
 };
 const ADEPT_DISTRICT_AFFINITY: Partial<Record<DistrictType, number>> = {
-  education_faith: 5, civic: 2,
+  education_faith: 5, civic: 2, residential_medium: 2, residential_low: 1,
 };
 
 const WARRIOR_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
@@ -113,7 +117,8 @@ const WARRIOR_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
   caravanserai: 3, foreign_quarter: 2, gallows: 2, civic_square: 2,
 };
 const WARRIOR_DISTRICT_AFFINITY: Partial<Record<DistrictType, number>> = {
-  military: 6, harbor: 3, dock: 3, slum: 2, civic: 2, trade: 1,
+  military: 6, harbor: 3, dock: 3, slum: 3, residential_low: 3, residential_medium: 2,
+  civic: 2, trade: 1,
 };
 
 const EXPERT_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
@@ -124,6 +129,7 @@ const EXPERT_LANDMARK_AFFINITY: Partial<Record<LandmarkKind, number>> = {
 const EXPERT_DISTRICT_AFFINITY: Partial<Record<DistrictType, number>> = {
   industry: 6, market: 5, harbor: 4, dock: 4, agricultural: 4, trade: 4,
   education_faith: 3, entertainment: 2,
+  residential_medium: 3, residential_low: 2, residential_high: 1,
 };
 
 function landmarkAffinity(npcClass: NpcClassType, kind: LandmarkKind): number {
@@ -150,19 +156,14 @@ interface PlaceCandidate {
   id: string;
   name: string;
   kind: string;
-  source: 'landmark' | 'block' | 'common';
+  source: 'landmark' | 'block';
   /** Cached affinity per class so we don't re-switch on every NPC pick. */
   baseAffinity: Record<NpcClassType, number>;
 }
 
 function buildPlaceCandidates(cityMap: CityMapDataV2 | undefined): PlaceCandidate[] {
+  if (!cityMap) return [];
   const out: PlaceCandidate[] = [];
-  if (!cityMap) {
-    return [{
-      id: 'common', name: 'Common dwellings', kind: 'townsfolk', source: 'common',
-      baseAffinity: { warrior: 1, expert: 1, adept: 1, aristocrat: 1 },
-    }];
-  }
 
   for (let i = 0; i < cityMap.landmarks.length; i++) {
     const lm = cityMap.landmarks[i];
@@ -204,12 +205,6 @@ function buildPlaceCandidates(cityMap: CityMapDataV2 | undefined): PlaceCandidat
     });
   }
 
-  if (out.length === 0) {
-    out.push({
-      id: 'common', name: 'Common dwellings', kind: 'townsfolk', source: 'common',
-      baseAffinity: { warrior: 1, expert: 1, adept: 1, aristocrat: 1 },
-    });
-  }
   return out;
 }
 
@@ -281,23 +276,28 @@ export function generateCityNpcs(
   if (city.isRuin) return empty;
   if (pcCount <= 0) return empty;
 
+  const candidates = buildPlaceCandidates(cityMap);
+  // No V2 city map / no candidate places → no NPCs. The DistrictModal in
+  // CityMapPopupV2 is the source of truth for "which places exist", so we
+  // never synthesise a generic bucket — once the city map loads the place
+  // pool fills in.
+  if (candidates.length === 0) return empty;
+
   const { maxLevel: maxPcLevel } = resolveCityRosterMax(city.size);
   const maxNpcLevel = Math.max(1, Math.floor(maxPcLevel / 2));
-  const totalNpcs = pcCount * NPC_PER_PC;
-
   const rng = seededPRNG(`${worldSeed}_npcs_${city.cellIndex}_y${year}`);
-  const candidates = buildPlaceCandidates(cityMap);
 
-  // Distribute `totalNpcs` uniformly across [1, maxNpcLevel] — same shape as
-  // the PC roster's uniform `[minLevel, maxLevel]` level roll. Distribute
-  // the remainder across the lowest levels so generation tends toward
-  // bottom-heavy populations (most townsfolk are tier 1).
+  // Geometric distribution: top level = `pcCount × NPC_TOP_LEVEL_COEFF`, each
+  // level below has TWICE as many. Total = topCount × (2^maxNpcLevel − 1).
+  // Per the user's spec: "the top levels have good amounts; but each level
+  // below should have twice as many".
+  const topCount = Math.max(1, Math.round(pcCount * NPC_TOP_LEVEL_COEFF));
   const perLevel = new Array<number>(maxNpcLevel + 1).fill(0);
-  const baseShare = Math.floor(totalNpcs / maxNpcLevel);
-  let remainder = totalNpcs - baseShare * maxNpcLevel;
-  for (let l = 1; l <= maxNpcLevel; l++) {
-    perLevel[l] = baseShare + (remainder > 0 ? 1 : 0);
-    if (remainder > 0) remainder--;
+  let totalNpcs = 0;
+  for (let l = maxNpcLevel; l >= 1; l--) {
+    const factor = 1 << (maxNpcLevel - l); // 1, 2, 4, 8, ...
+    perLevel[l] = topCount * factor;
+    totalNpcs += perLevel[l];
   }
 
   // (placeId → class → level → count) accumulator.
