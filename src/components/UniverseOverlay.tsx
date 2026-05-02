@@ -31,7 +31,7 @@ const TAB_WIDTHS: Record<OverlayTab, number> = {
   generation: 320,
   tree: 360,
 };
-const SYSTEM_OPTIONS = [10, 30, 80, 200, 500];
+const SYSTEM_OPTIONS = [500, 1000, 5000, 10000];
 
 // ── Focus-ring injection ──────────────────────────────────────────────────
 // Mirrors the world generation overlay (`UnifiedOverlay`) — :focus-visible
@@ -218,7 +218,7 @@ function GenerationTabBody({
         <input
           type="range"
           min={1}
-          max={500}
+          max={10000}
           step={1}
           value={numSolarSystems}
           onChange={(e) => onNumSolarSystemsChange(Number(e.target.value))}

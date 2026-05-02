@@ -13,7 +13,7 @@ import type {
 } from '../lib/universe/types';
 
 const DEFAULT_SEED = 'cosmos';
-const DEFAULT_SOLAR_SYSTEMS = 80;
+const DEFAULT_SOLAR_SYSTEMS = 500;
 
 interface UniverseScreenProps {
   /** Lifted to App so the universe survives a round-trip through the planet flow. */
