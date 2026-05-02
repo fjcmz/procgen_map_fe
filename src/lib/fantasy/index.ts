@@ -81,3 +81,14 @@ export {
   equipBonusSummary,
   formatCrit,
 } from './Equipment';
+
+export type { Spell, SpellSchool } from './Spell';
+export { SPELL_SCHOOLS, LEVEL_1_SPELLS, ALL_SPELLS, spellsForClassAndLevel } from './Spell';
+
+export type { CharacterSpellcasting, SpellcastingClassInfo } from './Spellcasting';
+export {
+  SPELLCASTING_CLASSES,
+  bonusSpellsForLevel,
+  maxSpellLevelForAbility,
+  rollCharacterSpellcasting,
+} from './Spellcasting';

@@ -9,6 +9,7 @@ import type { DistrictType, LandmarkKind } from '../lib/citymap';
 import type { Equipment } from '../lib/fantasy/Equipment';
 import { formatCrit } from '../lib/fantasy/Equipment';
 import { EquipmentPopup } from './EquipmentPopup';
+import { SpellPopup } from './SpellPopup';
 
 // Human-readable label for the affiliation's role / kind. Mirrors the
 // DISTRICT_ROLE_INFO / LANDMARK_KIND_INFO labels in `CityMapPopupV2.tsx` so
@@ -127,12 +128,21 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
   // displayed character switches.
   const [breakdownKey, setBreakdownKey] = useState<CombatBreakdownKey | null>(null);
   const [showEquipment, setShowEquipment] = useState(false);
+  // Spell popup visibility — opened by the Spells button below the combat
+  // grid. Resets together with the breakdown popup so switching characters
+  // never leaves a stale popup on screen.
+  const [spellsOpen, setSpellsOpen] = useState(false);
   useEffect(() => {
-    if (!isOpen) { setBreakdownKey(null); setShowEquipment(false); }
+    if (!isOpen) {
+      setBreakdownKey(null);
+      setShowEquipment(false);
+      setSpellsOpen(false);
+    }
   }, [isOpen]);
   useEffect(() => {
     setBreakdownKey(null);
     setShowEquipment(false);
+    setSpellsOpen(false);
   }, [character]);
 
   useEffect(() => {
@@ -236,6 +246,19 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
           {/* Weapon summary + Equipment button */}
           <WeaponBar character={c} onOpenEquipment={() => setShowEquipment(true)} />
 
+          {/* Spells button — opens the dedicated SpellPopup (slots + known
+              spells). Always rendered so non-spellcasters can confirm they
+              have no spells; the popup itself shows an explanatory empty
+              state when `spellcasting` is empty. */}
+          <button
+            type="button"
+            style={styles.spellsBtn}
+            onClick={() => setSpellsOpen(true)}
+            title="Open spell book"
+          >
+            Spells
+          </button>
+
           {/* Vitals — age + size + wealth */}
           <div style={styles.sectionLabel}>Vitals</div>
           <div style={styles.vitalsGrid}>
@@ -300,6 +323,16 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
           />
         )}
       </div>
+
+      {/* Spell popup — mounted as a sibling to the character popup so its
+          backdrop covers the whole viewport (not just the sheet). The
+          character popup stays mounted underneath; closing the spell popup
+          returns the user to the character sheet. */}
+      <SpellPopup
+        isOpen={spellsOpen}
+        character={c}
+        onClose={() => setSpellsOpen(false)}
+      />
     </>,
     document.body,
   );
@@ -840,6 +873,19 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'grid',
     gridTemplateColumns: 'repeat(5, 1fr)',
     gap: 6,
+  },
+  spellsBtn: {
+    padding: '8px 12px',
+    background: 'linear-gradient(180deg, #efe0b5 0%, #d8c285 100%)',
+    border: '1px solid #8a6a3a',
+    borderRadius: 4,
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#2a1a00',
+    textAlign: 'center',
+    width: '100%',
   },
   combatCell: {
     display: 'flex',

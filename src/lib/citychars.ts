@@ -39,6 +39,8 @@ import type { ClassLevel, CombatStats, BonusType, BonusComponent } from './fanta
 import { computeCombatStats } from './fantasy/Combat';
 import type { EquipmentSet } from './fantasy/Equipment';
 import { assignEquipment } from './fantasy/Equipment';
+import type { CharacterSpellcasting } from './fantasy/Spellcasting';
+import { rollCharacterSpellcasting } from './fantasy/Spellcasting';
 import type { City, Country, ReligionDetail, IllustrateDetail } from './types';
 import type { CityMapDataV2, DistrictType, LandmarkKind } from './citymap';
 
@@ -140,6 +142,13 @@ export interface CityCharacter {
    * AC and saving-throw bonuses from worn armor and shields.
    */
   equipment: EquipmentSet;
+  /**
+   * Per-spellcasting-class spell slot tables and known/memorized spell
+   * lists. One entry per spellcasting class in `classLevels`; absent (or
+   * empty) when the character has no spellcasting class. Drives the
+   * character spell popup.
+   */
+  spellcasting?: CharacterSpellcasting[];
   /**
    * When this character represents a simulation-generated illustrate (i.e.
    * the city has a famous historical figure currently active), these fields
@@ -754,6 +763,18 @@ export function generateCityCharacters(
     assignRelationships(out, relRng);
   } else {
     for (const c of out) c.relationships = [];
+  }
+
+  // Spellcasting pass — isolated PRNG sub-stream per character so adding
+  // future class slots / higher spell levels can't shift existing roster
+  // output. Resolves spell slots, known spells (random for wizard / sorcerer
+  // / bard, full class list for cleric / druid / paladin / ranger), and
+  // memorized spells for prepared casters. Non-spellcasting classes get an
+  // empty array.
+  for (let i = 0; i < out.length; i++) {
+    const c = out[i];
+    const spellRng = seededPRNG(worldSeed + '_charspells_' + city.cellIndex + '_' + i + yearKey);
+    c.spellcasting = rollCharacterSpellcasting(c.classLevels, c.abilities, spellRng);
   }
 
   return out;
