@@ -27,7 +27,7 @@ import { computeLayoutExtent } from './galaxyLayout';
  */
 
 // ── Background star field constants ───────────────────────────────────────
-const STAR_FIELD_COUNT = 200;
+const STAR_FIELD_COUNT = 500;
 const STAR_FIELD_SEED = 42;
 
 // ── Orbital animation speeds ───────────────────────────────────────────────
@@ -49,6 +49,18 @@ const SAT_MAX_PX = 10;
 
 const SAT_BASE_ORBIT = 90;
 const SAT_ORBIT_STEP = 44;
+
+// ── FNV-1a hash for deterministic per-galaxy variability ─────────────────
+// Produces a uint32 from a string id so the same galaxy always gets the
+// same jitter / rotation offset, independent of generation order.
+function hashId(id: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h;
+}
 
 // ── Tiny seeded LCG used only for the static background star field ─────
 function lcg(seed: number): () => number {
@@ -160,9 +172,13 @@ export function galaxySpiralPositions(
     const jitterRadius = ((i * 78.233) % 23) - 11;
     const finalAngle = angle + jitterAngle;
     const finalRadius = radius + jitterRadius;
+    // ±20% of the system's distance from centre, derived from index.
+    const posJitter = 0.2 * Math.abs(finalRadius);
+    const jx = Math.sin(i * 127.1 + 311.7);
+    const jy = Math.sin(i * 269.5 + 183.3);
     positions.push({
-      x: cx + Math.cos(finalAngle) * finalRadius,
-      y: cy + Math.sin(finalAngle) * finalRadius,
+      x: cx + Math.cos(finalAngle) * finalRadius + jx * posJitter,
+      y: cy + Math.sin(finalAngle) * finalRadius + jy * posJitter,
     });
   }
   return positions;
@@ -184,7 +200,7 @@ export function createStarField(viewportW: number, viewportH: number): Backgroun
       x: rng() * viewportW,
       y: rng() * viewportH,
       r: rng() * 0.8 + 0.15,
-      alpha: rng() * 0.15 + 0.03,
+      alpha: rng() * 0.5 + 0.1,
     });
   }
   return stars;
@@ -553,7 +569,8 @@ export function drawGalaxyScene(
       const cx = vw / 2;
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds) };
+      const rotOff = galaxyRotationOffset(focus.id);
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
@@ -563,7 +580,8 @@ export function drawGalaxyScene(
     const cx = vw / 2;
     const cy = vh / 2;
     const spreadPx = Math.min(vw, vh) * 0.7;
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds) };
+    const rotOff = data.galaxies.length === 1 ? galaxyRotationOffset(data.galaxies[0].id) : 0;
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -575,10 +593,21 @@ export function drawGalaxyScene(
 
   const hit: HitCircle[] = [];
   for (const galaxy of data.galaxies) {
-    const gcx = originX + galaxy.cx * worldScale;
-    const gcy = originY + galaxy.cy * worldScale;
-    const gRadiusCanvas = galaxy.radius * worldScale;
     const gSpreadCanvas = galaxy.spread * worldScale;
+
+    // Derive per-galaxy position jitter and initial rotation from galaxy id.
+    const h0 = hashId(galaxy.id);
+    const h1 = Math.imul(h0 ^ (h0 >>> 16), 0x45d9f3b) >>> 0;
+    const h2 = Math.imul(h1 ^ (h1 >>> 16), 0x45d9f3b) >>> 0;
+    const jx = h0 / 0x100000000 * 2 - 1;   // ±1, used for x position jitter
+    const jy = h1 / 0x100000000 * 2 - 1;   // ±1, used for y position jitter
+    const rotOff = h2 / 0x100000000 * Math.PI * 2;
+
+    // Apply ±20% of spread as a position offset so galaxies don't sit on a
+    // perfectly regular grid even after layout recentering.
+    const gcx = originX + galaxy.cx * worldScale + jx * 0.2 * gSpreadCanvas;
+    const gcy = originY + galaxy.cy * worldScale + jy * 0.2 * gSpreadCanvas;
+    const gRadiusCanvas = galaxy.radius * worldScale;
     const gScreenRadius = gRadiusCanvas * viewScale;
 
     // Cross-fade glyph ↔ embedded systems across the blend zone.
@@ -592,7 +621,7 @@ export function drawGalaxyScene(
       if (!viewBounds || circleIntersectsViewBounds(gcx, gcy, gRadiusCanvas, viewBounds)) {
         ctx.save();
         ctx.globalAlpha = glyphAlpha;
-        drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale);
+        drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale, rotOff);
         ctx.restore();
       }
       // Galaxy hit pushed FIRST so per-system hits (drawn next) win on
@@ -613,12 +642,18 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff);
       ctx.restore();
       hit.push(...subHit);
     }
   }
   return { hit };
+}
+
+function galaxyRotationOffset(galaxyId: string): number {
+  const h = hashId(galaxyId);
+  const h2 = Math.imul(Math.imul(h ^ (h >>> 16), 0x45d9f3b) ^ ((Math.imul(h ^ (h >>> 16), 0x45d9f3b) >>> 16)), 0x45d9f3b) >>> 0;
+  return h2 / 0x100000000 * Math.PI * 2;
 }
 
 // ── Spiral layout cache ───────────────────────────────────────────────────
@@ -676,10 +711,11 @@ function drawGalaxySpiral(
   viewScale: number,
   cameraScale: number,
   viewBounds?: ViewBounds,
+  rotationOffset: number = 0,
 ): HitCircle[] {
   const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread);
 
-  const galaxyAngle = timeSec * GALAXY_SPIN_SPEED;
+  const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
 
@@ -756,6 +792,7 @@ function drawGalaxyGlyph(
   data: UniverseData,
   timeSec: number,
   viewScale: number,
+  rotationOffset: number = 0,
 ): void {
   // Sample composition from the first few member stars to tint the glyph.
   const sampleSystem = galaxy.systemIds.length > 0
@@ -767,7 +804,7 @@ function drawGalaxyGlyph(
   // Low-res spiral dots — same algorithm as the full spiral but with a
   // fixed dot count so the glyph reads as a "compressed" galaxy.
   const dotPositions = galaxySpiralPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6);
-  const angle = timeSec * GALAXY_SPIN_SPEED;
+  const angle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
   const cosG = Math.cos(angle);
   const sinG = Math.sin(angle);
   const dotR = Math.max(0.6 / viewScale, radius * 0.04);
