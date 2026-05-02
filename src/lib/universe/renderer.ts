@@ -259,6 +259,7 @@ function planetFill(p: PlanetData): string {
 }
 
 function satelliteFill(s: SatelliteData): string {
+  if (s.life) return '#5fa86a';
   return s.composition === 'ICE' ? '#dde8f0' : '#9a8e80';
 }
 
@@ -491,6 +492,13 @@ export function drawPlanetScene(
     const sy = cy + Math.sin(angle) * ringR;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
     drawCircle(ctx, sx, sy, sizePx, satelliteFill(sat));
+    if (sat.life) {
+      ctx.beginPath();
+      ctx.arc(sx, sy, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(120,255,150,0.55)';
+      ctx.lineWidth = 1 / viewScale;
+      ctx.stroke();
+    }
     hit.push({ x: sx, y: sy, r: Math.max(sizePx * 2, 10 / viewScale), kind: 'satellite', id: sat.id });
   }
   return { hit };
