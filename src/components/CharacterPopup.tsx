@@ -1,9 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CityCharacter, CharacterAffiliation } from '../lib/citychars';
 import { alignmentBadge, raceLabel } from '../lib/citychars';
 import { abilityMod } from '../lib/fantasy/Ability';
 import type { Ability } from '../lib/fantasy/Ability';
+import type { DerivedStat, BonusComponent, BonusType } from '../lib/fantasy/Combat';
 import type { DistrictType, LandmarkKind } from '../lib/citymap';
 
 // Human-readable label for the affiliation's role / kind. Mirrors the
@@ -118,14 +119,29 @@ function fmtHeight(inches: number): string {
  * backdrop click, ESC, or the × button.
  */
 export function CharacterPopup({ isOpen, character, cityName, onClose, roster, onSelectCharacter }: CharacterPopupProps) {
+  // Active breakdown sub-popup: 'bab' | 'ac' | 'fortitude' | 'reflex' | 'will'
+  // (or null when none open). Reset whenever the popup closes or the
+  // displayed character switches.
+  const [breakdownKey, setBreakdownKey] = useState<CombatBreakdownKey | null>(null);
+  useEffect(() => {
+    if (!isOpen) setBreakdownKey(null);
+  }, [isOpen]);
+  useEffect(() => {
+    setBreakdownKey(null);
+  }, [character]);
+
   useEffect(() => {
     if (!isOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        // ESC closes the breakdown first if one's open, then the main popup.
+        if (breakdownKey) setBreakdownKey(null);
+        else onClose();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, breakdownKey]);
 
   if (!isOpen || !character) return null;
 
@@ -202,6 +218,16 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
             })}
           </div>
 
+          {/* Combat — BAB / AC / saves. Each card opens a breakdown sub-popup. */}
+          <div style={styles.sectionLabel}>Combat</div>
+          <div style={styles.combatGrid}>
+            <CombatCell label="BAB"  total={c.combat.bab.total}            onClick={() => setBreakdownKey('bab')} />
+            <CombatCell label="AC"   total={c.combat.ac.total}             onClick={() => setBreakdownKey('ac')} />
+            <CombatCell label="Fort" total={c.combat.saves.fortitude.total} onClick={() => setBreakdownKey('fortitude')} />
+            <CombatCell label="Ref"  total={c.combat.saves.reflex.total}    onClick={() => setBreakdownKey('reflex')} />
+            <CombatCell label="Will" total={c.combat.saves.will.total}      onClick={() => setBreakdownKey('will')} />
+          </div>
+
           {/* Vitals — age + size + wealth */}
           <div style={styles.sectionLabel}>Vitals</div>
           <div style={styles.vitalsGrid}>
@@ -255,10 +281,129 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
             </>
           )}
         </div>
+
+        {/* Combat-stat breakdown sub-popup. Renders as a backdrop + card on
+            top of the main character popup; closing it returns to the sheet. */}
+        {breakdownKey && (
+          <CombatBreakdown
+            character={c}
+            breakdownKey={breakdownKey}
+            onClose={() => setBreakdownKey(null)}
+          />
+        )}
       </div>
     </>,
     document.body,
   );
+}
+
+type CombatBreakdownKey = 'bab' | 'ac' | 'fortitude' | 'reflex' | 'will';
+
+const BREAKDOWN_LABELS: Record<CombatBreakdownKey, string> = {
+  bab:       'Base Attack Bonus',
+  ac:        'Armor Class',
+  fortitude: 'Fortitude Save',
+  reflex:    'Reflex Save',
+  will:      'Will Save',
+};
+
+const BONUS_TYPE_COLORS: Record<BonusType, string> = {
+  base:        '#5a3a10',
+  ability:     '#3a5a8a',
+  size:        '#7a5a30',
+  armor:       '#5a4a3a',
+  shield:      '#5a4a3a',
+  natural:     '#4a6a3a',
+  dodge:       '#3a6a5a',
+  deflection:  '#6a4a8a',
+  enhancement: '#8a4a8a',
+  resistance:  '#3a8a8a',
+  racial:      '#8a5a3a',
+  morale:      '#8a6a3a',
+  luck:        '#3a8a5a',
+  sacred:      '#a08030',
+  profane:     '#80303a',
+  insight:     '#3a8aa0',
+  competence:  '#5a6a8a',
+  magic:       '#7a3a8a',
+  misc:        '#7a5a30',
+};
+
+function CombatCell({ label, total, onClick }: { label: string; total: number; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={styles.combatCell}
+      title={`Click for ${label} breakdown`}
+    >
+      <div style={styles.combatLabel}>{label}</div>
+      <div style={styles.combatTotal}>{formatSigned(total)}</div>
+    </button>
+  );
+}
+
+function CombatBreakdown({
+  character,
+  breakdownKey,
+  onClose,
+}: {
+  character: CityCharacter;
+  breakdownKey: CombatBreakdownKey;
+  onClose: () => void;
+}) {
+  const stat: DerivedStat =
+    breakdownKey === 'bab'       ? character.combat.bab :
+    breakdownKey === 'ac'        ? character.combat.ac  :
+    breakdownKey === 'fortitude' ? character.combat.saves.fortitude :
+    breakdownKey === 'reflex'    ? character.combat.saves.reflex :
+                                   character.combat.saves.will;
+  return (
+    <>
+      <div style={styles.subBackdrop} onClick={onClose} />
+      <div style={styles.subContainer} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true">
+        <div style={styles.subHeader}>
+          <span style={styles.subTitle}>{BREAKDOWN_LABELS[breakdownKey]}</span>
+          <button style={styles.closeBtn} onClick={onClose} title="Close (Esc)">&times;</button>
+        </div>
+        <div style={styles.subBody}>
+          <div style={styles.subTotalRow}>
+            <span style={styles.subTotalLabel}>Total</span>
+            <span style={styles.subTotalValue}>{formatSigned(stat.total)}</span>
+          </div>
+          {stat.components.length === 0 ? (
+            <div style={styles.subEmpty}>No contributions.</div>
+          ) : (
+            <div style={styles.subList}>
+              {stat.components.map((bc, i) => (
+                <BreakdownRow key={i} bc={bc} />
+              ))}
+            </div>
+          )}
+          <div style={styles.subFootnote}>
+            Bonus types follow D&D 3.5e: same-type bonuses don't stack (only the largest applies);
+            <em> dodge</em> and <em>untyped</em> bonuses do.
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BreakdownRow({ bc }: { bc: BonusComponent }) {
+  return (
+    <div style={styles.subRow}>
+      <span style={styles.subRowSource}>{bc.source}</span>
+      <span style={{ ...styles.subRowType, color: BONUS_TYPE_COLORS[bc.type] ?? '#7a5a30' }}>
+        {bc.type}
+      </span>
+      <span style={styles.subRowValue}>{formatSigned(bc.value)}</span>
+    </div>
+  );
+}
+
+function formatSigned(n: number): string {
+  return n >= 0 ? `+${n}` : `${n}`;
 }
 
 function VitalRow({ label, value }: { label: string; value: string }) {
@@ -549,5 +694,144 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     flexShrink: 0,
+  },
+  combatGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(5, 1fr)',
+    gap: 6,
+  },
+  combatCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '6px 2px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+    cursor: 'pointer',
+    font: 'inherit',
+    color: 'inherit',
+  },
+  combatLabel: {
+    fontSize: 9,
+    color: '#7a5a30',
+    fontWeight: 600,
+    letterSpacing: 0.5,
+  },
+  combatTotal: {
+    fontSize: 17,
+    fontWeight: 700,
+    color: '#2a1a00',
+    fontFamily: 'Georgia, serif',
+    lineHeight: 1.2,
+  },
+  subBackdrop: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: 'rgba(30, 20, 10, 0.45)',
+    zIndex: 1,
+  },
+  subContainer: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: 'min(360px, calc(100% - 24px))',
+    maxHeight: 'calc(100% - 24px)',
+    background: '#f5e9c8',
+    border: '2px solid #8a6a3a',
+    borderRadius: 6,
+    boxShadow: '0 6px 20px rgba(0,0,0,0.4)',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    zIndex: 2,
+  },
+  subHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '8px 12px',
+    borderBottom: '1px solid #c8a868',
+    background: 'linear-gradient(180deg, #efe0b5 0%, #e6d5a3 100%)',
+  },
+  subTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: '#2a1a00',
+    fontFamily: 'Georgia, serif',
+  },
+  subBody: {
+    padding: '10px 12px',
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+  },
+  subTotalRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    padding: '6px 10px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+  },
+  subTotalLabel: {
+    fontSize: 10,
+    color: '#7a5a30',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    fontWeight: 700,
+  },
+  subTotalValue: {
+    fontSize: 18,
+    fontWeight: 700,
+    color: '#2a1a00',
+    fontFamily: 'Georgia, serif',
+  },
+  subList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+  },
+  subRow: {
+    display: 'grid',
+    gridTemplateColumns: '1fr auto auto',
+    gap: 8,
+    alignItems: 'baseline',
+    padding: '4px 8px',
+    fontSize: 12,
+    color: '#2a1a00',
+    borderBottom: '1px dotted rgba(138, 106, 58, 0.3)',
+  },
+  subRowSource: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  subRowType: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    textTransform: 'lowercase',
+  },
+  subRowValue: {
+    fontFamily: 'Georgia, serif',
+    fontWeight: 700,
+    minWidth: 32,
+    textAlign: 'right',
+  },
+  subEmpty: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#7a5a30',
+    padding: '4px 8px',
+  },
+  subFootnote: {
+    fontSize: 10,
+    color: '#7a5a30',
+    fontStyle: 'italic',
+    paddingTop: 2,
+    borderTop: '1px solid #d4b896',
   },
 };

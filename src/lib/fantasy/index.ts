@@ -42,3 +42,26 @@ export { PcChar } from './PcChar';
 
 export type { PcCharBiasOptions } from './PcCharGenerator';
 export { PcCharGenerator, pcCharGenerator, generatePcChar, generatePcCharBiased } from './PcCharGenerator';
+
+export type {
+  ClassLevel,
+  BonusType,
+  BonusComponent,
+  DerivedStat,
+  Saves,
+  CombatStats,
+  BabRate,
+  SaveQuality,
+  SaveProfile,
+} from './Combat';
+export {
+  BAB_RATE_BY_CLASS,
+  SAVE_PROFILE_BY_CLASS,
+  babForClass,
+  goodSaveBase,
+  poorSaveBase,
+  computeBAB,
+  computeAC,
+  computeSaves,
+  computeCombatStats,
+} from './Combat';

@@ -35,6 +35,8 @@ import type { RaceType } from './fantasy/RaceType';
 import type { AlignmentType } from './fantasy/AlignmentType';
 import type { Ability } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
+import type { ClassLevel, CombatStats } from './fantasy/Combat';
+import { computeCombatStats } from './fantasy/Combat';
 import type { City, Country, ReligionDetail, IllustrateDetail } from './types';
 import type { CityMapDataV2, DistrictType, LandmarkKind } from './citymap';
 
@@ -92,11 +94,25 @@ export interface CityCharacter {
   race: RaceType;
   pcClass: PcClassType;
   level: number;
+  /**
+   * Multi-class progression. Always populated; single-class characters carry
+   * a length-1 list `[{ pcClass, level }]`. The combat stats below are summed
+   * across this list, so adding a second class entry would automatically
+   * fold its BAB / save contributions in.
+   */
+  classLevels: ClassLevel[];
   alignment: AlignmentType;
   /** Display name, matches `DEITY_SPECS[d].name` or 'none'. */
   deity: string;
   hitPoints: number;
   abilities: Record<Ability, number>;
+  /**
+   * D&D 3.5e combat-side derived stats: Base Attack Bonus, Armor Class, and
+   * the three saving throws (Fort / Ref / Will). Each carries a typed
+   * `components` list so the UI can show a stacking-aware breakdown when the
+   * user clicks the corresponding number in the character popup.
+   */
+  combat: CombatStats;
   age: { currentAge: number; middleAge: number; oldAge: number; venerableAge: number; maxAge: number };
   height: number;
   weight: number;
@@ -576,11 +592,16 @@ export function generateCityCharacters(
     const abilities = {} as Record<Ability, number>;
     pc.abilities.forEach((v, k) => { abilities[k] = v; });
 
+    const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
+    const combat = computeCombatStats(classLevels, abilities, pc.race);
+
     out.push({
       name: il.name,
       race: pc.race,
       pcClass: pc.pcClass,
       level: pc.level,
+      classLevels,
+      combat,
       alignment: pc.alignment,
       deity: pc.deity,
       hitPoints: pc.hitPoints,
@@ -620,11 +641,16 @@ export function generateCityCharacters(
     const abilities = {} as Record<Ability, number>;
     pc.abilities.forEach((v, k) => { abilities[k] = v; });
 
+    const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
+    const combat = computeCombatStats(classLevels, abilities, pc.race);
+
     out.push({
       name: generateIllustrateName(rng, usedNames),
       race: pc.race,
       pcClass: pc.pcClass,
       level: pc.level,
+      classLevels,
+      combat,
       alignment: pc.alignment,
       deity: pc.deity,
       hitPoints: pc.hitPoints,
