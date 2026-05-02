@@ -197,6 +197,24 @@ const DOMINANT_RACE_MULT = 12;
 const SECONDARY_RACE_MULT = 4;
 const DOMINANT_DEITY_MULT = 8;
 
+/**
+ * Apply ±10% deterministic jitter to a count via stochastic rounding so even
+ * small counts (like the small-tier roster of 3) see variation across seeds.
+ * `val × [0.9, 1.1]` is split into integer + fractional parts; the fraction
+ * controls the probability of bumping the integer by 1.
+ *
+ * Consumes 2 RNG draws per call. Exported as a file-local helper so the NPC
+ * generator can mirror the same shape (it consumes its own PRNG sub-stream).
+ */
+export function jitter10pct(count: number, rng: () => number): number {
+  if (count <= 0) return 0;
+  const factor = 0.9 + rng() * 0.2;
+  const val = count * factor;
+  const intPart = Math.floor(val);
+  const fracPart = val - intPart;
+  return intPart + (rng() < fracPart ? 1 : 0);
+}
+
 // ─── Affiliation tables ────────────────────────────────────────────────────
 //
 // Class / race → preferred LandmarkKinds and DistrictTypes. Used by
@@ -704,7 +722,7 @@ export function generateCityCharacters(
   // Reserve illustrate names so the ordinary roller never picks the same one.
   for (const il of activeIllustrates) usedNames.add(il.name);
 
-  const ordinaryCount = Math.max(0, profile.count - activeIllustrates.length);
+  const ordinaryCount = Math.max(0, jitter10pct(profile.count, rng) - activeIllustrates.length);
 
   const out: CityCharacter[] = [];
 

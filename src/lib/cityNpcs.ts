@@ -25,7 +25,7 @@
 import { seededPRNG } from './terrain/noise';
 import { NPC_CLASS_SPECS } from './fantasy/NpcClassType';
 import type { NpcClassType } from './fantasy/NpcClassType';
-import { resolveCityRosterMax } from './citychars';
+import { resolveCityRosterMax, jitter10pct } from './citychars';
 import type { City } from './types';
 import type { CityMapDataV2, LandmarkKind, DistrictType } from './citymap';
 
@@ -290,13 +290,15 @@ export function generateCityNpcs(
   // Geometric distribution: top level = `pcCount × NPC_TOP_LEVEL_COEFF`, each
   // level below has TWICE as many. Total = topCount × (2^maxNpcLevel − 1).
   // Per the user's spec: "the top levels have good amounts; but each level
-  // below should have twice as many".
+  // below should have twice as many". Each level is jittered ±10% via
+  // stochastic rounding so the city counts vary organically across seeds /
+  // years instead of locking to clean powers of two.
   const topCount = Math.max(1, Math.round(pcCount * NPC_TOP_LEVEL_COEFF));
   const perLevel = new Array<number>(maxNpcLevel + 1).fill(0);
   let totalNpcs = 0;
   for (let l = maxNpcLevel; l >= 1; l--) {
     const factor = 1 << (maxNpcLevel - l); // 1, 2, 4, 8, ...
-    perLevel[l] = topCount * factor;
+    perLevel[l] = jitter10pct(topCount * factor, rng);
     totalNpcs += perLevel[l];
   }
 
