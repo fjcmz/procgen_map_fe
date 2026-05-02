@@ -715,7 +715,7 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    const equipment = assignEquipment(pc.pcClass, pc.wealth, abilities);
+    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities);
     const char: CityCharacter = {
       name: il.name,
       race: pc.race,
@@ -768,7 +768,7 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    const equipment = assignEquipment(pc.pcClass, pc.wealth, abilities);
+    const equipment = assignEquipment(pc.pcClass, pc.level, pc.wealth, abilities);
     const char: CityCharacter = {
       name: generateIllustrateName(rng, usedNames),
       race: pc.race,
