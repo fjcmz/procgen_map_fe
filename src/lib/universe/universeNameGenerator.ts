@@ -53,7 +53,9 @@ function makeGalaxyHumanName(rng: () => number): string {
 }
 
 /**
- * Galaxy names are universe-scoped singletons — no `usedNames` dedup needed.
+ * Galaxy names are sub-stream-scoped — pass the per-galaxy seed
+ * (e.g. `${universeSeed}_galaxy_${i}`) to keep names independent of system
+ * generation order and stable across regens.
  * Scientific: NGC-XXXX (4 uppercase hex digits).
  * Human: grand 3-part syllable composition.
  */
@@ -63,6 +65,33 @@ export function generateGalaxyName(seed: string): { human: string; scientific: s
   const scientific = `NGC-${hex}`;
   const human = makeGalaxyHumanName(rng);
   return { human, scientific };
+}
+
+// ── Universe (umbrella name above galaxies) ───────────────────────────────
+
+// Reuses GALAXY_* syllable arrays so universe names share the same phonetic
+// register but tag with a "Local Group / Cluster / Expanse" suffix to read as
+// the wrapper above galaxies.
+const UNIVERSE_SUFFIXES = [
+  'Cluster', 'Expanse', 'Reach', 'Local Group', 'Vault', 'Sea', 'Veil',
+] as const;
+
+/**
+ * Universe-level umbrella name. Used when the canvas/tree shows multiple
+ * galaxies — the universe needs its own identity once it's no longer
+ * synonymous with a single galaxy. Isolated PRNG sub-stream
+ * (`${seed}_universename`) so it never perturbs galaxy or system generation.
+ *
+ * Scientific: LG-XXXX (Local-Group catalog).
+ * Human: 3-part galaxy syllable + suffix word, e.g. "Velarionia Cluster".
+ */
+export function generateUniverseName(seed: string): { human: string; scientific: string } {
+  const rng = seededPRNG(`${seed}_universename`);
+  const hex = Math.floor(rng() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+  const scientific = `LG-${hex}`;
+  const stem = makeGalaxyHumanName(rng);
+  const suffix = pick(UNIVERSE_SUFFIXES, rng);
+  return { human: `${stem} ${suffix}`, scientific };
 }
 
 // ── Star ──────────────────────────────────────────────────────────────────

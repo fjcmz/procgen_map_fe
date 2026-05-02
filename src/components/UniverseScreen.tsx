@@ -65,7 +65,7 @@ export function UniverseScreen({
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [sceneState, setSceneState] = useState<UniverseSceneState>({
-    scene: 'galaxy', systemId: null, planetId: null,
+    scene: 'galaxy', systemId: null, planetId: null, galaxyId: null,
   });
   const [popupEntity, setPopupEntity] = useState<PopupEntity | null>(null);
 
@@ -172,26 +172,49 @@ export function UniverseScreen({
     setPopupEntity(null);
   }, []);
 
+  // Resolve the parent galaxy id of a system. Used by Up navigation so that
+  // exiting a system inside a grouped universe drops back into its galaxy
+  // (focus mode), not the multi-galaxy overview. Returns null in single-
+  // galaxy universes — focus mode there would render byte-identically to the
+  // legacy view but adds a confusing "Back" affordance to the overlay.
+  const galaxyIdOfSystem = useCallback((systemId: string): string | null => {
+    if (!data || data.galaxies.length <= 1) return null;
+    for (const g of data.galaxies) {
+      if (g.systemIds.includes(systemId)) return g.id;
+    }
+    return null;
+  }, [data]);
+
   // Navigate to the entity's parent scene and close the popup.
   const handlePopupNavigateUp = useCallback(() => {
     if (!popupEntity) return;
     setPopupEntity(null);
-    if (popupEntity.kind === 'system') {
-      canvasRef.current?.navigateTo('galaxy');
-    } else if (popupEntity.kind === 'star') {
-      canvasRef.current?.navigateTo('galaxy');
+    if (popupEntity.kind === 'galaxy') {
+      // ↑ Universe — multi-galaxy overview (clear focus).
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
+    } else if (popupEntity.kind === 'system' || popupEntity.kind === 'star') {
+      const galId = galaxyIdOfSystem(popupEntity.systemId);
+      // In a grouped universe, ↑ Galaxy lands in focus mode for the parent
+      // galaxy. In a single-galaxy universe `galId` is `gal_0` (focus mode
+      // there is identical to the legacy single-spiral view, so this is
+      // visually a no-op — same renderer path).
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, galId ?? undefined);
     } else if (popupEntity.kind === 'planet') {
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
     } else if (popupEntity.kind === 'satellite') {
       canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
     }
-  }, [popupEntity]);
+  }, [popupEntity, galaxyIdOfSystem]);
 
   // Navigate into the entity's child scene and close the popup.
   const handlePopupNavigateDown = useCallback(() => {
     if (!popupEntity) return;
     setPopupEntity(null);
-    if (popupEntity.kind === 'system') {
+    if (popupEntity.kind === 'galaxy') {
+      // ↓ Enter Galaxy → galaxy focus mode (single-spiral view of just this
+      // galaxy, mirrors legacy single-galaxy rendering).
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, popupEntity.galaxyId);
+    } else if (popupEntity.kind === 'system') {
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
     } else if (popupEntity.kind === 'planet') {
       canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
@@ -199,12 +222,17 @@ export function UniverseScreen({
     // star + satellite are leaves — no down navigation
   }, [popupEntity]);
 
-  // Tree entity selection: navigate the canvas to the scene that displays the
-  // entity, then open the details popup. System → galaxy view, star/planet →
-  // system view, satellite → planet view.
+  // Tree / popup entity selection: navigate the canvas to the scene that
+  // displays the entity, then open the details popup. Galaxy → galaxy focus
+  // (or overview when single), system → its parent galaxy view (focus when
+  // grouped), star/planet → system view, satellite → planet view.
   const handleTreeEntitySelect = useCallback((entity: PopupEntity) => {
-    if (entity.kind === 'system') {
-      canvasRef.current?.navigateTo('galaxy');
+    if (entity.kind === 'galaxy') {
+      // Tree click on a galaxy: jump to focus on it so the popup opens with
+      // the matching scene already visible behind the modal.
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, entity.galaxyId);
+    } else if (entity.kind === 'system') {
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, galaxyIdOfSystem(entity.systemId) ?? undefined);
     } else if (entity.kind === 'star') {
       canvasRef.current?.navigateTo('system', entity.systemId);
     } else if (entity.kind === 'planet') {
@@ -213,7 +241,7 @@ export function UniverseScreen({
       canvasRef.current?.navigateTo('planet', entity.systemId, entity.planetId);
     }
     setPopupEntity(entity);
-  }, []);
+  }, [galaxyIdOfSystem]);
 
   return (
     <>
@@ -249,7 +277,7 @@ export function UniverseScreen({
           onClose={handlePopupClose}
           onNavigateUp={handlePopupNavigateUp}
           onNavigateDown={
-            popupEntity.kind === 'system' || popupEntity.kind === 'planet'
+            popupEntity.kind === 'galaxy' || popupEntity.kind === 'system' || popupEntity.kind === 'planet'
               ? handlePopupNavigateDown
               : undefined
           }
@@ -259,6 +287,7 @@ export function UniverseScreen({
           onGenerateSatelliteWorld={
             onGenerateWorldFromSatellite ? handleGenerateSatelliteWorldFromPopup : undefined
           }
+          onSelectEntity={handleTreeEntitySelect}
         />
       )}
       {!data && !generating && (

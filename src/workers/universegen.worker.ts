@@ -6,6 +6,7 @@ import type {
   UniverseGenerateRequest,
   UniverseWorkerMessage,
   SolarSystemData,
+  GalaxyData,
 } from '../lib/universe/types';
 
 function post(msg: UniverseWorkerMessage): void {
@@ -54,12 +55,23 @@ function serializeUniverse(universe: Universe): UniverseData {
       })),
     })),
   }));
+  const galaxies: GalaxyData[] = universe.galaxies.map(g => ({
+    id: g.id,
+    humanName: g.humanName,
+    scientificName: g.scientificName,
+    systemIds: g.solarSystems.map(ss => ss.id),
+    cx: g.cx,
+    cy: g.cy,
+    radius: g.radius,
+    spread: g.spread,
+  }));
   return {
     id: universe.id,
     humanName: universe.humanName,
     scientificName: universe.scientificName,
     seed: universe.seed,
     solarSystems,
+    galaxies,
   };
 }
 

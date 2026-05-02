@@ -17,9 +17,18 @@ export interface UniverseSceneState {
   scene: UniverseScene;
   systemId: string | null;
   planetId: string | null;
+  /**
+   * Optional galaxy focus. When non-null in the `galaxy` scene the renderer
+   * displays only that galaxy centered (legacy single-spiral look) instead
+   * of the multi-galaxy world layout. Null = multi-galaxy overview (or the
+   * single legacy view when `data.galaxies.length === 1`). Other scenes
+   * ignore this field.
+   */
+  galaxyId: string | null;
 }
 
 export type PopupEntity =
+  | { kind: 'galaxy'; galaxyId: string }
   | { kind: 'system'; systemId: string }
   | { kind: 'star'; systemId: string; starId: string }
   | { kind: 'planet'; systemId: string; planetId: string }
@@ -28,7 +37,7 @@ export type PopupEntity =
 export interface UniverseCanvasHandle {
   reset: () => void;
   back: () => void;
-  navigateTo: (scene: UniverseScene, systemId?: string, planetId?: string) => void;
+  navigateTo: (scene: UniverseScene, systemId?: string, planetId?: string, galaxyId?: string) => void;
   zoomIn: () => void;
   zoomOut: () => void;
   resetZoom: () => void;
@@ -85,6 +94,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
       scene: 'galaxy',
       systemId: null,
       planetId: null,
+      galaxyId: null,
     });
     const sceneStateRef = useRef(sceneState);
     sceneStateRef.current = sceneState;
@@ -122,7 +132,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     // Reset scene + zoom when new universe data arrives.
     useEffect(() => {
       if (!data) return;
-      setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
+      setSceneState({ scene: 'galaxy', systemId: null, planetId: null, galaxyId: null });
       transitionRef.current = null;
       transformRef.current = { scale: 1, tx: 0, ty: 0 };
     }, [data]);
@@ -142,7 +152,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
     useImperativeHandle(ref, () => ({
       reset() {
-        setSceneState({ scene: 'galaxy', systemId: null, planetId: null });
+        setSceneState({ scene: 'galaxy', systemId: null, planetId: null, galaxyId: null });
         transformRef.current = { scale: 1, tx: 0, ty: 0 };
       },
       back() {
@@ -150,17 +160,25 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           if (prev.scene === 'planet') {
             transitionRef.current = { start: performance.now() / 1000, from: 'planet', to: 'system' };
             transformRef.current = { scale: 1, tx: 0, ty: 0 };
-            return { scene: 'system', systemId: prev.systemId, planetId: null };
+            return { scene: 'system', systemId: prev.systemId, planetId: null, galaxyId: prev.galaxyId };
           }
           if (prev.scene === 'system') {
             transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'galaxy' };
             transformRef.current = { scale: 1, tx: 0, ty: 0 };
-            return { scene: 'galaxy', systemId: null, planetId: null };
+            // Returning from a system view drops back into the galaxy that
+            // contained it (preserves focus mode if it was set when entering).
+            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: prev.galaxyId };
+          }
+          if (prev.scene === 'galaxy' && prev.galaxyId) {
+            // Exit galaxy focus mode → multi-galaxy overview.
+            transitionRef.current = { start: performance.now() / 1000, from: 'galaxy', to: 'galaxy' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
+            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: null };
           }
           return prev;
         });
       },
-      navigateTo(scene: UniverseScene, systemId?: string, planetId?: string) {
+      navigateTo(scene: UniverseScene, systemId?: string, planetId?: string, galaxyId?: string) {
         setSceneState(prev => {
           transitionRef.current = { start: performance.now() / 1000, from: prev.scene, to: scene };
           transformRef.current = { scale: 1, tx: 0, ty: 0 };
@@ -168,6 +186,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
             scene,
             systemId: systemId ?? null,
             planetId: planetId ?? null,
+            // Galaxy focus only applies to the 'galaxy' scene; deeper scenes
+            // remember their parent so `back()` can pop back into focus mode.
+            galaxyId: galaxyId ?? (scene === 'galaxy' ? null : prev.galaxyId),
           };
         });
       },
@@ -229,7 +250,7 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
 
         let rawHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time).hit;
+          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId).hit;
         } else if (state.scene === 'system' && system) {
           rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
         } else if (state.scene === 'planet' && planet) {
@@ -362,7 +383,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         const hit = pickHit(lastHitRef.current, px, py);
         if (!hit) return;
         const state = sceneStateRef.current;
-        if (hit.kind === 'system') {
+        if (hit.kind === 'galaxy') {
+          onEntityClickRef.current?.({ kind: 'galaxy', galaxyId: hit.id });
+        } else if (hit.kind === 'system') {
           onEntityClickRef.current?.({ kind: 'system', systemId: hit.id });
         } else if (hit.kind === 'planet') {
           onEntityClickRef.current?.({
@@ -448,7 +471,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         const hit = pickHit(lastHitRef.current, px, py);
         if (!hit) return;
         const state = sceneStateRef.current;
-        if (hit.kind === 'system') {
+        if (hit.kind === 'galaxy') {
+          onEntityClickRef.current?.({ kind: 'galaxy', galaxyId: hit.id });
+        } else if (hit.kind === 'system') {
           onEntityClickRef.current?.({ kind: 'system', systemId: hit.id });
         } else if (hit.kind === 'planet') {
           onEntityClickRef.current?.({
@@ -477,12 +502,17 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           if (prev.scene === 'planet') {
             transitionRef.current = { start: performance.now() / 1000, from: 'planet', to: 'system' };
             transformRef.current = { scale: 1, tx: 0, ty: 0 };
-            return { scene: 'system', systemId: prev.systemId, planetId: null };
+            return { scene: 'system', systemId: prev.systemId, planetId: null, galaxyId: prev.galaxyId };
           }
           if (prev.scene === 'system') {
             transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'galaxy' };
             transformRef.current = { scale: 1, tx: 0, ty: 0 };
-            return { scene: 'galaxy', systemId: null, planetId: null };
+            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: prev.galaxyId };
+          }
+          if (prev.scene === 'galaxy' && prev.galaxyId) {
+            transitionRef.current = { start: performance.now() / 1000, from: 'galaxy', to: 'galaxy' };
+            transformRef.current = { scale: 1, tx: 0, ty: 0 };
+            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: null };
           }
           return prev;
         });

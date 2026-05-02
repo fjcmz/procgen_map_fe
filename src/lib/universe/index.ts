@@ -8,6 +8,7 @@ export type { PlanetComposition, PlanetSubtype, RockPlanetSubtype, GasPlanetSubt
 export { SolarSystem } from './SolarSystem';
 export type { SolarSystemComposition } from './SolarSystem';
 export { Universe } from './Universe';
+export { Galaxy } from './Galaxy';
 export { StarGenerator, starGenerator } from './StarGenerator';
 export { SatelliteGenerator, satelliteGenerator } from './SatelliteGenerator';
 export { PlanetGenerator, planetGenerator } from './PlanetGenerator';
@@ -19,6 +20,7 @@ export type {
   PlanetData,
   StarData,
   SolarSystemData,
+  GalaxyData,
   UniverseData,
   UniverseGenerateRequest,
   UniverseWorkerMessage,
