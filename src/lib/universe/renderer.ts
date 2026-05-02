@@ -504,12 +504,17 @@ export function drawGalaxyScene(
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
 
+  // O(1) system lookup — avoids O(N) .find() per ID in focus/multi-galaxy paths.
+  const systemById = new Map<string, SolarSystemData>(
+    data.solarSystems.map(s => [s.id, s])
+  );
+
   // Focus mode — single galaxy fills the viewport like the legacy view.
   if (focusGalaxyId) {
     const focus = data.galaxies.find(g => g.id === focusGalaxyId);
     if (focus) {
       const systems = focus.systemIds
-        .map(id => data.solarSystems.find(s => s.id === id))
+        .map(id => systemById.get(id))
         .filter((s): s is SolarSystemData => !!s);
       const cx = vw / 2;
       const cy = vh / 2;
@@ -570,7 +575,7 @@ export function drawGalaxyScene(
 
     if (systemsAlpha > 0) {
       const systems = galaxy.systemIds
-        .map(id => data.solarSystems.find(s => s.id === id))
+        .map(id => systemById.get(id))
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
@@ -644,19 +649,47 @@ function drawGalaxySpiral(
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
 
+  // Conservative cull margin using the maximum possible sizePx (scaleMap
+  // output is always ≤ 14) — lets us skip scaleMap (Math.sqrt) and the
+  // rotation entirely for systems that can't be in view.
+  const maxSizePx = 14 * cameraScale / viewScale;
+  const cullMargin = maxSizePx * 1.5;
+
+  // Maximum squared distance from galaxy centre that could ever be in view.
+  // Rotation preserves distance from centre, so any system whose raw distance
+  // exceeds this is always offscreen regardless of the current rotation angle.
+  let maxViewDistSq = Infinity;
+  if (viewBounds) {
+    const corners = [
+      [viewBounds.x0 - cx, viewBounds.y0 - cy],
+      [viewBounds.x1 - cx, viewBounds.y0 - cy],
+      [viewBounds.x0 - cx, viewBounds.y1 - cy],
+      [viewBounds.x1 - cx, viewBounds.y1 - cy],
+    ];
+    const maxCornerDist = Math.max(...corners.map(([x, y]) => Math.sqrt(x * x + y * y)));
+    const r = maxCornerDist + cullMargin;
+    maxViewDistSq = r * r;
+  }
+
   const hit: HitCircle[] = [];
   for (let i = 0; i < systems.length; i++) {
-    // Inline rotation — avoids allocating a full positions[] array each frame.
     const raw = rawPositions[i];
     const dx = raw.x - cx;
     const dy = raw.y - cy;
+
+    // Pre-cull by distance from centre — no rotation needed (rotation is
+    // rigid-body, so distance from centre is invariant).
+    if (viewBounds && dx * dx + dy * dy > maxViewDistSq) continue;
+
+    // Inline rotation.
     const px = cx + dx * cosG - dy * sinG;
     const py = cy + dx * sinG + dy * cosG;
 
-    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
+    // Cull by viewport bounds using the conservative max margin.
+    if (viewBounds && !circleIntersectsViewBounds(px, py, cullMargin, viewBounds)) continue;
 
-    // Skip offscreen systems entirely — no draw, no hit circle.
-    if (viewBounds && !circleIntersectsViewBounds(px, py, sizePx * 1.5, viewBounds)) continue;
+    // Only compute exact sizePx (Math.sqrt inside scaleMap) for visible systems.
+    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
 
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
 
