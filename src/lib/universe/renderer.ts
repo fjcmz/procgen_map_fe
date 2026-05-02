@@ -253,14 +253,48 @@ export function drawBackground(
 }
 
 // ── Composition palettes ──────────────────────────────────────────────────
-function starFill(s: StarData): string {
-  if (s.composition === 'ANTIMATTER') return '#f4d8ff';
+interface StarPalette { core: string; glowInner: string; glowOuter: string }
+
+function starFill(s: StarData): StarPalette {
+  if (s.composition === 'ANTIMATTER') {
+    return { core: '#f4d8ff', glowInner: 'rgba(220,140,255,0.8)', glowOuter: 'rgba(120,40,180,0)' };
+  }
   // brightness 100..1000 → tint warmer at the bright end
   const t = Math.max(0, Math.min(1, (s.brightness - 100) / 900));
   const r = Math.round(255 * (0.85 + 0.15 * t));
   const g = Math.round(220 * (0.7 + 0.3 * (1 - Math.abs(t - 0.5) * 2)));
   const b = Math.round(255 * (1 - 0.7 * t));
-  return `rgb(${r},${g},${b})`;
+  return { core: `rgb(${r},${g},${b})`, glowInner: `rgba(${r},${g},${b},0.8)`, glowOuter: `rgba(${r},${g},${b},0)` };
+}
+
+// ── Glow canvas cache ─────────────────────────────────────────────────────
+// Each unique star color gets a 64×64 offscreen canvas with the radial
+// gradient pre-rendered once. drawGlow stamps it via drawImage (cheap GPU
+// blit) instead of calling createRadialGradient per system per frame.
+// Outer glow radius = sizePx * GLOW_OUTER_MULT (half the original 2.2).
+const GLOW_CANVAS_SIZE = 64;
+const GLOW_OUTER_MULT = 1.1;
+// Ratio of inner to outer gradient radius — same proportions as original.
+const GLOW_INNER_FRAC = 0.1 / GLOW_OUTER_MULT;
+const glowCanvasCache = new Map<string, HTMLCanvasElement>();
+
+function getOrBuildGlowCanvas(palette: StarPalette): HTMLCanvasElement {
+  const cached = glowCanvasCache.get(palette.glowInner);
+  if (cached) return cached;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = GLOW_CANVAS_SIZE;
+  canvas.height = GLOW_CANVAS_SIZE;
+  const gctx = canvas.getContext('2d')!;
+  const half = GLOW_CANVAS_SIZE / 2;
+  const grd = gctx.createRadialGradient(half, half, half * GLOW_INNER_FRAC, half, half, half);
+  grd.addColorStop(0, palette.glowInner);
+  grd.addColorStop(1, palette.glowOuter);
+  gctx.fillStyle = grd;
+  gctx.fillRect(0, 0, GLOW_CANVAS_SIZE, GLOW_CANVAS_SIZE);
+
+  glowCanvasCache.set(palette.glowInner, canvas);
+  return canvas;
 }
 
 // ── Composition-driven palettes (planets / satellites) ───────────────────
@@ -694,8 +728,10 @@ function drawGalaxySpiral(
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
 
     const dominant = systems[i].stars[0] ?? null;
-    const color = dominant ? starFill(dominant) : '#fff';
-    drawCircle(ctx, px, py, sizePx * 0.6, color);
+    const palette = dominant ? starFill(dominant) : { core: '#fff', glowInner: 'rgba(255,255,255,0.8)', glowOuter: 'rgba(255,255,255,0)' };
+    const outerR = sizePx * GLOW_OUTER_MULT;
+    ctx.drawImage(getOrBuildGlowCanvas(palette), px - outerR, py - outerR, outerR * 2, outerR * 2);
+    drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
   }
   return hit;
 }
@@ -801,7 +837,10 @@ export function drawSystemScene(
   if (system.stars.length === 1) {
     const star = system.stars[0];
     const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale;
-    drawCircle(ctx, cx, cy, starPx, starFill(star));
+    const palette = starFill(star);
+    const outerR = starPx * GLOW_OUTER_MULT;
+    ctx.drawImage(getOrBuildGlowCanvas(palette), cx - outerR, cy - outerR, outerR * 2, outerR * 2);
+    drawCircle(ctx, cx, cy, starPx, palette.core);
   } else {
     const clusterR = STAR_MIN_PX * 1.2 / viewScale;
     for (let i = 0; i < system.stars.length; i++) {
@@ -812,7 +851,10 @@ export function drawSystemScene(
       const sx = cx + Math.cos(angle) * clusterR;
       const sy = cy + Math.sin(angle) * clusterR;
       const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') * 0.7 / viewScale;
-      drawCircle(ctx, sx, sy, starPx, starFill(star));
+      const palette = starFill(star);
+      const outerR = starPx * GLOW_OUTER_MULT;
+      ctx.drawImage(getOrBuildGlowCanvas(palette), sx - outerR, sy - outerR, outerR * 2, outerR * 2);
+      drawCircle(ctx, sx, sy, starPx, palette.core);
     }
   }
 
