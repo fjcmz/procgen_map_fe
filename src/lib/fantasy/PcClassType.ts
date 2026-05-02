@@ -5,8 +5,6 @@ import type { Ability } from './Ability';
 import type { AlignmentType } from './AlignmentType';
 import { ALIGNMENT_SPECS, isLawNeutral, isGoodNeutral } from './AlignmentType';
 import type { JobMaturityType } from './JobMaturityType';
-import type { Rollable } from './Rollable';
-import { roll } from './Rollable';
 
 export type PcClassType =
   | 'barbarian'
@@ -29,7 +27,6 @@ export const PC_CLASS_TYPES: readonly PcClassType[] = [
 export interface PcClassSpec extends ProbEntry {
   jobMaturityType: JobMaturityType;
   hitDie: number;
-  initialWealth: Rollable;
   allowedAlignment: (a: AlignmentType) => boolean;
   mainAbility: Ability;
   mainAbilities: ReadonlySet<Ability>;
@@ -39,7 +36,6 @@ export interface PcClassSpec extends ProbEntry {
 export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   barbarian: {
     prob: 3, jobMaturityType: 'intuitive', hitDie: 12,
-    initialWealth: roll(3, 6).mult(10),
     allowedAlignment: a => ALIGNMENT_SPECS[a].chaotic,
     mainAbility: 'strength',
     mainAbilities: new Set(['strength', 'constitution']),
@@ -47,7 +43,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   bard: {
     prob: 3, jobMaturityType: 'self_taught', hitDie: 8,
-    initialWealth: roll(3, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'charisma',
     mainAbilities: new Set(['charisma']),
@@ -55,7 +50,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   cleric: {
     prob: 4, jobMaturityType: 'trained', hitDie: 8,
-    initialWealth: roll(4, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'wisdom',
     mainAbilities: new Set(['wisdom']),
@@ -63,7 +57,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   druid: {
     prob: 2, jobMaturityType: 'trained', hitDie: 8,
-    initialWealth: roll(2, 6).mult(10),
     allowedAlignment: a => isGoodNeutral(a) || isLawNeutral(a),
     mainAbility: 'wisdom',
     mainAbilities: new Set(['wisdom']),
@@ -71,7 +64,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   fighter: {
     prob: 5, jobMaturityType: 'self_taught', hitDie: 10,
-    initialWealth: roll(5, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'strength',
     mainAbilities: new Set(['strength', 'constitution']),
@@ -79,7 +71,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   monk: {
     prob: 4, jobMaturityType: 'trained', hitDie: 8,
-    initialWealth: roll(1, 6).mult(10),
     allowedAlignment: a => ALIGNMENT_SPECS[a].lawful,
     mainAbility: 'wisdom',
     mainAbilities: new Set(['wisdom', 'constitution', 'dexterity', 'strength']),
@@ -87,7 +78,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   paladin: {
     prob: 2, jobMaturityType: 'self_taught', hitDie: 10,
-    initialWealth: roll(5, 6).mult(10),
     allowedAlignment: a => ALIGNMENT_SPECS[a].good && ALIGNMENT_SPECS[a].lawful,
     mainAbility: 'charisma',
     mainAbilities: new Set(['charisma', 'constitution', 'strength']),
@@ -95,7 +85,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   ranger: {
     prob: 3, jobMaturityType: 'self_taught', hitDie: 10,
-    initialWealth: roll(5, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'dexterity',
     mainAbilities: new Set(['dexterity', 'constitution', 'wisdom']),
@@ -103,7 +92,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   rogue: {
     prob: 4, jobMaturityType: 'intuitive', hitDie: 8,
-    initialWealth: roll(4, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'dexterity',
     mainAbilities: new Set(['dexterity']),
@@ -111,7 +99,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   sorcerer: {
     prob: 3, jobMaturityType: 'intuitive', hitDie: 6,
-    initialWealth: roll(2, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'charisma',
     mainAbilities: new Set(['charisma']),
@@ -119,7 +106,6 @@ export const PC_CLASS_SPECS: Record<PcClassType, PcClassSpec> = {
   },
   wizard: {
     prob: 3, jobMaturityType: 'trained', hitDie: 6,
-    initialWealth: roll(3, 6).mult(10),
     allowedAlignment: () => true,
     mainAbility: 'intelligence',
     mainAbilities: new Set(['intelligence']),

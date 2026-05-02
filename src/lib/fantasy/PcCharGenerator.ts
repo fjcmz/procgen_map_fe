@@ -21,6 +21,50 @@ import { roll } from './Rollable';
 
 const ABILITY_ROLL = roll(3, 6).best(3); // Java: Rollable.Roll.roll(3, 6).best(3)
 
+/**
+ * D&D 3.5e DMG Table 5-1 "Character Wealth by Level" (player characters, in gp).
+ * Index is character level (1..20). Level 1 uses a representative starting-gold
+ * baseline (~150 gp average across class starting tables); levels 2-20 are the
+ * canonical published gp totals expected for a PC at that level.
+ *
+ * Levels above 20 clamp to the level-20 entry.
+ */
+const WEALTH_BY_LEVEL: readonly number[] = [
+  /* 0 unused */ 0,
+  /*  1 */    150,
+  /*  2 */    900,
+  /*  3 */   2700,
+  /*  4 */   5400,
+  /*  5 */   9000,
+  /*  6 */  13000,
+  /*  7 */  19000,
+  /*  8 */  27000,
+  /*  9 */  36000,
+  /* 10 */  49000,
+  /* 11 */  66000,
+  /* 12 */  88000,
+  /* 13 */ 110000,
+  /* 14 */ 150000,
+  /* 15 */ 200000,
+  /* 16 */ 260000,
+  /* 17 */ 340000,
+  /* 18 */ 440000,
+  /* 19 */ 580000,
+  /* 20 */ 760000,
+];
+
+/**
+ * Roll a wealth value for a character of the given level: looks up the
+ * D&D 3.5e PC wealth-by-level baseline and applies a uniform ±10% jitter
+ * (`base * (0.9 + rng() * 0.2)`), rounded to the nearest gp. Level is
+ * clamped into [1, 20].
+ */
+export function rollWealthForLevel(level: number, rng: () => number): number {
+  const clamped = Math.max(1, Math.min(20, level | 0));
+  const base = WEALTH_BY_LEVEL[clamped];
+  return Math.round(base * (0.9 + rng() * 0.2));
+}
+
 function rollAbilities(rng: () => number): Map<Ability, number> {
   const out = new Map<Ability, number>();
   for (const ab of ABILITIES) {
@@ -216,7 +260,7 @@ export function generatePcChar(
 
   pcChar.height = RACE_SPECS[pcChar.race].baseHeight + RACE_SPECS[pcChar.race].heightAdjustment.roll(rng);
   pcChar.weight = RACE_SPECS[pcChar.race].baseWeight + RACE_SPECS[pcChar.race].weightAdjustment.roll(rng);
-  pcChar.wealth = PC_CLASS_SPECS[pcChar.pcClass].initialWealth.roll(rng);
+  pcChar.wealth = rollWealthForLevel(pcChar.level, rng);
 
   // Hit points: max hit die + Con mod for level 1, then random 1..hitDie + Con mod
   // for each level after. Java: IntStream.range(1, level) is (level - 1) iterations.
@@ -338,7 +382,7 @@ export function generatePcCharBiased(
 
   pcChar.height = RACE_SPECS[pcChar.race].baseHeight + RACE_SPECS[pcChar.race].heightAdjustment.roll(rng);
   pcChar.weight = RACE_SPECS[pcChar.race].baseWeight + RACE_SPECS[pcChar.race].weightAdjustment.roll(rng);
-  pcChar.wealth = PC_CLASS_SPECS[pcChar.pcClass].initialWealth.roll(rng);
+  pcChar.wealth = rollWealthForLevel(pcChar.level, rng);
 
   const hitDie = PC_CLASS_SPECS[pcChar.pcClass].hitDie;
   const conMod = abilityMod(pcChar.abilities.get('constitution') ?? 10);
