@@ -1,11 +1,10 @@
-// D&D 3.5e spellcasting tables: spells per day, spells known, ability score
-// gating, and the per-character resolver `rollCharacterSpellcasting` that
-// turns a `(classLevels, abilities)` pair into ready-to-render
-// `CharacterSpellcasting` entries.
+// D&D 3.5e spellcasting tables for all base spellcasting classes, character
+// levels 1-20, spell levels 0-9. Includes spells-per-day, spells-known
+// (sorcerer / bard / wizard), the bonus-spell formula, and the
+// `rollCharacterSpellcasting` resolver that turns a `(classLevels, abilities)`
+// pair into `CharacterSpellcasting` entries the popup can render.
 //
-// Scope: only level-1 player characters in v1. The tables below cover all
-// 11 base classes for level 1; higher rows will land alongside higher-level
-// spells in a follow-up.
+// Domain bonus spells are not modeled — cleric base slots only.
 
 import type { Ability } from './Ability';
 import { abilityMod } from './Ability';
@@ -24,16 +23,15 @@ export interface SpellcastingClassInfo {
   /**
    * `true` for prepared casters (wizard / cleric / druid / paladin / ranger):
    * they choose which spells to memorize each morning, then cast from those.
-   * `false` for spontaneous casters (sorcerer / bard): they cast directly
-   * from a fixed list of spells known.
+   * `false` for spontaneous casters (sorcerer / bard).
    */
   prepared: boolean;
   /**
    * `true` when the class draws from a fixed spell list of which they know
    * every spell (cleric / druid / paladin / ranger). The "spells known" tab
-   * shows the full curated list for those classes; the prepared list is then
-   * a sampled subset of it. `false` for wizard (limited spellbook) and the
-   * spontaneous casters above.
+   * shows the full curated list for those classes; the prepared list is
+   * then a sampled subset of it. `false` for wizard (limited spellbook) and
+   * the spontaneous casters above.
    */
   knowsFullList: boolean;
 }
@@ -49,44 +47,211 @@ export const SPELLCASTING_CLASSES: Partial<Record<PcClassType, SpellcastingClass
 };
 
 /**
- * Base spells per day at character level 1, indexed by spell level
- * (`[lvl0, lvl1, lvl2, ...]`). Bonus spells from ability score are added on
- * top in `bonusSpellsForLevel`. Bards don't get level-1 spells until their
- * second class level, and paladins / rangers don't get any spells at level 1.
+ * Spells per day at each character level (1..20), indexed by spell level
+ * (`row[0]` = cantrips, `row[N]` = level-N slot count). The PHB tables are
+ * mirrored verbatim modulo cleric domain bonuses (always +1 at the spell
+ * levels the cleric can prepare; not modeled here). A `0` entry means "the
+ * slot exists but provides no base spell — only ability-bonus spells fill
+ * it" (e.g. paladin level 4 lvl-1 is `[0, 0]`, becoming `[0, 1]` with WIS 12).
+ *
+ * Empty rows ([]) mean the class has no spells at that character level
+ * (e.g. paladin / ranger char-levels 1-3).
  */
-const BASE_SPELLS_PER_DAY_LV1: Partial<Record<PcClassType, readonly number[]>> = {
-  wizard:   [3, 1],
-  sorcerer: [5, 3],
-  cleric:   [3, 1],
-  druid:    [3, 1],
-  bard:     [2],
-  paladin:  [],
-  ranger:   [],
+type SlotRow = readonly number[];
+
+const TABLE_WIZARD: readonly SlotRow[] = [
+  /*  1 */ [3, 1],
+  /*  2 */ [4, 2],
+  /*  3 */ [4, 2, 1],
+  /*  4 */ [4, 3, 2],
+  /*  5 */ [4, 3, 2, 1],
+  /*  6 */ [4, 3, 3, 2],
+  /*  7 */ [4, 4, 3, 2, 1],
+  /*  8 */ [4, 4, 3, 3, 2],
+  /*  9 */ [4, 4, 4, 3, 2, 1],
+  /* 10 */ [4, 4, 4, 3, 3, 2],
+  /* 11 */ [4, 4, 4, 4, 3, 2, 1],
+  /* 12 */ [4, 4, 4, 4, 3, 3, 2],
+  /* 13 */ [4, 4, 4, 4, 4, 3, 2, 1],
+  /* 14 */ [4, 4, 4, 4, 4, 3, 3, 2],
+  /* 15 */ [4, 4, 4, 4, 4, 4, 3, 2, 1],
+  /* 16 */ [4, 4, 4, 4, 4, 4, 3, 3, 2],
+  /* 17 */ [4, 4, 4, 4, 4, 4, 4, 3, 2, 1],
+  /* 18 */ [4, 4, 4, 4, 4, 4, 4, 3, 3, 2],
+  /* 19 */ [4, 4, 4, 4, 4, 4, 4, 4, 3, 3],
+  /* 20 */ [4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+];
+
+const TABLE_SORCERER: readonly SlotRow[] = [
+  /*  1 */ [5, 3],
+  /*  2 */ [6, 4],
+  /*  3 */ [6, 5],
+  /*  4 */ [6, 6, 3],
+  /*  5 */ [6, 6, 4],
+  /*  6 */ [6, 6, 5, 3],
+  /*  7 */ [6, 6, 6, 4],
+  /*  8 */ [6, 6, 6, 5, 3],
+  /*  9 */ [6, 6, 6, 6, 4],
+  /* 10 */ [6, 6, 6, 6, 5, 3],
+  /* 11 */ [6, 6, 6, 6, 6, 4],
+  /* 12 */ [6, 6, 6, 6, 6, 5, 3],
+  /* 13 */ [6, 6, 6, 6, 6, 6, 4],
+  /* 14 */ [6, 6, 6, 6, 6, 6, 5, 3],
+  /* 15 */ [6, 6, 6, 6, 6, 6, 6, 4],
+  /* 16 */ [6, 6, 6, 6, 6, 6, 6, 5, 3],
+  /* 17 */ [6, 6, 6, 6, 6, 6, 6, 6, 4],
+  /* 18 */ [6, 6, 6, 6, 6, 6, 6, 6, 5, 3],
+  /* 19 */ [6, 6, 6, 6, 6, 6, 6, 6, 6, 4],
+  /* 20 */ [6, 6, 6, 6, 6, 6, 6, 6, 6, 6],
+];
+
+const TABLE_CLERIC: readonly SlotRow[] = [
+  /*  1 */ [3, 1],
+  /*  2 */ [4, 2],
+  /*  3 */ [4, 2, 1],
+  /*  4 */ [5, 3, 2],
+  /*  5 */ [5, 3, 2, 1],
+  /*  6 */ [5, 3, 3, 2],
+  /*  7 */ [6, 4, 3, 2, 1],
+  /*  8 */ [6, 4, 3, 3, 2],
+  /*  9 */ [6, 4, 4, 3, 2, 1],
+  /* 10 */ [6, 4, 4, 3, 3, 2],
+  /* 11 */ [6, 5, 4, 4, 3, 2, 1],
+  /* 12 */ [6, 5, 4, 4, 3, 3, 2],
+  /* 13 */ [6, 5, 5, 4, 4, 3, 2, 1],
+  /* 14 */ [6, 5, 5, 4, 4, 3, 3, 2],
+  /* 15 */ [6, 5, 5, 5, 4, 4, 3, 2, 1],
+  /* 16 */ [6, 5, 5, 5, 4, 4, 3, 3, 2],
+  /* 17 */ [6, 5, 5, 5, 5, 4, 4, 3, 2, 1],
+  /* 18 */ [6, 5, 5, 5, 5, 4, 4, 3, 3, 2],
+  /* 19 */ [6, 5, 5, 5, 5, 5, 4, 4, 3, 3],
+  /* 20 */ [6, 5, 5, 5, 5, 5, 4, 4, 4, 4],
+];
+
+const TABLE_DRUID: readonly SlotRow[] = TABLE_CLERIC; // PHB druid table mirrors cleric base counts.
+
+const TABLE_BARD: readonly SlotRow[] = [
+  /*  1 */ [2],
+  /*  2 */ [3, 0],
+  /*  3 */ [3, 1],
+  /*  4 */ [3, 2, 0],
+  /*  5 */ [3, 3, 1],
+  /*  6 */ [3, 3, 2],
+  /*  7 */ [3, 3, 2, 0],
+  /*  8 */ [3, 3, 3, 1],
+  /*  9 */ [3, 3, 3, 2],
+  /* 10 */ [3, 3, 3, 2, 0],
+  /* 11 */ [3, 3, 3, 3, 1],
+  /* 12 */ [3, 3, 3, 3, 2],
+  /* 13 */ [3, 3, 3, 3, 2, 0],
+  /* 14 */ [4, 3, 3, 3, 3, 1],
+  /* 15 */ [4, 4, 3, 3, 3, 2],
+  /* 16 */ [4, 4, 4, 3, 3, 2, 0],
+  /* 17 */ [4, 4, 4, 4, 3, 3, 1],
+  /* 18 */ [4, 4, 4, 4, 4, 3, 2],
+  /* 19 */ [4, 4, 4, 4, 4, 4, 3],
+  /* 20 */ [4, 4, 4, 4, 4, 4, 4],
+];
+
+const TABLE_PALADIN: readonly SlotRow[] = [
+  /*  1 */ [],
+  /*  2 */ [],
+  /*  3 */ [],
+  /*  4 */ [0, 0],
+  /*  5 */ [0, 0],
+  /*  6 */ [0, 1],
+  /*  7 */ [0, 1],
+  /*  8 */ [0, 1, 0],
+  /*  9 */ [0, 1, 0],
+  /* 10 */ [0, 1, 1],
+  /* 11 */ [0, 1, 1, 0],
+  /* 12 */ [0, 1, 1, 1],
+  /* 13 */ [0, 1, 1, 1, 0],
+  /* 14 */ [0, 2, 1, 1, 1],
+  /* 15 */ [0, 2, 1, 1, 1],
+  /* 16 */ [0, 2, 2, 1, 1],
+  /* 17 */ [0, 2, 2, 2, 1],
+  /* 18 */ [0, 3, 2, 2, 1],
+  /* 19 */ [0, 3, 3, 3, 2],
+  /* 20 */ [0, 3, 3, 3, 3],
+];
+
+const TABLE_RANGER: readonly SlotRow[] = TABLE_PALADIN; // SRD ranger spell-progression mirrors paladin.
+
+const SPELLS_PER_DAY: Partial<Record<PcClassType, readonly SlotRow[]>> = {
+  wizard:   TABLE_WIZARD,
+  sorcerer: TABLE_SORCERER,
+  cleric:   TABLE_CLERIC,
+  druid:    TABLE_DRUID,
+  bard:     TABLE_BARD,
+  paladin:  TABLE_PALADIN,
+  ranger:   TABLE_RANGER,
 };
 
 /**
- * Base spells known at character level 1 for spontaneous casters and wizards
- * (whose spellbook starts with a fixed list of free spells). Indexed by spell
- * level. Cleric / druid / paladin / ranger draw from their full class list,
- * so they're not in this table.
+ * Spells known per character level for spontaneous casters (sorcerer, bard)
+ * and the wizard's pre-roll spellbook seed. Indexed by spell level. Cleric
+ * / druid / paladin / ranger draw from the full class list and need no
+ * spells-known table.
  */
-const BASE_SPELLS_KNOWN_LV1: Partial<Record<PcClassType, readonly number[]>> = {
-  // Wizard's spellbook starts with all level-0 spells plus 3 + INT-mod
-  // level-1 spells. The +INT mod is applied in `rollCharacterSpellcasting`.
-  wizard:   [0, 3], // level-0 count is "all" — special-cased below
-  sorcerer: [4, 2],
-  bard:     [4, 0],
+const SPELLS_KNOWN_SORCERER: readonly SlotRow[] = [
+  /*  1 */ [4, 2],
+  /*  2 */ [5, 2],
+  /*  3 */ [5, 3],
+  /*  4 */ [6, 3, 1],
+  /*  5 */ [6, 4, 2],
+  /*  6 */ [7, 4, 2, 1],
+  /*  7 */ [7, 5, 3, 2],
+  /*  8 */ [8, 5, 3, 2, 1],
+  /*  9 */ [8, 5, 4, 3, 2],
+  /* 10 */ [9, 5, 4, 3, 2, 1],
+  /* 11 */ [9, 5, 5, 4, 3, 2],
+  /* 12 */ [9, 5, 5, 4, 3, 2, 1],
+  /* 13 */ [9, 5, 5, 4, 4, 3, 2],
+  /* 14 */ [9, 5, 5, 4, 4, 3, 2, 1],
+  /* 15 */ [9, 5, 5, 4, 4, 4, 3, 2],
+  /* 16 */ [9, 5, 5, 4, 4, 4, 3, 2, 1],
+  /* 17 */ [9, 5, 5, 4, 4, 4, 3, 3, 2],
+  /* 18 */ [9, 5, 5, 4, 4, 4, 3, 3, 2, 1],
+  /* 19 */ [9, 5, 5, 4, 4, 4, 3, 3, 3, 2],
+  /* 20 */ [9, 5, 5, 4, 4, 4, 3, 3, 3, 3],
+];
+
+const SPELLS_KNOWN_BARD: readonly SlotRow[] = [
+  /*  1 */ [4, 2],
+  /*  2 */ [5, 3],
+  /*  3 */ [6, 3],
+  /*  4 */ [6, 3, 2],
+  /*  5 */ [6, 4, 3],
+  /*  6 */ [6, 4, 3],
+  /*  7 */ [6, 4, 4, 2],
+  /*  8 */ [6, 4, 4, 3],
+  /*  9 */ [6, 4, 4, 3],
+  /* 10 */ [6, 4, 4, 4, 2],
+  /* 11 */ [6, 4, 4, 4, 3],
+  /* 12 */ [6, 4, 4, 4, 3],
+  /* 13 */ [6, 4, 4, 4, 4, 2],
+  /* 14 */ [6, 4, 4, 4, 4, 3],
+  /* 15 */ [6, 4, 4, 4, 4, 3],
+  /* 16 */ [6, 5, 4, 4, 4, 4, 2],
+  /* 17 */ [6, 5, 5, 4, 4, 4, 3],
+  /* 18 */ [6, 5, 5, 5, 4, 4, 3],
+  /* 19 */ [6, 5, 5, 5, 5, 4, 4],
+  /* 20 */ [6, 5, 5, 5, 5, 5, 4],
+];
+
+const SPELLS_KNOWN: Partial<Record<PcClassType, readonly SlotRow[]>> = {
+  sorcerer: SPELLS_KNOWN_SORCERER,
+  bard:     SPELLS_KNOWN_BARD,
 };
 
 /**
- * D&D 3.5e Bonus Spells per Day table, derived analytically. Returns the
- * extra spells of `spellLevel` granted by an ability score. Cantrips (level 0)
- * never get bonus spells. Cap is enforced by callers via "max spell level you
- * can cast = ability_score - 10".
+ * D&D 3.5e Bonus Spells per Day, derived analytically. Returns the extra
+ * spells of `spellLevel` granted by an ability score. Cantrips (level 0)
+ * never get bonus spells. Cap is enforced by callers via "max spell level
+ * you can cast = ability_score - 10".
  *
  * Formula: `floor((mod + 4 - spellLevel) / 4)` when `mod >= spellLevel`, else 0.
- * Verified against PHB Table 1-1: at INT 14 (mod +2) → +1 lvl 1, +1 lvl 2;
- * at INT 20 (mod +5) → +2 lvl 1, +1 lvl 2-5.
  */
 export function bonusSpellsForLevel(abilityScore: number, spellLevel: number): number {
   if (spellLevel <= 0) return 0;
@@ -105,22 +270,31 @@ export function maxSpellLevelForAbility(abilityScore: number): number {
 }
 
 /**
+ * Read a row from a class table at a clamped character level (`1..20`).
+ * Returns an empty array when the class has no entry at that level (the
+ * outer code treats that as "no spells").
+ */
+function rowForLevel(table: readonly SlotRow[] | undefined, charLevel: number): SlotRow {
+  if (!table) return [];
+  const idx = Math.max(0, Math.min(table.length - 1, charLevel - 1));
+  return table[idx] ?? [];
+}
+
+/**
  * Per-class spellcasting state baked at character-roll time.
  *
  * `slotsPerLevel[i]` is the total spells per day at spell level `i` (cantrips
  * at index 0). `memorizedPerLevel[i]` is the prepared list for that spell
  * level (only populated for prepared casters; spontaneous casters leave it
  * empty). `spellsKnown` is a flat list — for full-list classes
- * (cleric / druid / paladin / ranger) it's the full curated class list at all
- * levels the character can cast; for wizard / sorcerer / bard it's the
- * randomly rolled set.
+ * (cleric / druid / paladin / ranger) it's every spell on the class list at
+ * each spell level the character can cast; for wizard / sorcerer / bard
+ * it's the rolled set.
  */
 export interface CharacterSpellcasting {
   pcClass: PcClassType;
   ability: Ability;
-  /** Mirror of `SPELLCASTING_CLASSES[pcClass].prepared` for UI convenience. */
   prepared: boolean;
-  /** Mirror of `SPELLCASTING_CLASSES[pcClass].knowsFullList`. */
   knowsFullList: boolean;
   slotsPerLevel: number[];
   memorizedPerLevel: Spell[][];
@@ -135,7 +309,6 @@ export interface CharacterSpellcasting {
 function pickDistinctSpells(pool: readonly Spell[], count: number, rng: () => number): Spell[] {
   if (count <= 0 || pool.length === 0) return [];
   if (count >= pool.length) return pool.slice();
-  // Fisher-Yates partial shuffle: pick `count` indices without replacement.
   const indices = pool.map((_, i) => i);
   const out: Spell[] = [];
   for (let i = 0; i < count; i++) {
@@ -149,9 +322,7 @@ function pickDistinctSpells(pool: readonly Spell[], count: number, rng: () => nu
 /**
  * For prepared casters, choose which spells to memorize from the day's
  * spellbook / class list. Returns up to `slots` spells, sampling with
- * replacement when there are more slots than distinct spells in the pool
- * (a wizard with 2 level-1 slots and 5 spells in their spellbook is welcome
- * to memorize the same fireball twice).
+ * replacement when there are more slots than distinct spells in the pool.
  */
 function pickMemorized(pool: readonly Spell[], slots: number, rng: () => number): Spell[] {
   if (slots <= 0 || pool.length === 0) return [];
@@ -164,13 +335,12 @@ function pickMemorized(pool: readonly Spell[], slots: number, rng: () => number)
 
 /**
  * Resolve every spellcasting class on a character into a renderable
- * `CharacterSpellcasting`. Non-spellcasting classes are skipped, so a fighter
- * returns `[]` and a multiclass fighter/wizard returns one entry for the
- * wizard side.
+ * `CharacterSpellcasting`. Non-spellcasting classes are skipped.
  *
- * v1 only handles level-1 class entries (the only level the spec requires)
- * — class-level rows above 1 fall back to the level-1 row with a warning
- * comment for the follow-up.
+ * The ability bonus is applied to every spell-level slot present in the
+ * base table (including `0` entries — that's how paladin / ranger / bard
+ * gain their first castable level), capped at the highest spell level the
+ * relevant ability can support (`score - 10`).
  */
 export function rollCharacterSpellcasting(
   classLevels: readonly ClassLevel[],
@@ -184,8 +354,14 @@ export function rollCharacterSpellcasting(
 
     const abilityScore = abilities[info.ability] ?? 10;
     const maxLevel = maxSpellLevelForAbility(abilityScore);
-    if (maxLevel < 0) {
-      // Even cantrips need ability ≥ 10; below that the class casts nothing.
+
+    const baseSlots = rowForLevel(SPELLS_PER_DAY[cl.pcClass], cl.level);
+    const baseKnown = SPELLS_KNOWN[cl.pcClass]
+      ? rowForLevel(SPELLS_KNOWN[cl.pcClass], cl.level)
+      : undefined;
+
+    // No spell rows at all (e.g. paladin level 1-3) → empty entry.
+    if (baseSlots.length === 0 || maxLevel < 0) {
       out.push({
         pcClass: cl.pcClass,
         ability: info.ability,
@@ -198,20 +374,15 @@ export function rollCharacterSpellcasting(
       continue;
     }
 
-    // v1: only level-1 base rows are tabulated. Higher class levels fall
-    // through to the level-1 row.
-    const baseSlots = BASE_SPELLS_PER_DAY_LV1[cl.pcClass] ?? [];
-    const baseKnown = BASE_SPELLS_KNOWN_LV1[cl.pcClass];
-
     // Final slots per spell level: base + bonus spells from ability score,
-    // clamped to spell levels the character can actually cast. Only spell
-    // levels with a non-zero base entry get bonuses (you can't gain a slot
-    // at a spell level your class doesn't grant yet).
+    // applied to every spell-level slot present in the base row, clamped to
+    // spell levels the character's ability supports. Cantrips (level 0)
+    // never get bonus spells.
     const slotsPerLevel: number[] = [];
     for (let lvl = 0; lvl < baseSlots.length; lvl++) {
       if (lvl > maxLevel) { slotsPerLevel.push(0); continue; }
       const base = baseSlots[lvl];
-      const bonus = base > 0 ? bonusSpellsForLevel(abilityScore, lvl) : 0;
+      const bonus = bonusSpellsForLevel(abilityScore, lvl);
       slotsPerLevel.push(base + bonus);
     }
 
@@ -219,31 +390,40 @@ export function rollCharacterSpellcasting(
     const spellsKnown: Spell[] = [];
     if (info.knowsFullList) {
       // Cleric / druid / paladin / ranger know every spell on their list at
-      // every level they can cast. For levels they can't cast yet there's
-      // simply nothing to show.
+      // every level they can cast.
       for (let lvl = 0; lvl < slotsPerLevel.length; lvl++) {
         if (slotsPerLevel[lvl] === 0) continue;
         spellsKnown.push(...spellsForClassAndLevel(cl.pcClass, lvl));
       }
     } else if (cl.pcClass === 'wizard') {
-      // Wizard's spellbook: all level-0 spells the engine knows + 3 + INT mod
-      // level-1 spells, randomly picked. Higher-level spell-knowns are added
-      // when those tiers land in a follow-up.
-      const cantripPool = spellsForClassAndLevel('wizard', 0);
-      spellsKnown.push(...cantripPool);
+      // Wizard's spellbook seeded with all level-0 spells plus a base of
+      // `3 + INT mod` random spells per non-cantrip spell level the wizard
+      // can cast (a flat-rate approximation of the SRD's "2 free spells per
+      // level" accumulation rule). The level-1 row gets a `+2 per character
+      // level past 1` bonus on top so high-level wizards have visibly fatter
+      // spellbooks at their starting tier.
+      spellsKnown.push(...spellsForClassAndLevel('wizard', 0));
       const intMod = abilityMod(abilityScore);
       for (let lvl = 1; lvl < slotsPerLevel.length; lvl++) {
-        const knownCount = (baseKnown?.[lvl] ?? 0) + (lvl === 1 ? Math.max(0, intMod) : 0);
+        if (slotsPerLevel[lvl] === 0) continue;
+        const baseCount = 3 + Math.max(0, intMod);
+        const bonusForCharLevel = lvl === 1 ? Math.max(0, cl.level - 1) : 0;
+        const knownCount = baseCount + bonusForCharLevel;
         const pool = spellsForClassAndLevel('wizard', lvl);
         spellsKnown.push(...pickDistinctSpells(pool, knownCount, rng));
       }
     } else {
-      // Sorcerer / bard: known list straight from the BASE_SPELLS_KNOWN_LV1
-      // table per spell level.
-      for (let lvl = 0; lvl < (baseKnown?.length ?? 0); lvl++) {
-        const knownCount = baseKnown?.[lvl] ?? 0;
-        const pool = spellsForClassAndLevel(cl.pcClass, lvl);
-        spellsKnown.push(...pickDistinctSpells(pool, knownCount, rng));
+      // Sorcerer / bard — fixed counts per spell level from the spells-known
+      // table. Each row is sized for the SRD canon; only spell levels
+      // present in the row are sampled.
+      if (baseKnown) {
+        for (let lvl = 0; lvl < baseKnown.length; lvl++) {
+          if (lvl > maxLevel) continue;
+          const knownCount = baseKnown[lvl];
+          if (knownCount <= 0) continue;
+          const pool = spellsForClassAndLevel(cl.pcClass, lvl);
+          spellsKnown.push(...pickDistinctSpells(pool, knownCount, rng));
+        }
       }
     }
 
