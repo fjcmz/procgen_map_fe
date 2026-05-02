@@ -408,227 +408,412 @@ export const MAGICAL_EQUIPMENT_CATALOG: Record<string, Equipment> = {
   rod_absorption:       { id: 'rod_absorption',       name: 'Rod of Absorption',               slot: 'utility1', price: 50000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 5 }], description: 'Absorbs spells targeted at wielder; stored energy can power memorized spells. +1 L5 slot approximates typical stored energy.' },
 };
 
-// ─── Class preference tables ─────────────────────────────────────────────────
-// Lists are ordered from most preferred (try first) to fallback. pickBest()
-// walks the list and returns the first item whose price fits the budget.
+// ─── Assignment helpers ───────────────────────────────────────────────────────
 
-const ARMOR_PREFS: Record<PcClassType, string[]> = {
-  fighter:   ['half_plate', 'banded_mail', 'splint_mail', 'chainmail', 'scale_mail', 'studded_leather'],
-  paladin:   ['half_plate', 'banded_mail', 'chainmail', 'scale_mail', 'studded_leather'],
-  ranger:    ['chain_shirt', 'scale_mail', 'studded_leather', 'hide', 'leather'],
-  cleric:    ['half_plate', 'chainmail', 'scale_mail', 'studded_leather', 'padded'],
-  druid:     ['hide', 'leather', 'padded', 'robes'],
-  barbarian: ['chain_shirt', 'scale_mail', 'hide', 'studded_leather', 'leather'],
-  rogue:     ['studded_leather', 'leather', 'padded'],
-  bard:      ['studded_leather', 'leather', 'padded'],
-  monk:      ['robes'],
-  sorcerer:  ['robes'],
-  wizard:    ['robes'],
-};
+/** Parse a dice expression like '2d6+3' or '1d8' and return the average roll. */
+function parseDiceAvg(expr: string): number {
+  const m = /^(\d+)d(\d+)([+-]\d+)?$/.exec(expr.trim());
+  if (!m) return 0;
+  return parseInt(m[1], 10) * (parseInt(m[2], 10) + 1) / 2 + (m[3] ? parseInt(m[3], 10) : 0);
+}
 
-const WEAPON1_PREFS_POWER: Record<PcClassType, string[]> = {
-  fighter:   ['greatsword', 'greataxe', 'falchion', 'longsword', 'battleaxe', 'warhammer', 'flail', 'morningstar'],
-  paladin:   ['longsword', 'warhammer', 'battleaxe', 'morningstar', 'heavy_mace'],
-  ranger:    ['longsword', 'shortsword', 'battleaxe', 'handaxe'],
-  cleric:    ['heavy_mace', 'morningstar', 'warhammer', 'flail', 'quarterstaff'],
-  druid:     ['scimitar', 'spear', 'quarterstaff', 'club', 'shortspear', 'dagger'],
-  barbarian: ['greataxe', 'greatsword', 'falchion', 'battleaxe', 'warhammer', 'heavy_mace'],
-  rogue:     ['rapier', 'shortsword', 'dagger'],
-  bard:      ['rapier', 'longsword', 'shortsword', 'dagger'],
-  monk:      ['quarterstaff', 'kama', 'siangham', 'dagger'],
-  sorcerer:  ['quarterstaff', 'dagger'],
-  wizard:    ['quarterstaff', 'dagger'],
-};
+// Metal armor IDs — druids are forbidden from wearing these.
+const METAL_ARMOR_IDS = new Set([
+  'chain_shirt', 'scale_mail', 'chainmail', 'splint_mail', 'banded_mail', 'half_plate', 'full_plate',
+  'chain_shirt_plus1', 'mithral_shirt', 'elven_chain',
+  'chainmail_plus1', 'chainmail_plus2',
+  'half_plate_plus1', 'half_plate_plus2', 'half_plate_plus3',
+  'full_plate_plus1', 'full_plate_plus2', 'full_plate_plus3', 'full_plate_plus4', 'full_plate_plus5',
+  'mithral_full_plate', 'adamantine_breastplate', 'ghostward_chain', 'celestial_armor',
+]);
 
-// DEX-favoring characters prefer lighter / finesse weapons
-const WEAPON1_PREFS_FINESSE: Record<PcClassType, string[]> = {
-  fighter:   ['longsword', 'rapier', 'shortsword', 'battleaxe', 'handaxe', 'flail', 'warhammer', 'morningstar'],
-  paladin:   ['longsword', 'warhammer', 'battleaxe', 'morningstar', 'heavy_mace'],
-  ranger:    ['shortsword', 'longsword', 'rapier', 'handaxe'],
-  cleric:    ['heavy_mace', 'morningstar', 'warhammer', 'quarterstaff'],
-  druid:     ['scimitar', 'shortspear', 'dagger', 'quarterstaff', 'club'],
-  barbarian: ['battleaxe', 'warhammer', 'greataxe', 'flail', 'heavy_mace'],
-  rogue:     ['rapier', 'shortsword', 'dagger'],
-  bard:      ['rapier', 'shortsword', 'longsword', 'dagger'],
-  monk:      ['kama', 'siangham', 'quarterstaff', 'dagger'],
-  sorcerer:  ['dagger', 'quarterstaff'],
-  wizard:    ['dagger', 'quarterstaff'],
-};
+// Medium and heavy armor — rogues/bards can't wear these; rangers can't wear heavy.
+const MEDIUM_ARMOR_IDS = new Set([
+  'hide', 'scale_mail', 'chainmail', 'chainmail_plus1', 'chainmail_plus2',
+  'ghostward_chain', 'adamantine_breastplate',
+]);
+const HEAVY_ARMOR_IDS = new Set([
+  'splint_mail', 'banded_mail', 'half_plate', 'full_plate',
+  'half_plate_plus1', 'half_plate_plus2', 'half_plate_plus3',
+  'full_plate_plus1', 'full_plate_plus2', 'full_plate_plus3', 'full_plate_plus4', 'full_plate_plus5',
+  'mithral_full_plate',
+]);
 
-const SHIELD_PREFS: Partial<Record<PcClassType, string[]>> = {
-  fighter:   ['heavy_steel_shield', 'light_steel_shield', 'heavy_wooden_shield', 'light_wooden_shield', 'buckler'],
-  paladin:   ['heavy_steel_shield', 'light_steel_shield', 'light_wooden_shield'],
-  cleric:    ['heavy_steel_shield', 'light_steel_shield', 'heavy_wooden_shield'],
-  druid:     ['heavy_wooden_shield', 'light_wooden_shield'],
-  ranger:    ['light_steel_shield', 'light_wooden_shield', 'buckler'],
-  barbarian: ['heavy_steel_shield', 'light_steel_shield'],
-};
-
-const WEAPON2_PREFS: Partial<Record<PcClassType, string[]>> = {
-  ranger:    ['shortsword', 'handaxe', 'dagger'],
-  rogue:     ['dagger'],
-  bard:      ['dagger'],
-};
-
-const RANGED_PREFS: Partial<Record<PcClassType, string[]>> = {
-  ranger:    ['longbow', 'shortbow', 'light_crossbow', 'javelin'],
-  fighter:   ['light_crossbow', 'javelin'],
-  rogue:     ['light_crossbow'],
-  bard:      ['light_crossbow'],
-  cleric:    ['light_crossbow', 'javelin'],
-  barbarian: ['javelin'],
-  paladin:   ['javelin'],
-  wizard:    ['light_crossbow'],
-  sorcerer:  ['light_crossbow'],
-  druid:     ['sling', 'javelin'],
-  monk:      ['sling', 'javelin'],
-};
-
-const AMMO_FOR_WEAPON: Record<string, string> = {
-  shortbow: 'arrows', longbow: 'arrows',
-  light_crossbow: 'bolts', heavy_crossbow: 'bolts',
-  sling: 'sling_bullets',
-  javelin: 'javelins_3',
-};
-
-const UTILITY_PREFS: Partial<Record<PcClassType, string[]>> = {
-  fighter:   ['potion_clw'],
-  paladin:   ['potion_clw', 'holy_water'],
-  ranger:    ['antitoxin', 'potion_clw'],
-  cleric:    ['potion_clw', 'scroll_clw', 'holy_water'],
-  druid:     ['potion_clw', 'antitoxin'],
-  barbarian: ['potion_clw', 'antitoxin'],
-  rogue:     ['antitoxin', 'potion_clw', 'alchemists_fire'],
-  bard:      ['potion_clw', 'alchemists_fire'],
-  monk:      ['potion_clw', 'antitoxin'],
-  sorcerer:  ['scroll_mage_armor', 'potion_clw'],
-  wizard:    ['scroll_mage_armor', 'scroll_clw', 'potion_clw'],
-};
-
-const HELMET_PREFS: Partial<Record<PcClassType, string[]>> = {
-  fighter:   ['great_helm', 'half_helm', 'open_helm'],
-  paladin:   ['great_helm', 'half_helm', 'open_helm'],
-  barbarian: ['half_helm', 'open_helm'],
-  cleric:    ['half_helm', 'open_helm'],
-  ranger:    ['open_helm'],
-};
+// Combined catalog searched for every assignment phase.
+const ALL_ITEMS: Record<string, Equipment> = { ...EQUIPMENT_CATALOG, ...MAGICAL_EQUIPMENT_CATALOG };
 
 // ─── Assignment ───────────────────────────────────────────────────────────────
 
 /**
- * Deterministically assign starting equipment to a level-1 character.
+ * Assign equipment to a character of the given class, level, and wealth.
+ * Searches both the mundane and magical catalogs; picks the best-scoring
+ * affordable item per slot using class-role weights.
  *
- * Priority order: armor → primary weapon → shield/secondary → ranged → ammo
- * → helmet → utility items → cosmetics (cloak, boots). Each step picks the
- * best (most expensive) item that fits within the remaining budget.
- *
- * Power vs finesse: STR-heavy characters (STR ≥ DEX+2) favour two-handed
- * power weapons; others favour lighter or finesse options.
+ * Phase order (highest budget priority first):
+ * armor → bracers → cloak → necklace → ring1 → weapon1 → belt → gloves
+ * → shield/off-hand → ranged+ammo → helmet → ring2 → boots
+ * → utility (×3) → cosmetic fallbacks.
  */
 export function assignEquipment(
   pcClass: PcClassType,
+  _level: number,
   wealth: number,
   abilities: Record<Ability, number>,
 ): EquipmentSet {
   let budget = wealth;
   const result: EquipmentSet = {};
 
-  const strMod = abilityMod(abilities.strength     ?? 10);
-  const dexMod = abilityMod(abilities.dexterity    ?? 10);
-  const favorsStrength = strMod >= dexMod + 2;
+  const strMod = abilityMod(abilities.strength  ?? 10);
+  const dexMod = abilityMod(abilities.dexterity ?? 10);
 
-  // Pick the most expensive affordable item from a preference list.
-  function pick(ids: string[]): Equipment | undefined {
-    for (const id of ids) {
-      const item = EQUIPMENT_CATALOG[id];
-      if (item && item.price <= budget) {
-        budget -= item.price;
-        return item;
-      }
-    }
-    return undefined;
+  // ── Role flags ────────────────────────────────────────────────────────────
+  const isPureArcane = pcClass === 'wizard' || pcClass === 'sorcerer';
+  const isBard       = pcClass === 'bard';
+  const isArcane     = isPureArcane || isBard;
+  const isMonk       = pcClass === 'monk';
+  const isDivine     = ['cleric', 'druid', 'paladin', 'ranger'].includes(pcClass);
+  const isRanger     = pcClass === 'ranger';
+  const isRogue      = pcClass === 'rogue';
+  const isPowerMelee = !isArcane && !isMonk && !isRogue && strMod >= dexMod;
+  const isFinesse    = isRogue || isMonk || (!isArcane && dexMod > strMod);
+
+  const castingStat: BonusTarget | null =
+    pcClass === 'wizard'               ? 'int'
+    : pcClass === 'sorcerer' || isBard ? 'cha'
+    : isDivine                         ? 'wis'
+    : null;
+
+  // ── Inner helpers ─────────────────────────────────────────────────────────
+  function bonusSum(item: Equipment, target: BonusTarget): number {
+    return item.bonuses.reduce((s, b) => b.target === target ? s + b.value : s, 0);
   }
 
-  // 1 ── Armor
-  const armor = pick(ARMOR_PREFS[pcClass] ?? ['robes']);
-  if (armor) result.armor = armor;
+  function bestBuy(
+    candidates: Equipment[],
+    score: (i: Equipment) => number,
+    filter?: (i: Equipment) => boolean,
+  ): Equipment | undefined {
+    let best: Equipment | undefined;
+    let bestScore = -Infinity;
+    for (const item of candidates) {
+      if (item.price > budget) continue;
+      if (filter && !filter(item)) continue;
+      const s = score(item);
+      if (s > bestScore) { bestScore = s; best = item; }
+    }
+    if (best) budget -= best.price;
+    return best;
+  }
 
-  // 2 ── Primary weapon — reorder for STR-heavy combatants
-  const baseW1 = favorsStrength && ['fighter', 'barbarian', 'ranger'].includes(pcClass)
-    ? WEAPON1_PREFS_POWER[pcClass]
-    : WEAPON1_PREFS_FINESSE[pcClass] ?? WEAPON1_PREFS_POWER[pcClass] ?? ['dagger'];
-  const weapon1 = pick(baseW1 ?? ['dagger']);
-  if (weapon1) result.weapon1 = weapon1;
+  function bySlot(s: EquipmentSlot): Equipment[] {
+    return Object.values(ALL_ITEMS).filter(i => i.slot === s);
+  }
 
-  // 3 ── Shield or secondary weapon (skipped when primary is two-handed)
+  // ── Proficiency filters ───────────────────────────────────────────────────
+  function canWearArmor(item: Equipment): boolean {
+    const id = item.id;
+    if (isPureArcane || isMonk) return id === 'robes';
+    if (isBard || isRogue)      return !HEAVY_ARMOR_IDS.has(id) && !MEDIUM_ARMOR_IDS.has(id);
+    if (isRanger)               return !HEAVY_ARMOR_IDS.has(id);
+    if (pcClass === 'druid')    return !METAL_ARMOR_IDS.has(id);
+    return true;
+  }
+
+  function canWieldMelee(item: Equipment): boolean {
+    if (item.isRanged || item.isShield) return false;
+    if (item.isExotic)  return isMonk;
+    if (item.isMartial) return !isPureArcane;
+    return true;
+  }
+
+  function canWieldRanged(item: Equipment): boolean {
+    if (!item.isRanged || item.isExotic) return false;
+    if (item.isMartial && (isPureArcane || isMonk)) {
+      return item.id.includes('crossbow') || item.id.startsWith('sling') || item.id === 'javelin';
+    }
+    return true;
+  }
+
+  // ── Weapon scoring ────────────────────────────────────────────────────────
+  function weaponScore(item: Equipment): number {
+    if (!item.damage) return -999;
+    const dmg = parseDiceAvg(item.damage);
+    const atk = bonusSum(item, 'bab');
+    const twoH = item.isTwoHanded;
+    if (isPowerMelee) return dmg + atk * 3 + (twoH ? 4 : 0);
+    if (isFinesse)    return dmg + atk * 3 - (twoH ? 8 : 0);
+    if (isArcane)     return dmg * 0.3 + atk - item.price / 5000;
+    return dmg + atk * 2 - (twoH ? 1 : 0);
+  }
+
+  function rangedScore(item: Equipment): number {
+    if (!item.damage) return -999;
+    const dmg = parseDiceAvg(item.damage);
+    const atk = bonusSum(item, 'bab');
+    return isRanger ? dmg + atk * 3 : dmg + atk * 2;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 1 – Armor
+  // ─────────────────────────────────────────────────────────────────────────
+  const armorItem = bestBuy(bySlot('armor'), i => bonusSum(i, 'ac'), canWearArmor);
+  if (armorItem) result.armor = armorItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 2 – Bracers
+  // Arcane casters and monks rely on bracers of armor for AC; rangers prefer
+  // bracers of archery; anyone else may still buy bracers of armor.
+  // ─────────────────────────────────────────────────────────────────────────
+  const bracerItem = bestBuy(
+    bySlot('braces'),
+    item => {
+      const ac  = bonusSum(item, 'ac');
+      const bab = bonusSum(item, 'bab');
+      if (isPureArcane || isMonk) return ac * 3;
+      if (isRanger)               return bab * 4 + ac;
+      return ac * 2;
+    },
+    item => {
+      if (isPureArcane || isMonk) return item.id.startsWith('bracers_armor');
+      if (isRanger)               return true;
+      return item.id.startsWith('bracers_armor');
+    },
+  );
+  if (bracerItem) result.braces = bracerItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 3 – Cloak (saving throw resistance)
+  // ─────────────────────────────────────────────────────────────────────────
+  const cloakItem = bestBuy(
+    bySlot('cloak'),
+    item => {
+      const saves = bonusSum(item, 'fort') + bonusSum(item, 'ref') + bonusSum(item, 'will');
+      return saves * 5 + bonusSum(item, 'ac') * 3;
+    },
+  );
+  if (cloakItem) result.cloak = cloakItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 4 – Necklace / amulet
+  // Divine casters prefer WIS; arcane prefer CON or natural armor; melee prefers AC.
+  // ─────────────────────────────────────────────────────────────────────────
+  const necklaceItem = bestBuy(
+    bySlot('necklace'),
+    item => {
+      const ac  = bonusSum(item, 'ac');
+      const wis = bonusSum(item, 'wis');
+      const con = bonusSum(item, 'con');
+      if (castingStat === 'wis')                      return wis * 8 + ac * 2 + con * 2;
+      if (castingStat === 'int' || castingStat === 'cha') return con * 4 + ac * 3;
+      return ac * 5 + con * 3;
+    },
+  );
+  if (necklaceItem) result.necklace = necklaceItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 5 – Ring 1
+  // ─────────────────────────────────────────────────────────────────────────
+  const ringPool = bySlot('ring1');
+  const ring1Item = bestBuy(
+    ringPool,
+    item => {
+      const ac       = bonusSum(item, 'ac');
+      const slotPts  = item.bonuses.reduce((s, b) => b.target === 'spell_slots' ? s + b.value * 3 : s, 0);
+      return isArcane ? slotPts * 4 + ac * 2 : ac * 5;
+    },
+  );
+  if (ring1Item) result.ring1 = ring1Item;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 6 – Primary melee weapon
+  // ─────────────────────────────────────────────────────────────────────────
+  const weapon1Item = bestBuy(bySlot('weapon1'), weaponScore, canWieldMelee);
+  if (weapon1Item) result.weapon1 = weapon1Item;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 7 – Belt (STR for power melee; DEX for finesse/monk; skip for casters)
+  // ─────────────────────────────────────────────────────────────────────────
+  const beltItem = bestBuy(
+    bySlot('belt'),
+    item => {
+      const str = bonusSum(item, 'str');
+      const dex = bonusSum(item, 'dex');
+      if (isPowerMelee)        return str * 8 + dex * 2;
+      if (isFinesse || isMonk) return dex * 8 + str * 2;
+      return 0;
+    },
+    item => (isPowerMelee || isFinesse || isMonk) ? true : item.price <= 10,
+  );
+  if (beltItem) result.belt = beltItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 8 – Gloves
+  // ─────────────────────────────────────────────────────────────────────────
+  const glovesItem = bestBuy(
+    bySlot('gloves'),
+    item => {
+      const str = bonusSum(item, 'str');
+      const dex = bonusSum(item, 'dex');
+      if (isPowerMelee)               return str * 6 + dex;
+      if (isFinesse || isMonk)        return dex * 6 + str;
+      if (isRanger)                   return dex * 5 + str * 2;
+      if (isPureArcane)               return dex * 2;
+      return 0;
+    },
+    item => {
+      if (isPowerMelee || isFinesse || isMonk || isRanger) return true;
+      if (isPureArcane) return item.price <= 10000;
+      return item.price <= 5;
+    },
+  );
+  if (glovesItem) result.gloves = glovesItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 9 – Shield (weapon2) or off-hand weapon
+  // ─────────────────────────────────────────────────────────────────────────
   if (!result.weapon1?.isTwoHanded) {
-    const shieldList = SHIELD_PREFS[pcClass];
-    const shield = shieldList ? pick(shieldList) : undefined;
-    if (shield) {
-      result.weapon2 = shield;
-    } else {
-      const w2List = WEAPON2_PREFS[pcClass];
-      const w2 = w2List ? pick(w2List) : undefined;
-      if (w2) result.weapon2 = w2;
+    const w2All    = bySlot('weapon2');
+    const shields  = w2All.filter(i => i.isShield);
+    const offhands = w2All.filter(i => !i.isShield && !i.isRanged);
+
+    let w2Item: Equipment | undefined;
+    if (['fighter', 'paladin', 'cleric', 'barbarian'].includes(pcClass)) {
+      w2Item = bestBuy(shields, item => bonusSum(item, 'ac') * 4);
+    } else if (pcClass === 'druid') {
+      w2Item = bestBuy(
+        shields.filter(i => !METAL_ARMOR_IDS.has(i.id)),
+        item => bonusSum(item, 'ac') * 3,
+      );
+    } else if (isRanger || isRogue || isBard) {
+      w2Item = bestBuy(
+        offhands,
+        item => item.damage ? parseDiceAvg(item.damage) + bonusSum(item, 'bab') * 2 : 0,
+        item => !item.isTwoHanded,
+      );
     }
+    if (w2Item) result.weapon2 = w2Item;
   }
 
-  // 4 ── Ranged weapon
-  const rangedList = RANGED_PREFS[pcClass];
-  const ranged = rangedList ? pick(rangedList) : undefined;
-  if (ranged) result.weapon3 = ranged;
-
-  // 5 ── Ammunition (matches the ranged weapon type)
-  const rangedWeapon = result.weapon3 ?? (result.weapon1?.isRanged ? result.weapon1 : undefined);
-  if (rangedWeapon) {
-    const ammoId = AMMO_FOR_WEAPON[rangedWeapon.id];
-    if (ammoId) {
-      const ammo = pick([ammoId]);
-      if (ammo) result.ammo = ammo;
-    }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 10 – Ranged weapon (weapon3) + matching ammo
+  // ─────────────────────────────────────────────────────────────────────────
+  const wantRanged = isRanger || ['fighter', 'rogue', 'bard', 'barbarian', 'paladin'].includes(pcClass);
+  const rangedItem = bestBuy(
+    bySlot('weapon3').filter(i => i.isRanged),
+    rangedScore,
+    item => canWieldRanged(item) && (wantRanged || item.price <= 200),
+  );
+  if (rangedItem) {
+    result.weapon3 = rangedItem;
+    const useArrows  = rangedItem.id.includes('bow');
+    const useBolts   = rangedItem.id.includes('crossbow');
+    const useBullets = rangedItem.id.includes('sling');
+    const useJavelin = rangedItem.id === 'javelin';
+    const ammoItem = bestBuy(
+      bySlot('ammo'),
+      item => bonusSum(item, 'bab') * 3,
+      item => {
+        if (useArrows)  return item.id.startsWith('arrow');
+        if (useBolts)   return item.id.startsWith('bolt') || item.id === 'screaming_bolt';
+        if (useBullets) return item.id.startsWith('sling_bullet');
+        if (useJavelin) return item.id === 'javelins_3';
+        return false;
+      },
+    );
+    if (ammoItem) result.ammo = ammoItem;
   }
 
-  // 6 ── Helmet
-  const helmetList = HELMET_PREFS[pcClass];
-  const helmet = helmetList ? pick(helmetList) : undefined;
-  if (helmet) result.helmet = helmet;
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 11 – Helmet / headband / circlet
+  // ─────────────────────────────────────────────────────────────────────────
+  const helmetItem = bestBuy(
+    bySlot('helmet'),
+    item => {
+      const int = bonusSum(item, 'int');
+      const wis = bonusSum(item, 'wis');
+      const cha = bonusSum(item, 'cha');
+      const bab = bonusSum(item, 'bab');
+      if (castingStat === 'int') return int * 10 + bab * 2;
+      if (castingStat === 'wis') return wis * 8  + bab * 2 + cha;
+      if (castingStat === 'cha') return cha * 8  + bab * 2 + wis;
+      return bab * 3;
+    },
+    item => {
+      if (isPureArcane) {
+        return item.id.startsWith('headband') || item.id.startsWith('circlet') ||
+               item.id.startsWith('hat')      || item.id.startsWith('helm');
+      }
+      if (isDivine && castingStat === 'wis') return !item.id.startsWith('headband_intellect');
+      return true;
+    },
+  );
+  if (helmetItem) result.helmet = helmetItem;
 
-  // 7 ── Utility belt (up to 3 slots, each a distinct item)
-  const utilList = UTILITY_PREFS[pcClass] ?? [];
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 12 – Ring 2 (same pool, skip the ring1 choice)
+  // ─────────────────────────────────────────────────────────────────────────
+  const ring2Item = bestBuy(
+    ringPool.filter(r => r.id !== ring1Item?.id),
+    item => {
+      const ac      = bonusSum(item, 'ac');
+      const slotPts = item.bonuses.reduce((s, b) => b.target === 'spell_slots' ? s + b.value * 3 : s, 0);
+      return isArcane ? slotPts * 3 + ac * 2 : ac * 4;
+    },
+  );
+  if (ring2Item) result.ring2 = ring2Item;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 13 – Boots
+  // ─────────────────────────────────────────────────────────────────────────
+  const bootsItem = bestBuy(
+    bySlot('boots'),
+    item => {
+      const ac    = bonusSum(item, 'ac');
+      const speed = (item.id.includes('speed') || item.id.includes('striding')) ? 4 : 0;
+      const dex   = bonusSum(item, 'dex');
+      if (isFinesse || isMonk) return dex * 3 + speed * 2 + ac;
+      return speed * 2 + ac * 2 + dex;
+    },
+  );
+  if (bootsItem) result.boots = bootsItem;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 14 – Utility slots (up to 3 distinct items)
+  // ─────────────────────────────────────────────────────────────────────────
+  const utilPool = [
+    ...bySlot('utility1'), ...bySlot('utility2'), ...bySlot('utility3'),
+  ];
+
+  function utilScore(item: Equipment): number {
+    const spellPts = item.bonuses.reduce((s, b) => b.target === 'spell_slots' ? s + b.value * 5 : s, 0);
+    const cl    = bonusSum(item, 'caster_level') * 4;
+    const stat  = castingStat ? bonusSum(item, castingStat) * 6 : 0;
+    const saves = bonusSum(item, 'fort') + bonusSum(item, 'ref') + bonusSum(item, 'will');
+    const hp    = bonusSum(item, 'hp');
+    if (isArcane) return spellPts * 3 + cl * 2 + stat + saves;
+    if (isDivine) return spellPts * 2 + cl + stat + saves + bonusSum(item, 'ac');
+    return hp * 2 + saves * 2 + bonusSum(item, 'str') + bonusSum(item, 'con');
+  }
+
   const usedUtil = new Set<string>();
-  const utilSlots: EquipmentSlot[] = ['utility1', 'utility2', 'utility3'];
-  let uSlot = 0;
-  for (const uid of utilList) {
-    if (uSlot >= utilSlots.length) break;
-    if (usedUtil.has(uid)) continue;
-    const item = EQUIPMENT_CATALOG[uid];
-    if (item && item.price <= budget) {
-      result[utilSlots[uSlot]] = item;
-      budget -= item.price;
-      usedUtil.add(uid);
-      uSlot++;
-    }
+  for (const slot of (['utility1', 'utility2', 'utility3'] as EquipmentSlot[])) {
+    const item = bestBuy(utilPool.filter(u => !usedUtil.has(u.id)), utilScore);
+    if (item) { result[slot] = item; usedUtil.add(item.id); }
   }
 
-  // 8 ── Cosmetics — buy with whatever budget remains
-  if (!result.cloak && budget >= EQUIPMENT_CATALOG['travelers_cloak'].price) {
-    result.cloak = EQUIPMENT_CATALOG['travelers_cloak'];
-    budget -= result.cloak.price;
-  }
-  if (!result.boots && budget >= EQUIPMENT_CATALOG['boots'].price) {
-    result.boots = EQUIPMENT_CATALOG['boots'];
-    budget -= result.boots.price;
-  }
-  if (!result.belt && budget >= EQUIPMENT_CATALOG['belt'].price) {
-    result.belt = EQUIPMENT_CATALOG['belt'];
-    budget -= result.belt.price;
-  }
-  if (!result.gloves && ['fighter', 'paladin', 'cleric'].includes(pcClass)) {
-    const glov = pick(['gauntlets']);
-    if (glov) result.gloves = glov;
-  } else if (!result.gloves && budget >= EQUIPMENT_CATALOG['light_gloves'].price) {
-    result.gloves = EQUIPMENT_CATALOG['light_gloves'];
-    budget -= result.gloves.price;
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 15 – Cosmetic fallbacks for empty wearable slots
+  // ─────────────────────────────────────────────────────────────────────────
+  for (const [s, id] of [
+    ['cloak',  'travelers_cloak'] as const,
+    ['boots',  'boots']          as const,
+    ['belt',   'belt']           as const,
+    ['gloves', 'light_gloves']   as const,
+  ]) {
+    if (!result[s]) {
+      const item = ALL_ITEMS[id];
+      if (item && item.price <= budget) { budget -= item.price; result[s] = item; }
+    }
   }
 
   return result;
