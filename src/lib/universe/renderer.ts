@@ -145,6 +145,9 @@ function speedFromId(id: string): number {
  * 2-arm logarithmic spiral with a ~15% central cluster. The central systems
  * are packed in a small nucleus around the galaxy core; the remaining 85% are
  * distributed across two outward-spiralling arms.
+ *
+ * Arm scatter is applied perpendicular to the spiral tangent so the two arms
+ * stay narrow and visually distinct — radial and XY jitter is kept very small.
  */
 export function galaxySpiralPositions(
   count: number,
@@ -160,45 +163,41 @@ export function galaxySpiralPositions(
   const armOffset = Math.PI;
   const a = 8;
   const angleStep = 0.42;
-  // Adaptive tightness — same cap as before, but computed for armCount so the
-  // outer arms stay within viewport regardless of cluster size.
   const maxK = Math.max(1, Math.floor(armCount / 2));
   const b = Math.min(0.18, 2.42 / (maxK * angleStep));
 
-  // Central cluster radius: half the innermost arm step's radial distance.
   const centralMaxR = (a * Math.exp(b * angleStep * 0.5)) * (spread / 200) * 0.8;
 
-  // Central cluster — quasi-random angle (golden angle) + CDF-biased radius.
+  // Central cluster — sin-based pseudo-random placement so there's no
+  // regular structure visible in the nucleus.
   for (let i = 0; i < centralCount; i++) {
-    const angle = i * 2.399963229; // golden angle ≈ 2π/φ
-    const uRaw = (i * 0.7548776662) % 1;
-    // Inverse CDF for density ∝ (1-r/R): r/R = 1 - sqrt(1-u)
+    const angle = (Math.sin(i * 127.1 + 311.7) * 0.5 + 0.5) * Math.PI * 2;
+    const uRaw  = (Math.sin(i * 269.5 + 183.3) * 0.5 + 0.5);
     const r = centralMaxR * (1 - Math.sqrt(1 - uRaw));
-    const jx = Math.sin(i * 127.1 + 99.3);
-    const jy = Math.sin(i * 269.5 + 43.7);
-    const posJitter = 0.15 * Math.max(r, 1);
     positions.push({
-      x: cx + Math.cos(angle) * r + jx * posJitter,
-      y: cy + Math.sin(angle) * r + jy * posJitter,
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r,
     });
   }
 
-  // Two spiral arms.
+  // Two spiral arms — scatter applied only perpendicular to the arm so the
+  // two arms remain tight and visually separate. Arm width is 6% of radius,
+  // with a small absolute floor so innermost points still have visible spread.
   for (let i = 0; i < armCount; i++) {
     const arm = i % arms;
     const k = Math.floor(i / arms);
-    const angle = armOffset * arm + k * angleStep;
-    const radius = (a * Math.exp(b * angle)) * (spread / 200);
-    const jitterAngle = ((i * 12.9898) % Math.PI) * 0.05;
-    const jitterRadius = ((i * 78.233) % 23) - 11;
-    const finalAngle = angle + jitterAngle;
-    const finalRadius = radius + jitterRadius;
-    const posJitter = 0.2 * Math.abs(finalRadius);
-    const jx = Math.sin(i * 127.1 + 311.7);
-    const jy = Math.sin(i * 269.5 + 183.3);
+    const baseAngle = armOffset * arm + k * angleStep;
+    const radius = (a * Math.exp(b * baseAngle)) * (spread / 200);
+    // Tiny along-arm angle wobble to break perfect regularity.
+    const jitterAngle = ((i * 12.9898) % Math.PI) * 0.012;
+    const finalAngle = baseAngle + jitterAngle;
+    // Perpendicular direction to the spiral arm at this point.
+    const perpAngle = finalAngle + Math.PI / 2;
+    const armWidth = Math.max(Math.abs(radius) * 0.06, (spread / 200) * 2);
+    const perpScatter = (((i * 78.233) % 2) - 1) * armWidth;
     positions.push({
-      x: cx + Math.cos(finalAngle) * finalRadius + jx * posJitter,
-      y: cy + Math.sin(finalAngle) * finalRadius + jy * posJitter,
+      x: cx + Math.cos(finalAngle) * radius + Math.cos(perpAngle) * perpScatter,
+      y: cy + Math.sin(finalAngle) * radius + Math.sin(perpAngle) * perpScatter,
     });
   }
   return positions;
@@ -209,10 +208,10 @@ export function galaxySpiralPositions(
  * with a linear density falloff from centre to edge — the centre is the
  * densest region and density decreases to zero at the oval boundary.
  *
- * Angular coverage uses the golden-angle quasi-random sequence for even
- * fill with no visible banding. The ellipse aspect ratio is derived
- * deterministically from the galaxy id hash so each oval galaxy looks
- * distinct.
+ * Angle and radius are sampled with independent sin-based pseudo-random
+ * values so there is no correlated structure (no arms, no rings).
+ * The ellipse aspect ratio is derived from the galaxy id hash so each
+ * oval galaxy has a distinct shape.
  */
 export function galaxyOvalPositions(
   count: number,
@@ -229,23 +228,20 @@ export function galaxyOvalPositions(
   const aspectX = 1.4 + (h & 0xfff) / 0xfff * 0.8;
 
   for (let i = 0; i < count; i++) {
-    // Golden angle gives uniform angular coverage without visible spokes.
-    const angle = i * 2.399963229;
+    // Independent sin-based pseudo-random values for angle and radius.
+    // Using two different large-prime multipliers keeps them uncorrelated,
+    // avoiding the spiral-arm artefact produced by the golden-angle sequence.
+    const angleRand  = Math.sin(i * 127.1 + 311.7) * 0.5 + 0.5; // [0, 1)
+    const radiusRand = Math.sin(i * 269.5 + 183.3) * 0.5 + 0.5; // [0, 1)
 
-    // Linear density falloff in the radial cross-section:
-    //   density(r) ∝ (1 − r/R)  →  CDF: F(t) = 2t − t²  (t = r/R)
-    //   Inverse CDF: r/R = 1 − sqrt(1 − u)
-    const uRaw = (i * 0.6180339887) % 1;
-    const r = maxR * (1 - Math.sqrt(1 - uRaw));
-
-    const jitterAngle = ((i * 12.9898) % Math.PI) * 0.04;
-    const jitterR = ((i * 78.233) % 15) - 7.5;
-    const finalAngle = angle + jitterAngle;
-    const finalR = Math.max(0, r + jitterR * 0.4);
+    const angle = angleRand * Math.PI * 2;
+    // Linear density falloff: density(r) ∝ (1−r/R) → inverse CDF gives
+    // r/R = 1 − sqrt(1 − u), concentrating systems toward the centre.
+    const r = maxR * (1 - Math.sqrt(1 - radiusRand));
 
     positions.push({
-      x: cx + Math.cos(finalAngle) * finalR * aspectX,
-      y: cy + Math.sin(finalAngle) * finalR,
+      x: cx + Math.cos(angle) * r * aspectX,
+      y: cy + Math.sin(angle) * r,
     });
   }
   return positions;
