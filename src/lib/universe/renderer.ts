@@ -229,19 +229,6 @@ function drawCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.fill();
 }
 
-function drawGlow(
-  ctx: CanvasRenderingContext2D,
-  x: number, y: number, r: number,
-  innerColor: string, outerColor: string,
-): void {
-  const grd = ctx.createRadialGradient(x, y, r * 0.2, x, y, r * 2.2);
-  grd.addColorStop(0, innerColor);
-  grd.addColorStop(1, outerColor);
-  ctx.fillStyle = grd;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 2.2, 0, Math.PI * 2);
-  ctx.fill();
-}
 
 function drawOrbitRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, viewScale: number = 1): void {
   ctx.beginPath();
@@ -266,17 +253,14 @@ export function drawBackground(
 }
 
 // ── Composition palettes ──────────────────────────────────────────────────
-function starFill(s: StarData): { inner: string; outer: string; core: string } {
-  if (s.composition === 'ANTIMATTER') {
-    return { inner: 'rgba(220,140,255,0.95)', outer: 'rgba(120,40,180,0)', core: '#f4d8ff' };
-  }
+function starFill(s: StarData): string {
+  if (s.composition === 'ANTIMATTER') return '#f4d8ff';
   // brightness 100..1000 → tint warmer at the bright end
   const t = Math.max(0, Math.min(1, (s.brightness - 100) / 900));
   const r = Math.round(255 * (0.85 + 0.15 * t));
   const g = Math.round(220 * (0.7 + 0.3 * (1 - Math.abs(t - 0.5) * 2)));
   const b = Math.round(255 * (1 - 0.7 * t));
-  const core = `rgb(${r},${g},${b})`;
-  return { inner: `rgba(${r},${g},${b},0.95)`, outer: `rgba(${r},${g},${b},0)`, core };
+  return `rgb(${r},${g},${b})`;
 }
 
 // ── Composition-driven palettes (planets / satellites) ───────────────────
@@ -677,9 +661,8 @@ function drawGalaxySpiral(
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
 
     const dominant = systems[i].stars[0] ?? null;
-    const palette = dominant ? starFill(dominant) : { inner: '#fff', outer: 'rgba(255,255,255,0)', core: '#fff' };
-    drawGlow(ctx, px, py, sizePx, palette.inner, palette.outer);
-    drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
+    const color = dominant ? starFill(dominant) : '#fff';
+    drawCircle(ctx, px, py, sizePx * 0.6, color);
   }
   return hit;
 }
@@ -694,7 +677,6 @@ function drawGalaxySpiral(
  * picks the same accent shade.
  */
 const GLYPH_DOT_COUNT = 20;
-const GLYPH_HALO_ALPHA = 0.55;
 
 function drawGalaxyGlyph(
   ctx: CanvasRenderingContext2D,
@@ -711,15 +693,7 @@ function drawGalaxyGlyph(
     ? data.solarSystems.find(s => s.id === galaxy.systemIds[0]) ?? null
     : null;
   const dominantStar = sampleSystem?.stars[0] ?? null;
-  const tint = dominantStar
-    ? starFill(dominantStar)
-    : { inner: 'rgba(200,210,255,0.9)', outer: 'rgba(40,60,120,0)', core: '#dde0ff' };
-
-  // Halo: large soft glow centered on galaxy.
-  ctx.save();
-  ctx.globalAlpha = GLYPH_HALO_ALPHA;
-  drawGlow(ctx, cx, cy, radius * 0.6, tint.inner, tint.outer);
-  ctx.restore();
+  const dotColor = dominantStar ? starFill(dominantStar) : '#dde0ff';
 
   // Low-res spiral dots — same algorithm as the full spiral but with a
   // fixed dot count so the glyph reads as a "compressed" galaxy.
@@ -733,7 +707,7 @@ function drawGalaxyGlyph(
     const dy = pos.y - cy;
     const px = cx + dx * cosG - dy * sinG;
     const py = cy + dx * sinG + dy * cosG;
-    drawCircle(ctx, px, py, dotR, tint.core);
+    drawCircle(ctx, px, py, dotR, dotColor);
   }
 
   // Outline ring at the galaxy's nominal radius for a clean LOD silhouette.
@@ -794,9 +768,7 @@ export function drawSystemScene(
   if (system.stars.length === 1) {
     const star = system.stars[0];
     const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale;
-    const palette = starFill(star);
-    drawGlow(ctx, cx, cy, starPx, palette.inner, palette.outer);
-    drawCircle(ctx, cx, cy, starPx, palette.core);
+    drawCircle(ctx, cx, cy, starPx, starFill(star));
   } else {
     const clusterR = STAR_MIN_PX * 1.2 / viewScale;
     for (let i = 0; i < system.stars.length; i++) {
@@ -807,9 +779,7 @@ export function drawSystemScene(
       const sx = cx + Math.cos(angle) * clusterR;
       const sy = cy + Math.sin(angle) * clusterR;
       const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') * 0.7 / viewScale;
-      const palette = starFill(star);
-      drawGlow(ctx, sx, sy, starPx, palette.inner, palette.outer);
-      drawCircle(ctx, sx, sy, starPx, palette.core);
+      drawCircle(ctx, sx, sy, starPx, starFill(star));
     }
   }
 
