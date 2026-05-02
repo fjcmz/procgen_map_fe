@@ -25,10 +25,10 @@ export interface ClassLevel {
 
 /**
  * Bonus type tags. D&D 3.5e tracks bonus types so same-type bonuses don't
- * stack (only the largest applies) while different-type bonuses do. The
- * stacking rules are not enforced by `computeCombat*` — every component is
- * summed — but the type annotation lets the UI group / colour the breakdown
- * and makes future stacking enforcement a non-breaking change.
+ * stack (only the largest applies) while different-type bonuses do.
+ * Stacking is enforced by `sumWithStacking()` below, which every
+ * `computeCombat*` total funnels through. Components are still recorded
+ * individually so the UI breakdown can show the suppressed entries.
  *
  * The union is intentionally open-ended so callers can extend it via
  * declaration merging or just pass any string; the literal list covers the
@@ -69,10 +69,57 @@ export interface BonusComponent {
  * Result of a `computeCombat*` call: total + the ordered list of components
  * that summed to it. Callers typically render `total` in the main UI and
  * spread `components` into a breakdown popup.
+ *
+ * `total` reflects the SRD stacking rules (`sumWithStacking`): same-type
+ * bonuses other than `base` / `ability` / `dodge` only contribute their
+ * largest positive value, while penalties (negative values) always stack.
+ * `components` retains every contribution so the UI can show suppressed
+ * entries alongside the effective ones.
  */
 export interface DerivedStat {
   total: number;
   components: BonusComponent[];
+}
+
+/**
+ * Bonus types that always stack with themselves regardless of source. Per
+ * the SRD: `dodge` explicitly stacks; `base` covers per-class progression
+ * (a multi-class character's BAB is the sum of per-class BAB) and per-class
+ * save progression; `ability` covers ability modifiers (each is unique by
+ * source — STR / DEX / CON / WIS — so multiple entries never collide in
+ * practice, but the rule is still "all apply").
+ *
+ * Every other type uses the "highest only" rule for positive contributions.
+ */
+export const STACKING_BONUS_TYPES: ReadonlySet<BonusType> = new Set<BonusType>([
+  'base',
+  'ability',
+  'dodge',
+]);
+
+/**
+ * Sum a list of typed bonus components under D&D 3.5e stacking rules:
+ *   • `base` / `ability` / `dodge` — every entry contributes (full sum).
+ *   • Penalties (value < 0) — always stack regardless of type.
+ *   • All other types — only the single largest positive entry per type
+ *     contributes.
+ *
+ * The input list is not modified; callers keep the full `components` array
+ * for breakdown UIs and just use this for the displayed total.
+ */
+export function sumWithStacking(components: readonly BonusComponent[]): number {
+  let total = 0;
+  const maxByType = new Map<BonusType, number>();
+  for (const c of components) {
+    if (c.value < 0 || STACKING_BONUS_TYPES.has(c.type)) {
+      total += c.value;
+      continue;
+    }
+    const prev = maxByType.get(c.type) ?? 0;
+    if (c.value > prev) maxByType.set(c.type, c.value);
+  }
+  for (const v of maxByType.values()) total += v;
+  return total;
 }
 
 /** The three D&D saving throws. */
@@ -225,8 +272,7 @@ export function computeBAB(
   // ability mod on top; we expose ability modifiers via `extraComponents`
   // when callers want them in the same total.
   for (const c of extraComponents) components.push(c);
-  const total = components.reduce((s, c) => s + c.value, 0);
-  return { total, components };
+  return { total: sumWithStacking(components), components };
 }
 
 /**
@@ -253,8 +299,7 @@ export function computeAC(
   }
 
   for (const c of extraComponents) components.push(c);
-  const total = components.reduce((s, c) => s + c.value, 0);
-  return { total, components };
+  return { total: sumWithStacking(components), components };
 }
 
 /**
@@ -302,11 +347,10 @@ export function computeSaves(
   if (extras.reflex)    for (const c of extras.reflex)    refComponents.push(c);
   if (extras.will)      for (const c of extras.will)      willComponents.push(c);
 
-  const sum = (cs: BonusComponent[]) => cs.reduce((s, c) => s + c.value, 0);
   return {
-    fortitude: { total: sum(fortComponents), components: fortComponents },
-    reflex:    { total: sum(refComponents),  components: refComponents  },
-    will:      { total: sum(willComponents), components: willComponents },
+    fortitude: { total: sumWithStacking(fortComponents), components: fortComponents },
+    reflex:    { total: sumWithStacking(refComponents),  components: refComponents  },
+    will:      { total: sumWithStacking(willComponents), components: willComponents },
   };
 }
 

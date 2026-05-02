@@ -13,6 +13,7 @@ import type { PcClassType } from './PcClassType';
 import type { Ability } from './Ability';
 import { abilityMod } from './Ability';
 import type { BonusType } from './Combat';
+import { STACKING_BONUS_TYPES } from './Combat';
 
 // ─── Slot types ──────────────────────────────────────────────────────────────
 
@@ -488,6 +489,38 @@ export function assignEquipment(
     return item.bonuses.reduce((s, b) => b.target === target ? s + b.value : s, 0);
   }
 
+  /**
+   * AC contribution of `item` over and above what is already equipped, under
+   * SRD stacking rules. Same-type AC bonuses (armor / shield / natural /
+   * deflection / etc) only contribute the delta above the highest existing
+   * value of that type; types in `STACKING_BONUS_TYPES` (only `dodge` is
+   * relevant for AC) always contribute their full value.
+   *
+   * Used in place of raw `bonusSum(item, 'ac')` for every AC-scoring phase
+   * so the equipment picker doesn't waste budget on items whose AC bonus
+   * would be entirely suppressed by something already in the slot map (e.g.
+   * a Fighter in Full Plate has no use for Bracers of Armor).
+   */
+  function marginalAcGain(item: Equipment): number {
+    let gain = 0;
+    for (const b of item.bonuses) {
+      if (b.target !== 'ac') continue;
+      const type = (b.type ?? 'misc') as BonusType;
+      if (STACKING_BONUS_TYPES.has(type)) { gain += b.value; continue; }
+      let existing = 0;
+      for (const eq of Object.values(result)) {
+        if (!eq || eq.id === item.id) continue;
+        for (const eb of eq.bonuses) {
+          if (eb.target !== 'ac') continue;
+          if (((eb.type ?? 'misc') as BonusType) !== type) continue;
+          if (eb.value > existing) existing = eb.value;
+        }
+      }
+      gain += Math.max(0, b.value - existing);
+    }
+    return gain;
+  }
+
   function bestBuy(
     candidates: Equipment[],
     score: (i: Equipment) => number,
@@ -567,7 +600,7 @@ export function assignEquipment(
   const bracerItem = bestBuy(
     bySlot('braces'),
     item => {
-      const ac  = bonusSum(item, 'ac');
+      const ac  = marginalAcGain(item);
       const bab = bonusSum(item, 'bab');
       if (isPureArcane || isMonk) return ac * 3;
       if (isRanger)               return bab * 4 + ac;
@@ -576,7 +609,10 @@ export function assignEquipment(
     item => {
       if (isPureArcane || isMonk) return item.id.startsWith('bracers_armor');
       if (isRanger)               return true;
-      return item.id.startsWith('bracers_armor');
+      // Other classes only buy bracers of armor when they actually exceed
+      // the worn armor's AC bonus (same-type bonuses don't stack).
+      if (item.id.startsWith('bracers_armor')) return marginalAcGain(item) > 0;
+      return false;
     },
   );
   if (bracerItem) result.braces = bracerItem;
@@ -588,7 +624,7 @@ export function assignEquipment(
     bySlot('cloak'),
     item => {
       const saves = bonusSum(item, 'fort') + bonusSum(item, 'ref') + bonusSum(item, 'will');
-      return saves * 5 + bonusSum(item, 'ac') * 3;
+      return saves * 5 + marginalAcGain(item) * 3;
     },
   );
   if (cloakItem) result.cloak = cloakItem;
@@ -600,7 +636,7 @@ export function assignEquipment(
   const necklaceItem = bestBuy(
     bySlot('necklace'),
     item => {
-      const ac  = bonusSum(item, 'ac');
+      const ac  = marginalAcGain(item);
       const wis = bonusSum(item, 'wis');
       const con = bonusSum(item, 'con');
       if (castingStat === 'wis')                      return wis * 8 + ac * 2 + con * 2;
@@ -617,7 +653,7 @@ export function assignEquipment(
   const ring1Item = bestBuy(
     ringPool,
     item => {
-      const ac       = bonusSum(item, 'ac');
+      const ac       = marginalAcGain(item);
       const slotPts  = item.bonuses.reduce((s, b) => b.target === 'spell_slots' ? s + b.value * 3 : s, 0);
       return isArcane ? slotPts * 4 + ac * 2 : ac * 5;
     },
@@ -678,11 +714,19 @@ export function assignEquipment(
 
     let w2Item: Equipment | undefined;
     if (['fighter', 'paladin', 'cleric', 'barbarian'].includes(pcClass)) {
-      w2Item = bestBuy(shields, item => bonusSum(item, 'ac') * 4);
+      w2Item = bestBuy(
+        shields,
+        item => marginalAcGain(item) * 4,
+        // Skip shields whose bonus is already covered by something equipped
+        // (e.g. a Ring of Force Shield bought in Phase 5 makes a +1 buckler
+        // a wasted slot).
+        item => marginalAcGain(item) > 0,
+      );
     } else if (pcClass === 'druid') {
       w2Item = bestBuy(
         shields.filter(i => !METAL_ARMOR_IDS.has(i.id)),
-        item => bonusSum(item, 'ac') * 3,
+        item => marginalAcGain(item) * 3,
+        item => marginalAcGain(item) > 0,
       );
     } else if (isRanger || isRogue || isBard) {
       w2Item = bestBuy(
@@ -755,7 +799,7 @@ export function assignEquipment(
   const ring2Item = bestBuy(
     ringPool.filter(r => r.id !== ring1Item?.id),
     item => {
-      const ac      = bonusSum(item, 'ac');
+      const ac      = marginalAcGain(item);
       const slotPts = item.bonuses.reduce((s, b) => b.target === 'spell_slots' ? s + b.value * 3 : s, 0);
       return isArcane ? slotPts * 3 + ac * 2 : ac * 4;
     },
@@ -768,7 +812,7 @@ export function assignEquipment(
   const bootsItem = bestBuy(
     bySlot('boots'),
     item => {
-      const ac    = bonusSum(item, 'ac');
+      const ac    = marginalAcGain(item);
       const speed = (item.id.includes('speed') || item.id.includes('striding')) ? 4 : 0;
       const dex   = bonusSum(item, 'dex');
       if (isFinesse || isMonk) return dex * 3 + speed * 2 + ac;
@@ -791,7 +835,7 @@ export function assignEquipment(
     const saves = bonusSum(item, 'fort') + bonusSum(item, 'ref') + bonusSum(item, 'will');
     const hp    = bonusSum(item, 'hp');
     if (isArcane) return spellPts * 3 + cl * 2 + stat + saves;
-    if (isDivine) return spellPts * 2 + cl + stat + saves + bonusSum(item, 'ac');
+    if (isDivine) return spellPts * 2 + cl + stat + saves + marginalAcGain(item);
     return hp * 2 + saves * 2 + bonusSum(item, 'str') + bonusSum(item, 'con');
   }
 

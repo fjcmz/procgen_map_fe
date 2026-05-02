@@ -37,7 +37,7 @@ import type { Ability } from './fantasy/Ability';
 import { abilityMod } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
 import type { ClassLevel, CombatStats, BonusType, BonusComponent } from './fantasy/Combat';
-import { computeCombatStats } from './fantasy/Combat';
+import { computeCombatStats, sumWithStacking } from './fantasy/Combat';
 import type { EquipmentSet } from './fantasy/Equipment';
 import { assignEquipment } from './fantasy/Equipment';
 import type { CharacterSpellcasting } from './fantasy/Spellcasting';
@@ -542,6 +542,11 @@ export function raceLabel(r: RaceType): string {
  * attribute and hp targets are stored in the EquipmentSet but not mirrored
  * into combat stats (they affect ability scores which would require a full
  * recompute — left for future work).
+ *
+ * Components are pushed onto each `DerivedStat.components` list and the
+ * `total` is rebuilt via `sumWithStacking` at the end so same-type bonuses
+ * (e.g. armor from worn plate plus armor from bracers of armor) collapse
+ * to the single largest value per the SRD stacking rules.
  */
 function applyEquipmentToCombat(char: CityCharacter): void {
   const eq = char.equipment;
@@ -555,23 +560,18 @@ function applyEquipmentToCombat(char: CityCharacter): void {
       });
       switch (bonus.target) {
         case 'ac':
-          char.combat.ac.total += bonus.value;
           char.combat.ac.components.push(comp());
           break;
         case 'bab':
-          char.combat.bab.total += bonus.value;
           char.combat.bab.components.push(comp());
           break;
         case 'fort':
-          char.combat.saves.fortitude.total += bonus.value;
           char.combat.saves.fortitude.components.push(comp());
           break;
         case 'ref':
-          char.combat.saves.reflex.total += bonus.value;
           char.combat.saves.reflex.components.push(comp());
           break;
         case 'will':
-          char.combat.saves.will.total += bonus.value;
           char.combat.saves.will.components.push(comp());
           break;
         case 'hp':
@@ -581,7 +581,7 @@ function applyEquipmentToCombat(char: CityCharacter): void {
           const old = abilityMod(char.abilities.strength    ?? 10);
           char.abilities.strength    = (char.abilities.strength    ?? 10) + bonus.value;
           const d = abilityMod(char.abilities.strength) - old;
-          if (d) { char.combat.bab.total += d; char.combat.bab.components.push({ source: item.name + ' (STR)', value: d, type: 'ability' as BonusType }); }
+          if (d) char.combat.bab.components.push({ source: item.name + ' (STR)', value: d, type: 'ability' as BonusType });
           break;
         }
         case 'dex': {
@@ -589,8 +589,8 @@ function applyEquipmentToCombat(char: CityCharacter): void {
           char.abilities.dexterity   = (char.abilities.dexterity   ?? 10) + bonus.value;
           const d = abilityMod(char.abilities.dexterity) - old;
           if (d) {
-            char.combat.ac.total += d; char.combat.ac.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
-            char.combat.saves.reflex.total += d; char.combat.saves.reflex.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
+            char.combat.ac.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
+            char.combat.saves.reflex.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
           }
           break;
         }
@@ -600,7 +600,7 @@ function applyEquipmentToCombat(char: CityCharacter): void {
           const d = abilityMod(char.abilities.constitution) - old;
           if (d) {
             char.hitPoints += d * char.level;
-            char.combat.saves.fortitude.total += d; char.combat.saves.fortitude.components.push({ source: item.name + ' (CON)', value: d, type: 'ability' as BonusType });
+            char.combat.saves.fortitude.components.push({ source: item.name + ' (CON)', value: d, type: 'ability' as BonusType });
           }
           break;
         }
@@ -608,7 +608,7 @@ function applyEquipmentToCombat(char: CityCharacter): void {
           const old = abilityMod(char.abilities.wisdom      ?? 10);
           char.abilities.wisdom      = (char.abilities.wisdom      ?? 10) + bonus.value;
           const d = abilityMod(char.abilities.wisdom) - old;
-          if (d) { char.combat.saves.will.total += d; char.combat.saves.will.components.push({ source: item.name + ' (WIS)', value: d, type: 'ability' as BonusType }); }
+          if (d) char.combat.saves.will.components.push({ source: item.name + ' (WIS)', value: d, type: 'ability' as BonusType });
           break;
         }
         case 'int':
@@ -634,6 +634,13 @@ function applyEquipmentToCombat(char: CityCharacter): void {
       }
     }
   }
+  // Rebuild totals under SRD stacking rules now that every equipment
+  // contribution is in the components list.
+  char.combat.ac.total              = sumWithStacking(char.combat.ac.components);
+  char.combat.bab.total             = sumWithStacking(char.combat.bab.components);
+  char.combat.saves.fortitude.total = sumWithStacking(char.combat.saves.fortitude.components);
+  char.combat.saves.reflex.total    = sumWithStacking(char.combat.saves.reflex.components);
+  char.combat.saves.will.total      = sumWithStacking(char.combat.saves.will.components);
 }
 
 export function generateCityCharacters(
