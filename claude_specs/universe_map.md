@@ -138,14 +138,43 @@ This is the only piece of glue between the universe pipeline and the world-map p
 
 | File | Purpose |
 |------|---------|
-| `renderer.ts` | Three scenes (galaxy / system / planet), Kepler-driven orbital animation, scale mapping, hit-test circles. Reference-repo helpers ported verbatim |
+| `renderer.ts` | Three scenes (galaxy / system / planet), Kepler-driven orbital animation, scale mapping, hit-test circles. Reference-repo helpers ported verbatim. See **Renderer internals** below |
 | `hitTest.ts` | Pick topmost circle under cursor (back-to-front iteration) |
 | `LandingScreen.tsx` | Choose between "Planet generation" (world-map flow) and "Universe generation" (universe flow) |
-| `UniverseScreen.tsx` | Top-level screen that owns the worker lifecycle + canvas state |
-| `UniverseCanvas.tsx` | Canvas component; manages scene state (`'galaxy' \| 'system' \| 'planet'`), zoom/pan, drill-down navigation, and reset on new universe data |
-| `UniverseOverlay.tsx` | Tabbed overlay (Generation + Tree); persists position to `localStorage` (`universe.overlay.position`) and active tab to `universe.activeTab`; mirrors the world-map `UnifiedOverlay.tsx` UX |
+| `UniverseScreen.tsx` | Top-level screen that owns the worker lifecycle + canvas state. `DEFAULT_SOLAR_SYSTEMS = 500` (lowest preset button) |
+| `UniverseCanvas.tsx` | Canvas component; manages scene state (`'galaxy' \| 'system' \| 'planet'`), zoom/pan (`MIN_SCALE = 0.15`, `MAX_SCALE = 2000`), drill-down navigation, reset on new data. Computes `ViewBounds` each frame from `{scale, tx, ty}` and passes it to `drawGalaxyScene` for frustum culling. Hit circles from the renderer are mapped back to screen space via `transformHit` |
+| `UniverseOverlay.tsx` | Tabbed overlay (Generation + Tree); persists position to `localStorage` (`universe.overlay.position`) and active tab to `universe.activeTab`; mirrors the world-map `UnifiedOverlay.tsx` UX. Solar-system count presets: `SYSTEM_OPTIONS = [500, 1000, 5000, 10000]`; slider max = 10 000 |
 | `UniverseTreeTab.tsx` | Hierarchical browser of the generated universe (Galaxy → System → Star/Planet → Satellite). Single-galaxy universes hide the galaxy level by spec |
 | `UniverseEntityPopup.tsx` | Detail popup for a clicked entity. Shows physics fields and (for habitable rock planets / moons) a "Generate World" button that triggers the hand-off |
+
+### Renderer internals (`renderer.ts`)
+
+**Galaxy scene — `drawGalaxySpiral`**
+
+Systems are placed on a 2-arm logarithmic spiral by `galaxySpiralPositions` (adaptive tightness `b = min(0.18, 2.42 / (maxK × angleStep))` so outer arms stay within ~45 % of `spread` for large counts). A full-galaxy rigid-body rotation is applied each frame at `GALAXY_SPIN_SPEED = 0.018 rad/s` (≈ 5.8 min per revolution). Each system renders as a single solid `drawCircle` call sized by `scaleMap` on the dominant star's radius. **There is no glow** — `drawGlow` (`ctx.createRadialGradient` per system) was removed; `starFill` returns a plain color string.
+
+**Spiral layout cache — `getOrBuildLayout`**
+
+`rawPositions` (computed by `galaxySpiralPositions`, which calls `Math.exp` per system) and `maxStarRadii / minR / maxR` are expensive to recompute every animation frame but never change for a fixed galaxy. They are cached in a module-level `Map<string, SpiralLayout>` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction) keyed by `"${count}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id}"`. The rotation is inlined per-iteration in the draw loop rather than `.map()`-ing an intermediate `positions[]` array.
+
+**Frustum culling — `ViewBounds`**
+
+`UniverseCanvas` derives `ViewBounds` (content-space AABB) from the current `{scale, tx, ty}` transform:
+
+```
+x0 = -tx / scale,  x1 = (vw - tx) / scale
+y0 = -ty / scale,  y1 = (vh - ty) / scale
+```
+
+This is passed through `drawGalaxyScene` → `drawGalaxySpiral`. Each system is tested with `circleIntersectsViewBounds` before any work is done — systems outside the viewport are skipped entirely (no draw call, no hit circle push). Galaxy glyphs in the multi-galaxy view are also culled when their bounding circle falls outside `ViewBounds`. At the identity transform `{scale:1, tx:0, ty:0}` bounds equal the canvas dimensions and nothing is culled.
+
+**Multi-galaxy LOD**
+
+Galaxy glyphs (20 low-res spiral dots + outline ring) cross-fade with the full embedded spiral: `LOD_BLEND_START = 50 px` on-screen radius → glyph only; `LOD_BLEND_END = 110 px` → full spiral; smoothstep blend in between.
+
+**System scene**
+
+Single star: solid circle at canvas center. Multi-star binary: stars orbit a tight cluster at `STAR_ORBIT_SPEED = 0.08 rad/s`. Planets follow Kepler ω ∝ r⁻¹·⁵ (`PLANET_K = 0.5`). Satellites orbit the planet at fixed ring spacing (`SAT_BASE_ORBIT = 90`, `SAT_ORBIT_STEP = 44`, `SAT_K = 0.8`).
 
 ## Pitfalls
 
@@ -160,5 +189,9 @@ This is the only piece of glue between the universe pipeline and the world-map p
 - **Planet / satellite biomes are only assigned when `composition === 'ROCK' && life`.** Other planets / moons have `biome === undefined`. The hand-off code in `App.tsx` falls back to `'default'` for the world-map profile when biome is undefined — keep that fallback if you ever extend biome assignment.
 - **Hand-off seed format is part of the determinism contract.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on. Changing this format would break "the same universe seed always gives the same world for a given planet". Treat it like a stable interface.
 - **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.
+- **Do NOT call `galaxySpiralPositions` outside `getOrBuildLayout`.** The function calls `Math.exp` per system — at 10 000 systems this is significant. `getOrBuildLayout` caches the result; bypassing it reintroduces an O(N) cost every animation frame.
+- **Do NOT allocate a `positions[]` array per frame.** The rotation is intentionally inlined in the draw loop (`px = cx + dx*cosG - dy*sinG`) to avoid a 10 000-object allocation + GC hit every tick. Keep it that way.
+- **Do NOT push hit circles before the cull check.** Offscreen systems cannot be clicked; accumulating hit circles for them wastes memory and GC budget at large system counts. The hit push must stay after `circleIntersectsViewBounds`.
+- **Do NOT reintroduce `ctx.createRadialGradient` per visible system.** At high system counts this dominates per-frame GPU state cost. If a glow effect is ever needed again, gate it on a zoom-level threshold and batch it.
 - **`npm run sweep` does NOT run the universe pipeline.** The sweep harness (`scripts/sweep-history.ts`) is purely world-map / world-history. Universe-package changes can never produce a non-zero sweep diff. Conversely, a universe-package change that accidentally touches `src/lib/terrain/` or `src/lib/history/` WILL show up in the sweep — treat any non-zero diff after a universe-only change as evidence of an unintended cross-layer edit.
 - **Universe package has no test suite of its own.** Verify changes by `npm run build` (catches type errors, including the `PLANET_SUBTYPE_COMPOSITION` / `SATELLITE_SUBTYPE_COMPOSITION` exhaustiveness checks that fire when a subtype is added to one table but not the other) and visual inspection in `npm run dev` → "Universe generation" on the landing screen.
