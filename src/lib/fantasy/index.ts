@@ -37,6 +37,9 @@ export { RACE_TYPES, RACE_SPECS, getAdjustAbilities } from './RaceType';
 export type { PcClassType, PcClassSpec } from './PcClassType';
 export { PC_CLASS_TYPES, PC_CLASS_SPECS, getClassesForMainAbility } from './PcClassType';
 
+export type { NpcClassType, NpcClassSpec } from './NpcClassType';
+export { NPC_CLASS_TYPES, NPC_CLASS_SPECS } from './NpcClassType';
+
 export type { PcCharAge } from './PcChar';
 export { PcChar } from './PcChar';
 
