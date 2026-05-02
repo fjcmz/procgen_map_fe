@@ -40,6 +40,7 @@ function serializeUniverse(universe: Universe): UniverseData {
       orbit: planet.orbit,
       life: planet.life,
       composition: planet.composition,
+      subtype: planet.subtype,
       biome: planet.biome,
       satellites: planet.satellites.map(sat => ({
         id: sat.id,
@@ -47,6 +48,7 @@ function serializeUniverse(universe: Universe): UniverseData {
         scientificName: sat.scientificName,
         radius: sat.radius,
         composition: sat.composition,
+        subtype: sat.subtype,
         life: sat.life,
         biome: sat.biome,
       })),

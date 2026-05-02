@@ -1,10 +1,10 @@
 export { rndSize } from './helpers';
 export { Star } from './Star';
 export type { StarComposition } from './Star';
-export { Satellite } from './Satellite';
-export type { SatelliteComposition } from './Satellite';
-export { Planet } from './Planet';
-export type { PlanetComposition } from './Planet';
+export { Satellite, SATELLITE_SUBTYPE_COMPOSITION } from './Satellite';
+export type { SatelliteComposition, SatelliteSubtype, IceSatelliteSubtype, RockSatelliteSubtype } from './Satellite';
+export { Planet, PLANET_SUBTYPE_COMPOSITION } from './Planet';
+export type { PlanetComposition, PlanetSubtype, RockPlanetSubtype, GasPlanetSubtype, PlanetBiome } from './Planet';
 export { SolarSystem } from './SolarSystem';
 export type { SolarSystemComposition } from './SolarSystem';
 export { Universe } from './Universe';

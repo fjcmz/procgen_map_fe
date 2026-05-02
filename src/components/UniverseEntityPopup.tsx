@@ -203,7 +203,7 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
   return (
     <>
       <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
-      <Row label="Composition">{planet.composition.toLowerCase()}</Row>
+      <Row label="Composition">{planet.composition.toLowerCase()} ({planet.subtype.replace(/_/g, ' ')})</Row>
       <Row label="Life">{planet.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
       {planet.biome && (
         <Row label="Biome"><span style={s.biome}>{planet.biome}</span></Row>
@@ -243,7 +243,7 @@ function SatelliteDetails({
   return (
     <>
       <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
-      <Row label="Composition">{satellite.composition.toLowerCase()}</Row>
+      <Row label="Composition">{satellite.composition.toLowerCase()} ({satellite.subtype.replace(/_/g, ' ')})</Row>
       <Row label="Life">{satellite.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
       {satellite.biome && (
         <Row label="Biome"><span style={s.biome}>{satellite.biome}</span></Row>
