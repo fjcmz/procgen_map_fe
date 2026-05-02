@@ -208,7 +208,7 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
             <VitalRow label="Age" value={`${c.age.currentAge} yrs`} />
             <VitalRow label="Height" value={fmtHeight(c.height)} />
             <VitalRow label="Weight" value={`${c.weight} lb`} />
-            <VitalRow label="Wealth" value={`${c.wealth} gp`} />
+            <VitalRow label="Wealth" value={`${c.wealth.toLocaleString('en-US')} gp`} />
           </div>
 
           {/* Age stages — small reference for D&D 3.5e age penalties. */}
