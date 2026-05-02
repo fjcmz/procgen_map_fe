@@ -66,6 +66,22 @@ export {
   computeCombatStats,
 } from './Combat';
 
+export type {
+  EquipmentSlot,
+  BonusTarget,
+  EquipBonus,
+  Equipment,
+  EquipmentSet,
+} from './Equipment';
+export {
+  SLOT_LABELS,
+  SLOT_GROUPS,
+  EQUIPMENT_CATALOG,
+  assignEquipment,
+  equipBonusSummary,
+  formatCrit,
+} from './Equipment';
+
 export type { Spell, SpellSchool } from './Spell';
 export { SPELL_SCHOOLS, LEVEL_1_SPELLS, ALL_SPELLS, spellsForClassAndLevel } from './Spell';
 

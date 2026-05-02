@@ -35,8 +35,10 @@ import type { RaceType } from './fantasy/RaceType';
 import type { AlignmentType } from './fantasy/AlignmentType';
 import type { Ability } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
-import type { ClassLevel, CombatStats } from './fantasy/Combat';
+import type { ClassLevel, CombatStats, BonusType, BonusComponent } from './fantasy/Combat';
 import { computeCombatStats } from './fantasy/Combat';
+import type { EquipmentSet } from './fantasy/Equipment';
+import { assignEquipment } from './fantasy/Equipment';
 import type { CharacterSpellcasting } from './fantasy/Spellcasting';
 import { rollCharacterSpellcasting } from './fantasy/Spellcasting';
 import type { City, Country, ReligionDetail, IllustrateDetail } from './types';
@@ -133,6 +135,13 @@ export interface CityCharacter {
    * accumulate multiple incoming edges.
    */
   relationships?: CharacterRelationship[];
+  /**
+   * Starting equipment assigned from the D&D 3.5e non-magical gear catalog,
+   * selected by class and constrained by wealth budget. Always populated by
+   * `generateCityCharacters`. The `combat` stats above already include the
+   * AC and saving-throw bonuses from worn armor and shields.
+   */
+  equipment: EquipmentSet;
   /**
    * Per-spellcasting-class spell slot tables and known/memorized spell
    * lists. One entry per spellcasting class in `classLevels`; absent (or
@@ -525,6 +534,51 @@ export function raceLabel(r: RaceType): string {
  * Returns [] on degenerate input (no worldSeed, ruined cities at the renderer
  * layer should already have skipped this call).
  */
+
+/**
+ * Fold equipment bonus components into the character's already-computed
+ * CombatStats in-place. Handles ac / bab / fort / ref / will targets;
+ * attribute and hp targets are stored in the EquipmentSet but not mirrored
+ * into combat stats (they affect ability scores which would require a full
+ * recompute — left for future work).
+ */
+function applyEquipmentToCombat(char: CityCharacter): void {
+  const eq = char.equipment;
+  for (const item of Object.values(eq)) {
+    if (!item) continue;
+    for (const bonus of item.bonuses) {
+      const component: BonusComponent = {
+        source: item.name,
+        value:  bonus.value,
+        type:   (bonus.type ?? 'misc') as BonusType,
+      };
+      switch (bonus.target) {
+        case 'ac':
+          char.combat.ac.total += bonus.value;
+          char.combat.ac.components.push(component);
+          break;
+        case 'bab':
+          char.combat.bab.total += bonus.value;
+          char.combat.bab.components.push(component);
+          break;
+        case 'fort':
+          char.combat.saves.fortitude.total += bonus.value;
+          char.combat.saves.fortitude.components.push(component);
+          break;
+        case 'ref':
+          char.combat.saves.reflex.total += bonus.value;
+          char.combat.saves.reflex.components.push(component);
+          break;
+        case 'will':
+          char.combat.saves.will.total += bonus.value;
+          char.combat.saves.will.components.push(component);
+          break;
+        // str / dex / con / int / wis / cha / hp — informational only
+      }
+    }
+  }
+}
+
 export function generateCityCharacters(
   worldSeed: string,
   city: Pick<City, 'cellIndex' | 'size' | 'isRuin'>,
@@ -604,7 +658,8 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    out.push({
+    const equipment = assignEquipment(pc.pcClass, pc.wealth, abilities);
+    const char: CityCharacter = {
       name: il.name,
       race: pc.race,
       pcClass: pc.pcClass,
@@ -619,10 +674,13 @@ export function generateCityCharacters(
       height: pc.height,
       weight: pc.weight,
       wealth: pc.wealth,
+      equipment,
       illustrateType: il.type,
       illustrateBirthYear: il.birthYear,
       illustrateDeathYear: il.deathYear,
-    });
+    };
+    applyEquipmentToCombat(char);
+    out.push(char);
   }
 
   // 2) Ordinary characters fill the remaining slots.
@@ -653,7 +711,8 @@ export function generateCityCharacters(
     const classLevels: ClassLevel[] = [{ pcClass: pc.pcClass, level: pc.level }];
     const combat = computeCombatStats(classLevels, abilities, pc.race);
 
-    out.push({
+    const equipment = assignEquipment(pc.pcClass, pc.wealth, abilities);
+    const char: CityCharacter = {
       name: generateIllustrateName(rng, usedNames),
       race: pc.race,
       pcClass: pc.pcClass,
@@ -668,7 +727,10 @@ export function generateCityCharacters(
       height: pc.height,
       weight: pc.weight,
       wealth: pc.wealth,
-    });
+      equipment,
+    };
+    applyEquipmentToCombat(char);
+    out.push(char);
   }
 
   // Affiliation pass — runs on its own isolated PRNG sub-stream so adding /

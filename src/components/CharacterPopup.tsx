@@ -6,6 +6,9 @@ import { abilityMod } from '../lib/fantasy/Ability';
 import type { Ability } from '../lib/fantasy/Ability';
 import type { DerivedStat, BonusComponent, BonusType } from '../lib/fantasy/Combat';
 import type { DistrictType, LandmarkKind } from '../lib/citymap';
+import type { Equipment } from '../lib/fantasy/Equipment';
+import { formatCrit } from '../lib/fantasy/Equipment';
+import { EquipmentPopup } from './EquipmentPopup';
 import { SpellPopup } from './SpellPopup';
 
 // Human-readable label for the affiliation's role / kind. Mirrors the
@@ -124,6 +127,7 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
   // (or null when none open). Reset whenever the popup closes or the
   // displayed character switches.
   const [breakdownKey, setBreakdownKey] = useState<CombatBreakdownKey | null>(null);
+  const [showEquipment, setShowEquipment] = useState(false);
   // Spell popup visibility — opened by the Spells button below the combat
   // grid. Resets together with the breakdown popup so switching characters
   // never leaves a stale popup on screen.
@@ -131,11 +135,13 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
   useEffect(() => {
     if (!isOpen) {
       setBreakdownKey(null);
+      setShowEquipment(false);
       setSpellsOpen(false);
     }
   }, [isOpen]);
   useEffect(() => {
     setBreakdownKey(null);
+    setShowEquipment(false);
     setSpellsOpen(false);
   }, [character]);
 
@@ -160,7 +166,7 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
     c.alignment.endsWith('_evil') ? '#943030' :
     '#5a3a10';
 
-  return createPortal(
+  const mainPortal = createPortal(
     <>
       <div style={styles.backdrop} onClick={onClose} />
       <div style={styles.container} onClick={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="character-popup-title">
@@ -236,6 +242,9 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
             <CombatCell label="Ref"  total={c.combat.saves.reflex.total}    onClick={() => setBreakdownKey('reflex')} />
             <CombatCell label="Will" total={c.combat.saves.will.total}      onClick={() => setBreakdownKey('will')} />
           </div>
+
+          {/* Weapon summary + Equipment button */}
+          <WeaponBar character={c} onOpenEquipment={() => setShowEquipment(true)} />
 
           {/* Spells button — opens the dedicated SpellPopup (slots + known
               spells). Always rendered so non-spellcasters can confirm they
@@ -326,6 +335,81 @@ export function CharacterPopup({ isOpen, character, cityName, onClose, roster, o
       />
     </>,
     document.body,
+  );
+
+  // Equipment popup renders as its own portal so it sits above the character
+  // popup without needing a nested backdrop chain.
+  return (
+    <>
+      {mainPortal}
+      <EquipmentPopup
+        isOpen={showEquipment}
+        character={character}
+        onClose={() => setShowEquipment(false)}
+      />
+    </>
+  );
+}
+
+// ─── Weapon summary bar ───────────────────────────────────────────────────────
+
+function WeaponBar({ character, onOpenEquipment }: { character: CityCharacter; onOpenEquipment: () => void }) {
+  const eq = character.equipment ?? {};
+  // Primary combat weapon: first weapon slot with a damage die, else ranged
+  const weapon: Equipment | undefined =
+    (eq.weapon1?.damage ? eq.weapon1 : undefined) ??
+    (eq.weapon3?.damage ? eq.weapon3 : undefined);
+
+  const str = abilityMod(character.abilities.strength  ?? 10);
+  const dex = abilityMod(character.abilities.dexterity ?? 10);
+  const bab = character.combat.bab.total;
+
+  let weaponText = 'Unarmed';
+  let atkText = '';
+  let dmgText = '';
+  let critText = '';
+
+  if (weapon) {
+    const isRanged = !!weapon.isRanged;
+    const abilityBonus = isRanged ? dex : str;
+    const totalAtk = bab + abilityBonus;
+    atkText = totalAtk >= 0 ? `+${totalAtk}` : `${totalAtk}`;
+    const dmgBonus = isRanged ? 0 : str;
+    dmgText = dmgBonus !== 0
+      ? `${weapon.damage}${dmgBonus > 0 ? '+' : ''}${dmgBonus}`
+      : (weapon.damage ?? '');
+    critText = formatCrit(weapon.critRange, weapon.critMult);
+    weaponText = weapon.name;
+  } else {
+    // Unarmed fallback
+    const totalAtk = bab + str;
+    atkText = totalAtk >= 0 ? `+${totalAtk}` : `${totalAtk}`;
+    dmgText = str >= 0 ? `1d3+${str}` : `1d3${str}`;
+    critText = ' (×2)';
+  }
+
+  return (
+    <div style={styles.weaponBar}>
+      <div style={styles.weaponBarLeft}>
+        <span style={styles.weaponBarName}>{weaponText}</span>
+        {atkText && (
+          <span style={styles.weaponBarStats}>
+            <span style={styles.weaponAtkVal}>{atkText}</span>
+            <span style={styles.weaponBarDim}> to hit · </span>
+            <span style={styles.weaponDmgVal}>{dmgText}</span>
+            <span style={styles.weaponBarDim}>{critText}</span>
+          </span>
+        )}
+      </div>
+      <button
+        type="button"
+        style={styles.equipBtn}
+        onClick={onOpenEquipment}
+        title="View full equipment"
+      >
+        ⚔ Equipment
+      </button>
+    </div>
   );
 }
 
@@ -726,6 +810,64 @@ const styles: Record<string, React.CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     flexShrink: 0,
+  },
+  weaponBar: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+    padding: '5px 10px',
+    background: '#ede0bb',
+    border: '1px solid #c8a868',
+    borderRadius: 4,
+    flexWrap: 'wrap',
+  },
+  weaponBarLeft: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 1,
+    minWidth: 0,
+  },
+  weaponBarName: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: '#2a1a00',
+    fontFamily: 'Georgia, serif',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  weaponBarStats: {
+    fontSize: 11,
+    display: 'flex',
+    alignItems: 'baseline',
+    gap: 1,
+    flexWrap: 'wrap',
+  },
+  weaponAtkVal: {
+    color: '#1a5a1a',
+    fontWeight: 700,
+  },
+  weaponDmgVal: {
+    color: '#8a1a1a',
+    fontWeight: 700,
+  },
+  weaponBarDim: {
+    color: '#9a7a50',
+  },
+  equipBtn: {
+    background: '#5a3a10',
+    border: 'none',
+    borderRadius: 3,
+    color: '#f5e9c8',
+    cursor: 'pointer',
+    fontSize: 10,
+    fontFamily: 'inherit',
+    fontWeight: 600,
+    padding: '3px 8px',
+    letterSpacing: '0.04em',
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   },
   combatGrid: {
     display: 'grid',
