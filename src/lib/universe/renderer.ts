@@ -598,6 +598,45 @@ export function drawGalaxyScene(
   return { hit };
 }
 
+// ── Spiral layout cache ───────────────────────────────────────────────────
+// rawPositions and star-radius stats are pure functions of (count, cx, cy,
+// spread, firstSystemId) — they never change between frames for the same
+// galaxy layout. Caching them avoids O(N) Math.exp calls and per-system
+// star-radius scans every animation frame.
+interface SpiralLayout {
+  rawPositions: Array<{ x: number; y: number }>;
+  maxStarRadii: number[];
+  minR: number;
+  maxR: number;
+}
+const spiralLayoutCache = new Map<string, SpiralLayout>();
+const SPIRAL_CACHE_MAX = 10;
+
+function getOrBuildLayout(
+  systems: SolarSystemData[],
+  cx: number,
+  cy: number,
+  spread: number,
+): SpiralLayout {
+  const key = `${systems.length}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id ?? ''}`;
+  const cached = spiralLayoutCache.get(key);
+  if (cached) return cached;
+
+  const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
+  const maxStarRadii = systems.map(ss =>
+    ss.stars.length > 0 ? Math.max(...ss.stars.map(s => s.radius)) : 0
+  );
+  const minR = maxStarRadii.length ? Math.min(...maxStarRadii) : 0;
+  const maxR = maxStarRadii.length ? Math.max(...maxStarRadii) : 1;
+
+  if (spiralLayoutCache.size >= SPIRAL_CACHE_MAX) {
+    spiralLayoutCache.delete(spiralLayoutCache.keys().next().value!);
+  }
+  const layout: SpiralLayout = { rawPositions, maxStarRadii, minR, maxR };
+  spiralLayoutCache.set(key, layout);
+  return layout;
+}
+
 /**
  * Per-galaxy spiral renderer. Extracted from the original `drawGalaxyScene`
  * so it can be reused for the single-galaxy legacy path, focus mode, and
@@ -615,37 +654,32 @@ function drawGalaxySpiral(
   cameraScale: number,
   viewBounds?: ViewBounds,
 ): HitCircle[] {
-  const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
+  const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread);
 
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED;
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
-  const positions = rawPositions.map(pos => {
-    const dx = pos.x - cx;
-    const dy = pos.y - cy;
-    return { x: cx + dx * cosG - dy * sinG, y: cy + dx * sinG + dy * cosG };
-  });
-
-  const maxStarRadii = systems.map(ss =>
-    ss.stars.length > 0 ? Math.max(...ss.stars.map(s => s.radius)) : 0
-  );
-  const minR = maxStarRadii.length ? Math.min(...maxStarRadii) : 0;
-  const maxR = maxStarRadii.length ? Math.max(...maxStarRadii) : 1;
 
   const hit: HitCircle[] = [];
   for (let i = 0; i < systems.length; i++) {
-    const ss = systems[i];
-    const pos = positions[i];
+    // Inline rotation — avoids allocating a full positions[] array each frame.
+    const raw = rawPositions[i];
+    const dx = raw.x - cx;
+    const dy = raw.y - cy;
+    const px = cx + dx * cosG - dy * sinG;
+    const py = cy + dx * sinG + dy * cosG;
+
     const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
-    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
 
-    // Skip draw calls for systems outside the visible viewport.
-    if (viewBounds && !circleIntersectsViewBounds(pos.x, pos.y, sizePx * 1.5, viewBounds)) continue;
+    // Skip offscreen systems entirely — no draw, no hit circle.
+    if (viewBounds && !circleIntersectsViewBounds(px, py, sizePx * 1.5, viewBounds)) continue;
 
-    const dominant = ss.stars[0] ?? null;
+    hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
+
+    const dominant = systems[i].stars[0] ?? null;
     const palette = dominant ? starFill(dominant) : { inner: '#fff', outer: 'rgba(255,255,255,0)', core: '#fff' };
-    drawGlow(ctx, pos.x, pos.y, sizePx, palette.inner, palette.outer);
-    drawCircle(ctx, pos.x, pos.y, sizePx * 0.6, palette.core);
+    drawGlow(ctx, px, py, sizePx, palette.inner, palette.outer);
+    drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
   }
   return hit;
 }
