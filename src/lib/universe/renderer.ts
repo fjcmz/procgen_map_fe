@@ -1,5 +1,6 @@
 import type {
   UniverseData,
+  GalaxyData,
   SolarSystemData,
   StarData,
   PlanetData,
@@ -7,6 +8,7 @@ import type {
 } from './types';
 import type { PlanetSubtype, PlanetBiome } from './Planet';
 import type { SatelliteSubtype } from './Satellite';
+import { computeLayoutExtent } from './galaxyLayout';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -193,9 +195,21 @@ export interface HitCircle {
   x: number;
   y: number;
   r: number;
-  kind: 'system' | 'planet' | 'satellite';
+  kind: 'galaxy' | 'system' | 'planet' | 'satellite';
   id: string;
 }
+
+// LOD threshold for the multi-galaxy scene: when a galaxy's on-screen
+// radius (`galaxy.radius * worldScale * viewScale`) is below this many
+// pixels, draw a stylized glyph instead of the full embedded spiral.
+// Picked empirically — the spiral structure becomes legible around 80 px.
+const LOD_GLYPH_PX_THRESHOLD = 80;
+// Viewport fit factor: leave a 10% margin on each side so the outermost
+// galaxy doesn't kiss the canvas edge.
+const VIEWPORT_FIT_FRACTION = 0.45;
+// Minimum hit radius for a galaxy glyph (in screen px) so users can always
+// click a tiny glyph at low zoom levels.
+const GALAXY_HIT_MIN_PX = 14;
 
 // ── Drawing primitives ────────────────────────────────────────────────────
 function drawCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string): void {
@@ -462,6 +476,18 @@ export interface GalaxyDrawResult {
   hit: HitCircle[];
 }
 
+/**
+ * Top-level scene dispatcher.
+ *
+ *   - `data.galaxies.length === 1` → legacy single-galaxy spiral, byte-
+ *     identical to pre-grouping (galaxy `gal_0` wraps every system).
+ *   - `focusGalaxyId` set → focus mode: draw only that galaxy centered with
+ *     no LOD (mimics the legacy single-galaxy view for any galaxy in a
+ *     grouped universe).
+ *   - else → multi-galaxy world layout. Each galaxy is positioned in world
+ *     units (`galaxy.cx`, `galaxy.cy`) and rendered as either an embedded
+ *     spiral (when its on-screen radius ≥ LOD threshold) or a stylized glyph.
+ */
 export function drawGalaxyScene(
   ctx: CanvasRenderingContext2D,
   data: UniverseData,
@@ -472,14 +498,86 @@ export function drawGalaxyScene(
   skipBg: boolean = false,
   viewScale: number = 1,
   timeSec: number = 0,
+  focusGalaxyId: string | null = null,
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
-  const cx = vw / 2;
-  const cy = vh / 2;
-  const spread = Math.min(vw, vh) * 0.7;
-  const rawPositions = galaxySpiralPositions(data.solarSystems.length, cx, cy, spread);
 
-  // Rotate the entire galaxy around its center
+  // Focus mode — single galaxy fills the viewport like the legacy view.
+  if (focusGalaxyId) {
+    const focus = data.galaxies.find(g => g.id === focusGalaxyId);
+    if (focus) {
+      const systems = focus.systemIds
+        .map(id => data.solarSystems.find(s => s.id === id))
+        .filter((s): s is SolarSystemData => !!s);
+      const cx = vw / 2;
+      const cy = vh / 2;
+      const spreadPx = Math.min(vw, vh) * 0.7;
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale) };
+    }
+    // Bogus focus id falls through to multi-galaxy view.
+  }
+
+  // Single-galaxy legacy path: byte-identical to pre-grouping rendering.
+  if (data.galaxies.length <= 1) {
+    const cx = vw / 2;
+    const cy = vh / 2;
+    const spreadPx = Math.min(vw, vh) * 0.7;
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale) };
+  }
+
+  // Multi-galaxy: world layout with per-galaxy LOD.
+  const minSide = Math.min(vw, vh);
+  const extent = computeLayoutExtent(data.galaxies);
+  const worldScale = (minSide * VIEWPORT_FIT_FRACTION) / extent;
+  const originX = vw / 2;
+  const originY = vh / 2;
+
+  const hit: HitCircle[] = [];
+  for (const galaxy of data.galaxies) {
+    const gcx = originX + galaxy.cx * worldScale;
+    const gcy = originY + galaxy.cy * worldScale;
+    const gRadiusCanvas = galaxy.radius * worldScale;
+    const gSpreadCanvas = galaxy.spread * worldScale;
+    const gScreenRadius = gRadiusCanvas * viewScale;
+
+    if (gScreenRadius < LOD_GLYPH_PX_THRESHOLD) {
+      drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale);
+      hit.push({
+        x: gcx,
+        y: gcy,
+        r: Math.max(gRadiusCanvas, GALAXY_HIT_MIN_PX / viewScale),
+        kind: 'galaxy',
+        id: galaxy.id,
+      });
+    } else {
+      const systems = galaxy.systemIds
+        .map(id => data.solarSystems.find(s => s.id === id))
+        .filter((s): s is SolarSystemData => !!s);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale);
+      hit.push(...subHit);
+    }
+  }
+  return { hit };
+}
+
+/**
+ * Per-galaxy spiral renderer. Extracted from the original `drawGalaxyScene`
+ * so it can be reused for the single-galaxy legacy path, focus mode, and
+ * each above-LOD galaxy in the multi-galaxy view. Returns hit circles in
+ * canvas coordinates (the canvas transform applies separately).
+ */
+function drawGalaxySpiral(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  spread: number,
+  systems: SolarSystemData[],
+  timeSec: number,
+  viewScale: number,
+  cameraScale: number,
+): HitCircle[] {
+  const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
+
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED;
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
@@ -489,32 +587,84 @@ export function drawGalaxyScene(
     return { x: cx + dx * cosG - dy * sinG, y: cy + dx * sinG + dy * cosG };
   });
 
-  // Pre-compute domain for fair sizing across orders of magnitude.
-  const maxStarRadii = data.solarSystems.map(ss =>
+  const maxStarRadii = systems.map(ss =>
     ss.stars.length > 0 ? Math.max(...ss.stars.map(s => s.radius)) : 0
   );
   const minR = maxStarRadii.length ? Math.min(...maxStarRadii) : 0;
   const maxR = maxStarRadii.length ? Math.max(...maxStarRadii) : 1;
 
   const hit: HitCircle[] = [];
-  for (let i = 0; i < data.solarSystems.length; i++) {
-    const ss = data.solarSystems[i];
+  for (let i = 0; i < systems.length; i++) {
+    const ss = systems[i];
     const pos = positions[i];
-    // Divide by viewScale so the glyph stays at a constant screen-pixel size
-    // regardless of the canvas zoom level (the canvas transform already
-    // multiplies everything by viewScale, so dividing here cancels it out).
     const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
-
-    // Mass-weighted compositional palette: ANTIMATTER vs MATTER systems read
-    // visually distinct in the galaxy view.
     const dominant = ss.stars[0] ?? null;
     const palette = dominant ? starFill(dominant) : { inner: '#fff', outer: 'rgba(255,255,255,0)', core: '#fff' };
     drawGlow(ctx, pos.x, pos.y, sizePx, palette.inner, palette.outer);
     drawCircle(ctx, pos.x, pos.y, sizePx * 0.6, palette.core);
-
     hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
   }
-  return { hit };
+  return hit;
+}
+
+/**
+ * Stand-in figure for an entire galaxy at low zoom: a soft halo + low-res
+ * spiral of dots (~20 dots) tinted by the galaxy's dominant matter /
+ * antimatter mix, animating with the same rotation as the full spiral so
+ * the LOD swap reads as a continuous zoom rather than a scene change.
+ *
+ * Tint hash is deterministic from `galaxy.id` so the same galaxy always
+ * picks the same accent shade.
+ */
+const GLYPH_DOT_COUNT = 20;
+const GLYPH_HALO_ALPHA = 0.55;
+
+function drawGalaxyGlyph(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  galaxy: GalaxyData,
+  data: UniverseData,
+  timeSec: number,
+  viewScale: number,
+): void {
+  // Sample composition from the first few member stars to tint the glyph.
+  const sampleSystem = galaxy.systemIds.length > 0
+    ? data.solarSystems.find(s => s.id === galaxy.systemIds[0]) ?? null
+    : null;
+  const dominantStar = sampleSystem?.stars[0] ?? null;
+  const tint = dominantStar
+    ? starFill(dominantStar)
+    : { inner: 'rgba(200,210,255,0.9)', outer: 'rgba(40,60,120,0)', core: '#dde0ff' };
+
+  // Halo: large soft glow centered on galaxy.
+  ctx.save();
+  ctx.globalAlpha = GLYPH_HALO_ALPHA;
+  drawGlow(ctx, cx, cy, radius * 0.6, tint.inner, tint.outer);
+  ctx.restore();
+
+  // Low-res spiral dots — same algorithm as the full spiral but with a
+  // fixed dot count so the glyph reads as a "compressed" galaxy.
+  const dotPositions = galaxySpiralPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6);
+  const angle = timeSec * GALAXY_SPIN_SPEED;
+  const cosG = Math.cos(angle);
+  const sinG = Math.sin(angle);
+  const dotR = Math.max(0.6 / viewScale, radius * 0.04);
+  for (const pos of dotPositions) {
+    const dx = pos.x - cx;
+    const dy = pos.y - cy;
+    const px = cx + dx * cosG - dy * sinG;
+    const py = cy + dx * sinG + dy * cosG;
+    drawCircle(ctx, px, py, dotR, tint.core);
+  }
+
+  // Outline ring at the galaxy's nominal radius for a clean LOD silhouette.
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(180, 200, 240, 0.18)';
+  ctx.lineWidth = 1 / viewScale;
+  ctx.stroke();
 }
 
 // ── System scene ──────────────────────────────────────────────────────────

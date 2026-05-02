@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData } from '../lib/universe/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData } from '../lib/universe/types';
 import type { PopupEntity } from './UniverseCanvas';
 
 interface Props {
@@ -20,17 +20,41 @@ interface Props {
    * similar to planets. Forwards satellite + parent planet + system id.
    */
   onGenerateSatelliteWorld?: (satellite: SatelliteData, planet: PlanetData, systemId: string) => void;
+  /**
+   * When provided, system rows inside a Galaxy popup are clickable and
+   * navigate to that system. The popup forwards just the system id; the
+   * screen handler resolves the rest.
+   */
+  onSelectEntity?: (entity: PopupEntity) => void;
 }
 
-export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld }: Props) {
+export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
 
+  // Galaxy-aware lookup: a system entity carries only `systemId`, but to label
+  // the "↑ Galaxy" button correctly we also need to find which galaxy
+  // contains it. `galaxyOf(systemId)` is the only place the popup reads
+  // `data.galaxies` directly.
+  const galaxyBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyData>();
+    for (const g of data.galaxies) {
+      for (const sid of g.systemIds) m.set(sid, g);
+    }
+    return m;
+  }, [data.galaxies]);
+
+  const galaxy: GalaxyData | null =
+    entity.kind === 'galaxy'
+      ? data.galaxies.find(g => g.id === entity.galaxyId) ?? null
+      : null;
   const system: SolarSystemData | null =
-    data.solarSystems.find(s => s.id === entity.systemId) ?? null;
+    entity.kind !== 'galaxy'
+      ? data.solarSystems.find(s => s.id === entity.systemId) ?? null
+      : null;
   const star: StarData | null =
     entity.kind === 'star' && system
       ? system.stars.find(st => st.id === entity.starId) ?? null
@@ -51,13 +75,16 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     }
   };
 
+  const grouped = data.galaxies.length > 1;
   const upLabel =
-    entity.kind === 'system' ? '↑ Galaxy' :
+    entity.kind === 'galaxy' ? '↑ Universe' :
+    entity.kind === 'system' ? (grouped ? '↑ Galaxy' : '↑ Galaxy') :
     entity.kind === 'star' ? '↑ System' :
     entity.kind === 'planet' ? '↑ System' :
     '↑ Planet';
 
   const downLabel =
+    entity.kind === 'galaxy' ? '↓ Enter Galaxy' :
     entity.kind === 'system' ? '↓ Enter System' :
     entity.kind === 'planet' ? '↓ Enter Planet' :
     null;
@@ -77,10 +104,12 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     satellite.life;
 
   const headerTitle =
+    entity.kind === 'galaxy' && galaxy ? galaxy.humanName :
     entity.kind === 'system' && system ? system.humanName :
     entity.kind === 'star' && star ? star.humanName :
     entity.kind === 'planet' && planet ? planet.humanName :
     entity.kind === 'satellite' && satellite ? satellite.humanName :
+    entity.kind === 'galaxy' ? 'Galaxy' :
     entity.kind === 'system' ? 'Solar System' :
     entity.kind === 'star' ? 'Star' :
     entity.kind === 'planet' ? 'Planet' :
@@ -101,7 +130,19 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
         </div>
 
         <div style={s.body}>
-          {entity.kind === 'system' && system && <SystemDetails system={system} />}
+          {entity.kind === 'galaxy' && galaxy && (
+            <GalaxyDetails
+              galaxy={galaxy}
+              data={data}
+              onSelectSystem={onSelectEntity ? (sid) => onSelectEntity({ kind: 'system', systemId: sid }) : undefined}
+            />
+          )}
+          {entity.kind === 'system' && system && (
+            <SystemDetails
+              system={system}
+              parentGalaxy={grouped ? galaxyBySystem.get(system.id) ?? null : null}
+            />
+          )}
           {entity.kind === 'star' && star && system && (
             <StarDetails star={star} parentSystem={system} />
           )}
@@ -148,11 +189,87 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
 
 // ── Sub-components ────────────────────────────────────────────────────────
 
-function SystemDetails({ system }: { system: SolarSystemData }) {
+function GalaxyDetails({
+  galaxy, data, onSelectSystem,
+}: {
+  galaxy: GalaxyData;
+  data: UniverseData;
+  onSelectSystem?: (systemId: string) => void;
+}) {
+  const systems = galaxy.systemIds
+    .map(id => data.solarSystems.find(s => s.id === id))
+    .filter((s): s is SolarSystemData => !!s);
+  let matterCount = 0;
+  let antimatterCount = 0;
+  let totalStars = 0;
+  let totalPlanets = 0;
+  for (const sys of systems) {
+    totalStars += sys.stars.length;
+    totalPlanets += sys.planets.length;
+    const dominant = sys.stars[0];
+    if (!dominant) continue;
+    if (dominant.composition === 'ANTIMATTER') antimatterCount += 1;
+    else matterCount += 1;
+  }
+  const avgStars = systems.length ? (totalStars / systems.length).toFixed(1) : '0';
+
+  return (
+    <>
+      <NameRow humanName={galaxy.humanName} scientificName={galaxy.scientificName} />
+      <Row label="Systems">{systems.length}</Row>
+      <Row label="Composition">
+        {matterCount} matter
+        {antimatterCount > 0 && (
+          <>, <span style={s.biome}>{antimatterCount} antimatter</span></>
+        )}
+      </Row>
+      <Row label="Total stars">{totalStars}</Row>
+      <Row label="Avg stars / system">{avgStars}</Row>
+      <Row label="Total planets">{totalPlanets}</Row>
+
+      <CollapsibleSection title="Solar Systems" count={systems.length}>
+        {systems.map(sys => (
+          <Item key={sys.id}>
+            {onSelectSystem ? (
+              <button
+                type="button"
+                style={s.linkBtn}
+                onClick={() => onSelectSystem(sys.id)}
+                title="Open system"
+              >
+                <EntityLabel humanName={sys.humanName} scientificName={sys.scientificName} />
+              </button>
+            ) : (
+              <EntityLabel humanName={sys.humanName} scientificName={sys.scientificName} />
+            )}
+            <span style={s.dim}> — {sys.composition.toLowerCase()}, {sys.stars.length} star{sys.stars.length === 1 ? '' : 's'}, {sys.planets.length} planet{sys.planets.length === 1 ? '' : 's'}</span>
+          </Item>
+        ))}
+        {systems.length === 0 && <Item><span style={s.dim}>none</span></Item>}
+      </CollapsibleSection>
+    </>
+  );
+}
+
+function SystemDetails({
+  system, parentGalaxy,
+}: {
+  system: SolarSystemData;
+  parentGalaxy: GalaxyData | null;
+}) {
   return (
     <>
       <NameRow humanName={system.humanName} scientificName={system.scientificName} />
       <Row label="Type">{system.composition.toLowerCase()}</Row>
+
+      {parentGalaxy && (
+        <Section title="Parent Galaxy">
+          <Item>
+            <EntityLabel humanName={parentGalaxy.humanName} scientificName={parentGalaxy.scientificName} />
+            <span style={s.dim}> ({parentGalaxy.systemIds.length} systems)</span>
+          </Item>
+        </Section>
+      )}
 
       <CollapsibleSection title="Stars" count={system.stars.length}>
         {system.stars.map(star => (
@@ -485,6 +602,17 @@ const s: Record<string, React.CSSProperties> = {
   },
   dim: {
     color: '#a0a8d0',
+  },
+  linkBtn: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+    cursor: 'pointer',
+    fontFamily: 'Georgia, serif',
+    fontSize: 12,
+    color: 'inherit',
+    textAlign: 'left',
   },
   life: {
     color: '#5fa86a',

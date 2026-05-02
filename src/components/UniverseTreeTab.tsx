@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type {
   UniverseData,
+  GalaxyData,
   SolarSystemData,
   StarData,
   PlanetData,
@@ -106,11 +107,30 @@ function systemPasses(system: SolarSystemData, f: Filters): boolean {
 export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const grouped = data.galaxies.length > 1;
 
   const visibleSystems = useMemo(
     () => data.solarSystems.filter(sys => systemPasses(sys, filters)),
     [data, filters],
   );
+
+  // Build per-galaxy visible-system lists once. When `grouped` is false this
+  // is unused — the legacy flat path renders `visibleSystems` directly so
+  // single-galaxy universes show no galaxy level (spec §backward-compat).
+  const visibleByGalaxy = useMemo(() => {
+    if (!grouped) return new Map<string, SolarSystemData[]>();
+    const sysById = new Map(data.solarSystems.map(s => [s.id, s]));
+    const m = new Map<string, SolarSystemData[]>();
+    for (const g of data.galaxies) {
+      const list: SolarSystemData[] = [];
+      for (const sid of g.systemIds) {
+        const sys = sysById.get(sid);
+        if (sys && systemPasses(sys, filters)) list.push(sys);
+      }
+      m.set(g.id, list);
+    }
+    return m;
+  }, [data, filters, grouped]);
 
   const toggle = (key: string) => {
     setExpanded(prev => {
@@ -178,22 +198,88 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
       {/* Tree */}
       <div style={s.treeWrap}>
         <div style={s.treeHeader}>
-          {formatCount(visibleSystems.length, data.solarSystems.length, 'system')}
+          {grouped
+            ? `${data.galaxies.length} galaxies · ${formatCount(visibleSystems.length, data.solarSystems.length, 'system')}`
+            : formatCount(visibleSystems.length, data.solarSystems.length, 'system')}
         </div>
         {visibleSystems.length === 0 && (
           <div style={s.empty}>No systems match the active filters.</div>
         )}
-        {visibleSystems.map(system => (
-          <SystemNode
-            key={system.id}
-            system={system}
-            filters={filters}
-            expanded={expanded}
-            onToggle={toggle}
-            onSelect={onSelect}
-          />
-        ))}
+        {grouped
+          ? data.galaxies.map(galaxy => (
+              <GalaxyNode
+                key={galaxy.id}
+                galaxy={galaxy}
+                visibleSystems={visibleByGalaxy.get(galaxy.id) ?? []}
+                filters={filters}
+                expanded={expanded}
+                onToggle={toggle}
+                onSelect={onSelect}
+              />
+            ))
+          : visibleSystems.map(system => (
+              <SystemNode
+                key={system.id}
+                system={system}
+                filters={filters}
+                expanded={expanded}
+                onToggle={toggle}
+                onSelect={onSelect}
+              />
+            ))}
       </div>
+    </div>
+  );
+}
+
+function GalaxyNode({
+  galaxy, visibleSystems, filters, expanded, onToggle, onSelect,
+}: {
+  galaxy: GalaxyData;
+  visibleSystems: SolarSystemData[];
+  filters: Filters;
+  expanded: Set<string>;
+  onToggle: (key: string) => void;
+  onSelect: (entity: PopupEntity) => void;
+}) {
+  const key = `gal:${galaxy.id}`;
+  const isOpen = expanded.has(key);
+  const totalSystems = galaxy.systemIds.length;
+  const hasChildren = totalSystems > 0;
+  const countLabel = formatCount(visibleSystems.length, totalSystems, 'system');
+
+  return (
+    <div style={s.node}>
+      <div style={s.row}>
+        <Caret open={isOpen} hasChildren={hasChildren} onClick={hasChildren ? () => onToggle(key) : undefined} />
+        <button
+          style={s.label}
+          onClick={() => onSelect({ kind: 'galaxy', galaxyId: galaxy.id })}
+          title="Show galaxy details"
+        >
+          <span style={s.icon}>◎</span>
+          <span style={s.name}>{galaxy.humanName}</span>
+          <span style={s.sci}> ({galaxy.scientificName})</span>
+          <span style={s.dim}> — {countLabel}</span>
+        </button>
+      </div>
+      {isOpen && (
+        <div style={s.children}>
+          {visibleSystems.map(system => (
+            <SystemNode
+              key={system.id}
+              system={system}
+              filters={filters}
+              expanded={expanded}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))}
+          {visibleSystems.length === 0 && (
+            <div style={s.emptyChild}>no matching systems</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

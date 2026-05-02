@@ -1,7 +1,9 @@
 import { Universe } from './Universe';
+import { Galaxy } from './Galaxy';
 import { solarSystemGenerator } from './SolarSystemGenerator';
 import { rndSize } from './helpers';
-import { generateGalaxyName } from './universeNameGenerator';
+import { generateGalaxyName, generateUniverseName } from './universeNameGenerator';
+import { layoutGalaxies } from './galaxyLayout';
 
 export interface UniverseGenerateOptions {
   /**
@@ -19,6 +21,16 @@ export interface UniverseGenerateOptions {
   onProgress?: (fraction: number) => void;
 }
 
+/**
+ * Galaxy grouping rules:
+ *   - ≤ MAX_SYSTEMS_PER_GALAXY (100): a single galaxy wraps every system; the
+ *     UI hides the galaxy level and the renderer falls back to legacy
+ *     single-spiral behavior (byte-identical to pre-grouping).
+ *   - >  MAX_SYSTEMS_PER_GALAXY: split into `ceil(N/MAX)` equal-sized
+ *     sequential chunks; group sizes differ by at most 1.
+ */
+const MAX_SYSTEMS_PER_GALAXY = 100;
+
 export class UniverseGenerator {
   generate(rng: () => number, seed: string = '', opts: UniverseGenerateOptions = {}): Universe {
     const universe = new Universe(rng, seed);
@@ -29,11 +41,38 @@ export class UniverseGenerator {
         opts.onProgress((i + 1) / solarSystemCount);
       }
     }
-    // Galaxy name uses an isolated sub-stream — placed after physics generation
-    // so it never perturbs any physics RNG calls.
-    const galaxyName = generateGalaxyName(seed);
-    universe.humanName = galaxyName.human;
-    universe.scientificName = galaxyName.scientific;
+
+    // Universe + galaxy names use isolated PRNG sub-streams — placed after
+    // physics generation so they never perturb any physics RNG calls.
+    const numGalaxies = Math.max(1, Math.ceil(universe.solarSystems.length / MAX_SYSTEMS_PER_GALAXY));
+    const groupSize = Math.ceil(universe.solarSystems.length / numGalaxies);
+    for (let i = 0; i < numGalaxies; i++) {
+      const galaxy = new Galaxy(i);
+      const start = i * groupSize;
+      const end = Math.min(start + groupSize, universe.solarSystems.length);
+      galaxy.solarSystems = universe.solarSystems.slice(start, end);
+      const name = generateGalaxyName(`${seed}_galaxy_${i}`);
+      galaxy.humanName = name.human;
+      galaxy.scientificName = name.scientific;
+      universe.galaxies.push(galaxy);
+      universe.mapGalaxies.set(galaxy.id, galaxy);
+    }
+
+    layoutGalaxies(universe.galaxies, seed);
+
+    if (universe.galaxies.length === 1) {
+      // Legacy single-galaxy case: name the universe with the same galaxy
+      // name so existing UI labels ("↑ Galaxy", breadcrumb "Galaxy", etc.)
+      // continue to make sense.
+      const gal = universe.galaxies[0];
+      universe.humanName = gal.humanName;
+      universe.scientificName = gal.scientificName;
+    } else {
+      const universeName = generateUniverseName(seed);
+      universe.humanName = universeName.human;
+      universe.scientificName = universeName.scientific;
+    }
+
     return universe;
   }
 }

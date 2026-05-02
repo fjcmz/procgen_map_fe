@@ -164,16 +164,26 @@ function GenerationTabBody({
   onGenerate, generating, progress,
   data, sceneState, onBack,
 }: GenerationTabBodyProps) {
+  const grouped = !!data && data.galaxies.length > 1;
+  // Top-of-tree label changes when grouping is active so the breadcrumb
+  // matches the popup labels ("Universe" → "Galaxy" → "System" → "Planet").
+  const top = grouped ? 'Universe' : 'Galaxy';
+  const galaxyCrumb = grouped && sceneState.galaxyId
+    ? `${top} › Galaxy`
+    : top;
   const breadcrumb =
-    sceneState.scene === 'galaxy' ? 'Galaxy' :
-    sceneState.scene === 'system' ? 'Galaxy › System' :
-    'Galaxy › System › Planet';
+    sceneState.scene === 'galaxy' ? galaxyCrumb :
+    sceneState.scene === 'system' ? `${galaxyCrumb} › System` :
+    `${galaxyCrumb} › System › Planet`;
 
   const system = data && sceneState.systemId
     ? data.solarSystems.find(s => s.id === sceneState.systemId) ?? null
     : null;
   const planet = system && sceneState.planetId
     ? system.planets.find(p => p.id === sceneState.planetId) ?? null
+    : null;
+  const focusGalaxy = data && sceneState.galaxyId
+    ? data.galaxies.find(g => g.id === sceneState.galaxyId) ?? null
     : null;
 
   return (
@@ -238,16 +248,27 @@ function GenerationTabBody({
           <div style={styles.divider} />
           <div style={styles.sceneRow}>
             <span style={styles.breadcrumb}>{breadcrumb}</span>
-            {sceneState.scene !== 'galaxy' && (
+            {(sceneState.scene !== 'galaxy' || sceneState.galaxyId) && (
               <button style={styles.backBtn} onClick={onBack} title="Back (Esc)">
                 ◂ Back
               </button>
             )}
           </div>
           <div style={styles.stats}>
-            {sceneState.scene === 'galaxy' && (
+            {sceneState.scene === 'galaxy' && !focusGalaxy && (
               <>
-                <div>{data.solarSystems.length} solar systems</div>
+                {grouped
+                  ? <div>{data.galaxies.length} galaxies · {data.solarSystems.length} solar systems</div>
+                  : <div>{data.solarSystems.length} solar systems</div>}
+                <div style={styles.hint}>
+                  {grouped ? 'Click a galaxy to drill in.' : 'Click a system to drill in.'}
+                </div>
+              </>
+            )}
+            {sceneState.scene === 'galaxy' && focusGalaxy && (
+              <>
+                <div>Galaxy: <em>{focusGalaxy.humanName}</em></div>
+                <div>{focusGalaxy.systemIds.length} solar systems</div>
                 <div style={styles.hint}>Click a system to drill in.</div>
               </>
             )}
