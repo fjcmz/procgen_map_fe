@@ -199,17 +199,27 @@ export interface HitCircle {
   id: string;
 }
 
-// LOD threshold for the multi-galaxy scene: when a galaxy's on-screen
-// radius (`galaxy.radius * worldScale * viewScale`) is below this many
-// pixels, draw a stylized glyph instead of the full embedded spiral.
-// Picked empirically — the spiral structure becomes legible around 80 px.
-const LOD_GLYPH_PX_THRESHOLD = 80;
+// LOD blend zone for the multi-galaxy scene. Below `LOD_BLEND_START` only
+// the stylized glyph is drawn; above `LOD_BLEND_END` only the embedded
+// systems. In between, both layers are cross-faded with a smoothstep curve
+// so the transition reads as a gradual zoom rather than a hard scene swap.
+// Hit emission follows visibility: the galaxy hit is pushed first whenever
+// the glyph is at all visible, and the per-system hits are pushed after
+// (so direct hits on a star dot win during overlap, while empty galaxy
+// space still opens the galaxy popup).
+const LOD_BLEND_START = 50;
+const LOD_BLEND_END = 110;
 // Viewport fit factor: leave a 10% margin on each side so the outermost
 // galaxy doesn't kiss the canvas edge.
 const VIEWPORT_FIT_FRACTION = 0.45;
 // Minimum hit radius for a galaxy glyph (in screen px) so users can always
 // click a tiny glyph at low zoom levels.
 const GALAXY_HIT_MIN_PX = 14;
+
+function smoothstep01(t: number): number {
+  const u = Math.max(0, Math.min(1, t));
+  return u * u * (3 - 2 * u);
+}
 
 // ── Drawing primitives ────────────────────────────────────────────────────
 function drawCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string): void {
@@ -540,8 +550,20 @@ export function drawGalaxyScene(
     const gSpreadCanvas = galaxy.spread * worldScale;
     const gScreenRadius = gRadiusCanvas * viewScale;
 
-    if (gScreenRadius < LOD_GLYPH_PX_THRESHOLD) {
+    // Cross-fade glyph ↔ embedded systems across the blend zone.
+    const t = (gScreenRadius - LOD_BLEND_START) / (LOD_BLEND_END - LOD_BLEND_START);
+    const blend = smoothstep01(t);
+    const glyphAlpha = 1 - blend;
+    const systemsAlpha = blend;
+
+    if (glyphAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = glyphAlpha;
       drawGalaxyGlyph(ctx, gcx, gcy, gRadiusCanvas, galaxy, data, timeSec, viewScale);
+      ctx.restore();
+      // Galaxy hit pushed FIRST so per-system hits (drawn next) win on
+      // direct overlap. Below the blend zone systems aren't drawn at all,
+      // so the galaxy hit is the only target — exactly what we want.
       hit.push({
         x: gcx,
         y: gcy,
@@ -549,11 +571,16 @@ export function drawGalaxyScene(
         kind: 'galaxy',
         id: galaxy.id,
       });
-    } else {
+    }
+
+    if (systemsAlpha > 0) {
       const systems = galaxy.systemIds
         .map(id => data.solarSystems.find(s => s.id === id))
         .filter((s): s is SolarSystemData => !!s);
+      ctx.save();
+      ctx.globalAlpha = systemsAlpha;
       const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale);
+      ctx.restore();
       hit.push(...subHit);
     }
   }
