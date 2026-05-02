@@ -138,7 +138,7 @@ This is the only piece of glue between the universe pipeline and the world-map p
 
 | File | Purpose |
 |------|---------|
-| `renderer.ts` | Three scenes (galaxy / system / planet), Kepler-driven orbital animation, scale mapping, hit-test circles. Reference-repo helpers ported verbatim |
+| `renderer.ts` | Three scenes (galaxy / system / planet), Kepler-driven orbital animation, scale mapping, hit-test circles. Reference-repo helpers ported verbatim. Galaxy-scene draws solid star cores (no per-system glow) for performance; system / planet scenes still glow because they only ever render 1–3 stars at a time. `galaxySpiralPositions(count, spread)` returns local-frame coords cached as a `Float64Array` — callers add `cx, cy` and apply the spin rotation inline so the per-frame draw loop allocates nothing |
 | `hitTest.ts` | Pick topmost circle under cursor (back-to-front iteration) |
 | `LandingScreen.tsx` | Choose between "Planet generation" (world-map flow) and "Universe generation" (universe flow) |
 | `UniverseScreen.tsx` | Top-level screen that owns the worker lifecycle + canvas state |

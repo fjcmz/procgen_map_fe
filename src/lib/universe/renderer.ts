@@ -128,16 +128,29 @@ function speedFromId(id: string): number {
 }
 
 // ── Galaxy spiral layout ──────────────────────────────────────────────────
-export function galaxySpiralPositions(
-  count: number,
-  cx: number,
-  cy: number,
-  spread: number,
-): Array<{ x: number; y: number }> {
+//
+// Spiral positions are computed in the galaxy's LOCAL frame (origin at 0,0)
+// and cached by `(count, spread)`. Callers add `cx, cy` and apply the per-
+// frame rotation themselves so the cache survives camera moves and the spin
+// animation. Cache key is a tuple string; spread is read from canvas-pixel
+// computations that are stable as long as the viewport size doesn't change,
+// so we get a hit on every frame in steady state. Resize invalidates one
+// entry per active galaxy on the next frame, then steady state resumes.
+//
+// The cache stores `Float64Array`s of length `count * 2` (x0, y0, x1, y1, …)
+// instead of `{x, y}[]` so the per-frame draw loop avoids any allocation
+// — it just indexes into the typed array.
+const spiralPositionCache = new Map<string, Float64Array>();
+
+export function galaxySpiralPositions(count: number, spread: number): Float64Array {
+  const key = `${count}_${spread}`;
+  const cached = spiralPositionCache.get(key);
+  if (cached) return cached;
+
   // 2-arm logarithmic spiral. Per-arm we step radius outward and angle by a
   // fixed delta; small per-step noise (deterministic from index) breaks the
   // visible regularity without needing an RNG instance.
-  const positions: Array<{ x: number; y: number }> = [];
+  const positions = new Float64Array(count * 2);
   const arms = 2;
   const armOffset = Math.PI;
   const a = 8;       // logarithmic spiral inner radius
@@ -160,11 +173,10 @@ export function galaxySpiralPositions(
     const jitterRadius = ((i * 78.233) % 23) - 11;
     const finalAngle = angle + jitterAngle;
     const finalRadius = radius + jitterRadius;
-    positions.push({
-      x: cx + Math.cos(finalAngle) * finalRadius,
-      y: cy + Math.sin(finalAngle) * finalRadius,
-    });
+    positions[i * 2] = Math.cos(finalAngle) * finalRadius;
+    positions[i * 2 + 1] = Math.sin(finalAngle) * finalRadius;
   }
+  spiralPositionCache.set(key, positions);
   return positions;
 }
 
@@ -603,48 +615,61 @@ function drawGalaxySpiral(
   viewScale: number,
   cameraScale: number,
 ): HitCircle[] {
-  const rawPositions = galaxySpiralPositions(systems.length, cx, cy, spread);
+  const localPositions = galaxySpiralPositions(systems.length, spread);
 
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED;
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
-  const positions = rawPositions.map(pos => {
-    const dx = pos.x - cx;
-    const dy = pos.y - cy;
-    return { x: cx + dx * cosG - dy * sinG, y: cy + dx * sinG + dy * cosG };
-  });
 
-  const maxStarRadii = systems.map(ss =>
-    ss.stars.length > 0 ? Math.max(...ss.stars.map(s => s.radius)) : 0
-  );
-  const minR = maxStarRadii.length ? Math.min(...maxStarRadii) : 0;
-  const maxR = maxStarRadii.length ? Math.max(...maxStarRadii) : 1;
+  // Compute min/max star radius without spread args (which would crash on
+  // huge galaxies and allocate intermediate arrays).
+  let minR = Infinity;
+  let maxR = -Infinity;
+  for (let i = 0; i < systems.length; i++) {
+    const stars = systems[i].stars;
+    let m = 0;
+    for (let j = 0; j < stars.length; j++) {
+      const r = stars[j].radius;
+      if (r > m) m = r;
+    }
+    if (m < minR) minR = m;
+    if (m > maxR) maxR = m;
+  }
+  if (minR === Infinity) { minR = 0; maxR = 1; }
 
-  const hit: HitCircle[] = [];
+  const hit: HitCircle[] = new Array(systems.length);
   for (let i = 0; i < systems.length; i++) {
     const ss = systems[i];
-    const pos = positions[i];
-    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
-    const dominant = ss.stars[0] ?? null;
-    const palette = dominant ? starFill(dominant) : { inner: '#fff', outer: 'rgba(255,255,255,0)', core: '#fff' };
-    drawGlow(ctx, pos.x, pos.y, sizePx, palette.inner, palette.outer);
-    drawCircle(ctx, pos.x, pos.y, sizePx * 0.6, palette.core);
-    hit.push({ x: pos.x, y: pos.y, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id });
+    const lx = localPositions[i * 2];
+    const ly = localPositions[i * 2 + 1];
+    // Rotate + translate inline — no per-frame array allocation.
+    const px = cx + lx * cosG - ly * sinG;
+    const py = cy + lx * sinG + ly * cosG;
+    let maxStarR = 0;
+    const stars = ss.stars;
+    for (let j = 0; j < stars.length; j++) {
+      const r = stars[j].radius;
+      if (r > maxStarR) maxStarR = r;
+    }
+    const sizePx = scaleMap(maxStarR, minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
+    const dominant = stars[0] ?? null;
+    const core = dominant ? starFill(dominant).core : '#fff';
+    drawCircle(ctx, px, py, sizePx, core);
+    hit[i] = { x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: ss.id };
   }
   return hit;
 }
 
 /**
- * Stand-in figure for an entire galaxy at low zoom: a soft halo + low-res
- * spiral of dots (~20 dots) tinted by the galaxy's dominant matter /
- * antimatter mix, animating with the same rotation as the full spiral so
+ * Stand-in figure for an entire galaxy at low zoom: a low-res spiral of
+ * dots (~20 dots) tinted by the galaxy's dominant matter / antimatter
+ * mix, animating with the same rotation as the full spiral so
  * the LOD swap reads as a continuous zoom rather than a scene change.
  *
  * Tint hash is deterministic from `galaxy.id` so the same galaxy always
  * picks the same accent shade.
  */
 const GLYPH_DOT_COUNT = 20;
-const GLYPH_HALO_ALPHA = 0.55;
 
 function drawGalaxyGlyph(
   ctx: CanvasRenderingContext2D,
@@ -665,24 +690,18 @@ function drawGalaxyGlyph(
     ? starFill(dominantStar)
     : { inner: 'rgba(200,210,255,0.9)', outer: 'rgba(40,60,120,0)', core: '#dde0ff' };
 
-  // Halo: large soft glow centered on galaxy.
-  ctx.save();
-  ctx.globalAlpha = GLYPH_HALO_ALPHA;
-  drawGlow(ctx, cx, cy, radius * 0.6, tint.inner, tint.outer);
-  ctx.restore();
-
   // Low-res spiral dots — same algorithm as the full spiral but with a
   // fixed dot count so the glyph reads as a "compressed" galaxy.
-  const dotPositions = galaxySpiralPositions(GLYPH_DOT_COUNT, cx, cy, radius * 1.6);
+  const localPositions = galaxySpiralPositions(GLYPH_DOT_COUNT, radius * 1.6);
   const angle = timeSec * GALAXY_SPIN_SPEED;
   const cosG = Math.cos(angle);
   const sinG = Math.sin(angle);
   const dotR = Math.max(0.6 / viewScale, radius * 0.04);
-  for (const pos of dotPositions) {
-    const dx = pos.x - cx;
-    const dy = pos.y - cy;
-    const px = cx + dx * cosG - dy * sinG;
-    const py = cy + dx * sinG + dy * cosG;
+  for (let i = 0; i < GLYPH_DOT_COUNT; i++) {
+    const lx = localPositions[i * 2];
+    const ly = localPositions[i * 2 + 1];
+    const px = cx + lx * cosG - ly * sinG;
+    const py = cy + lx * sinG + ly * cosG;
     drawCircle(ctx, px, py, dotR, tint.core);
   }
 
