@@ -23,12 +23,12 @@ The universe entity instances live **only inside `universegen.worker.ts`** — t
 |------|---------------|
 | `types.ts` | Plain structured-clone-safe shapes that cross the worker boundary — `UniverseData`, `GalaxyData`, `SolarSystemData`, `StarData`, `PlanetData`, `SatelliteData`, `UniverseGenerateRequest`, `UniverseWorkerMessage`. **Start here when looking up a serialized field** |
 | `Universe.ts` | Top-level entity. Owns the per-tier `usedNames: Set<string>` dedup sets, the runtime indexes (`mapSolarSystems`/`mapStars`/`mapPlanets`/`mapSatellites`/`mapGalaxies`), and the captured worker `seed: string` so generators can derive isolated PRNG sub-streams via `seededPRNG(`${seed}_<purpose>_<id>`)`. Mirrors `World.seed` (see `world_history.md`). Empty-string seed is supported (sub-stream draws are still deterministic) |
-| `Galaxy.ts` | Runtime galaxy entity. Carries `solarSystems: SolarSystem[]` reference list + baked layout fields (`cx`, `cy`, `radius`, `spread`). No `Map`/`Set` of its own but lives next to entities that have them, so it stays inside the worker too |
+| `Galaxy.ts` | Runtime galaxy entity. Carries `solarSystems: SolarSystem[]` reference list + baked layout fields (`cx`, `cy`, `radius`, `spread`, `shape: 'spiral' | 'oval'`). No `Map`/`Set` of its own but lives next to entities that have them, so it stays inside the worker too |
 | `SolarSystem.ts` | System entity: composition (`'ROCK' \| 'GAS'`), star list, planet list, parent universe id |
 | `Star.ts` | Star entity: composition (`'MATTER' \| 'ANTIMATTER'`), radius, brightness, parent system id |
 | `Planet.ts` | Planet entity: composition (`'ROCK' \| 'GAS'`), 13 fine-grained subtypes (`PlanetSubtype` = `RockPlanetSubtype` ∪ `GasPlanetSubtype`), radius, orbit, life flag, optional `biome: PlanetBiome` (only for ROCK + life), satellites, parent system id. Exports the `PLANET_SUBTYPE_COMPOSITION` enforcement table — every subtype belongs to exactly one composition |
 | `Satellite.ts` | Satellite entity: composition (`'ICE' \| 'ROCK'`), 10 fine-grained subtypes (`SatelliteSubtype` = `IceSatelliteSubtype` ∪ `RockSatelliteSubtype`), radius, life flag, optional biome (only for ROCK + life), parent planet id. Exports the `SATELLITE_SUBTYPE_COMPOSITION` enforcement table |
-| `UniverseGenerator.ts` | Top-level orchestrator + galaxy grouping. Generates `numSolarSystems` solar systems (defaulting to `rndSize(rng, 5, 1)` when no override is supplied), then chunks them into galaxies (≤100 → 1 galaxy; >100 → `ceil(N/100)` chunks), names them, lays them out via `layoutGalaxies`, and names the universe (single galaxy → reuse galaxy name; multi-galaxy → `generateUniverseName`) |
+| `UniverseGenerator.ts` | Top-level orchestrator + galaxy grouping. Generates `numSolarSystems` solar systems (defaulting to `rndSize(rng, 5, 1)` when no override is supplied), then chunks them into galaxies (≤100 → 1 galaxy; >100 → `ceil(N/100)` chunks), names them, assigns each a morphology shape (`spiral` or `oval`) via an isolated sub-stream, lays them out via `layoutGalaxies`, and names the universe (single galaxy → reuse galaxy name; multi-galaxy → `generateUniverseName`) |
 | `SolarSystemGenerator.ts` | Per-system generator: rolls composition (50/50 ROCK/GAS), generates `rndSize(rng, 3, 1)` stars, sets the system's name from the **primary star** (no separate RNG draw), then generates `stars.length * 2 + floor(rng() * 15)` planets |
 | `StarGenerator.ts` | Per-star: rolls radius (400 000–900 000), brightness (100–999), composition (50/50). Names via `generateStarName` (isolated sub-stream) |
 | `PlanetGenerator.ts` | Per-planet: rolls radius (1 000–31 000), orbit (monotonic in insertion index — read **before** push), composition driven by orbit (`rockProbability`: <10 → 100% rock, >20 → 100% gas, linear in between), life flag (10%), biome (only ROCK + life, 7 weighted profiles), subtype via isolated sub-stream `${seed}_planetsubtype_${planet.id}`, then `rndSize(rng, 15, -5)` satellites |
@@ -36,7 +36,7 @@ The universe entity instances live **only inside `universegen.worker.ts`** — t
 | `galaxyLayout.ts` | Random rejection-sampling layout for multi-galaxy universes. Bakes per-galaxy `cx`, `cy`, `radius`, `spread` in **normalized world units** so the renderer can apply a single viewport-fit factor at draw time. Enforces a minimum centre-to-centre distance of `MIN_CENTER_DIST = 10` world units; container radius scales as `10 × √N` so density stays roughly constant as galaxy count grows. RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams. Also exports `computeLayoutExtent(galaxies)` for the renderer's viewport fit |
 | `universeNameGenerator.ts` | Procedural names for every tier: `generateGalaxyName`, `generateUniverseName`, `generateStarName`, `generatePlanetName`, `generateSatelliteName`. Two layers per name: **scientific** (catalog-style: NGC, HD, HIP, GJ, KOI, Roman numerals) + **human** (proper names with a tier-distinct phonetic feel). Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entityId>` — name generation never perturbs physics RNG. Per-tier dedup via the `usedNames: Set<string>` that callers pass in (lives on `Universe`) |
 | `helpers.ts` | `rndSize(rng, max, min)` — uniform integer in `[min, min + max)`, clamped at 0. Mirrors the `ReferenceSizeConfig.RandomSizeConfig.rndSize(max, min)` helper from the upstream Java framework. Used everywhere in this package for child-count rolls |
-| `renderer.ts` | Canvas-2D renderer with three drill-down scenes (galaxy / system / planet). Ports `galaxySpiralPositions` (2-arm logarithmic spiral system layout), `OrbitalMechanics.angularVelocity` (Kepler's 3rd law, ω ∝ r⁻¹·⁵), `StarField` (seeded LCG background), `ScaleMapper` (linear/sqrt/log domain → pixel mapping for fair size perception across orders of magnitude) verbatim from `github.com/fjcmz/procen_universe_viz`. **Background star field uses an INDEPENDENT LCG seed (`STAR_FIELD_SEED = 42`)** so the backdrop is identical regardless of universe contents — same as the reference repo |
+| `renderer.ts` | Canvas-2D renderer with three drill-down scenes (galaxy / system / planet). Ports `OrbitalMechanics.angularVelocity` (Kepler's 3rd law, ω ∝ r⁻¹·⁵), `StarField` (seeded LCG background), `ScaleMapper` (linear/sqrt/log domain → pixel mapping for fair size perception across orders of magnitude) verbatim from `github.com/fjcmz/procen_universe_viz`. Also contains `galaxySpiralPositions` (2-arm log-spiral with central cluster) and `galaxyOvalPositions` (elliptical, linear density falloff). **Background star field uses an INDEPENDENT LCG seed (`STAR_FIELD_SEED = 42`)** so the backdrop is identical regardless of universe contents — same as the reference repo |
 | `hitTest.ts` | `pickHit(circles, px, py)` — picks the topmost circle whose disk contains the click point. Iterates back-to-front so later-drawn entities win ties (same convention as the reference repo's HitTester) |
 | `index.ts` | Public barrel: re-exports every entity class, every generator singleton (`universeGenerator`, `solarSystemGenerator`, `starGenerator`, `planetGenerator`, `satelliteGenerator`), every type, and `rndSize` |
 
@@ -87,7 +87,9 @@ Roll bias (in `pickSatelliteSubtype`, parent-orbit aware):
 - **N ≤ 100** — single galaxy `gal_0` wraps every system. The UI hides the galaxy level entirely and the renderer falls back to legacy single-spiral rendering (byte-identical to pre-grouping). Universe display name is reused from the single galaxy's name so existing labels ("↑ Galaxy", breadcrumb "Galaxy") still make sense.
 - **N > 100** — split into `numGalaxies = ceil(N / 100)` equal sequential chunks, `groupSize = ceil(N / numGalaxies)`. Group sizes differ by at most 1.
 
-Galaxy generation is placed **after** all physics generation in `UniverseGenerator.generate` so naming/layout RNG never perturbs any physics RNG calls.
+Galaxy generation is placed **after** all physics generation in `UniverseGenerator.generate` so naming/layout/shape RNG never perturbs any physics RNG calls.
+
+Each galaxy is assigned a **morphology shape** (`'spiral'` or `'oval'`) determined by an isolated sub-stream `seededPRNG(`${seed}_galaxy_shape_${i}`)()` — 50/50 probability. The shape is stored on `Galaxy.shape` and serialized into `GalaxyData.shape`. It is the only generator-time decision that affects visual layout rather than physics.
 
 ## Galaxy Layout (`galaxyLayout.ts`)
 
@@ -95,7 +97,7 @@ For multi-galaxy universes, `layoutGalaxies(galaxies, universeSeed)` positions g
 
 Algorithm:
 1. Per-galaxy `spread = sqrt(groupSize / 100)` — a half-full galaxy reads as ~0.7× the diameter of a full one.
-2. `radius = 0.45 × spread` — matches the cap baked into `galaxySpiralPositions` (`b = 2.42 / (maxK × angleStep)`, outer arm reaches 0.45 × spread).
+2. `radius = 0.45 × spread` — sized to contain a spiral galaxy's outermost arm (baked into `galaxySpiralPositions`: `b = 2.42 / (maxK × angleStep)`, outer arm reaches ~0.45 × spread). Oval galaxies use `maxR = spread × 0.3` so they sit comfortably inside the same bounding circle.
 3. **Random placement** via rejection sampling inside a disc of radius `max(10, 10 × √N)`. For each new galaxy up to `PLACEMENT_ATTEMPTS = 800` random positions are tried; a position is accepted only if it is ≥ 10 world units from every already-placed galaxy. This produces an irregular, non-patterned layout (replacing the earlier sunflower/phyllotaxis spiral). The `√N` scaling keeps average nearest-neighbour spacing roughly constant (~15–30 world units) as galaxy count grows.
 4. **Fallback**: if all attempts fail, the galaxy is placed just outside the cluster boundary at a random angle so the minimum separation guarantee is always met.
 5. **Recenter** so centroid is `(0, 0)`.
@@ -103,6 +105,28 @@ Algorithm:
 All RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams.
 
 `computeLayoutExtent(galaxies)` returns the maximum extent from origin (`max(|center| + radius)`), used by the renderer to compute the viewport fit factor. Accepts a structural type so both runtime `Galaxy` and serialized `GalaxyData` work.
+
+## Galaxy Shapes
+
+Each galaxy has a `shape: 'spiral' | 'oval'` field baked at generation time. The renderer dispatches to a different layout function based on this field.
+
+### Spiral (`galaxySpiralPositions`)
+
+- **Central cluster (~15%)**: systems placed with sin-based pseudo-random angle and CDF-biased radius (`r/R = 1 − √(1−u)`) in a small nucleus. Radius cap is ~80% of the first arm step's radial distance.
+- **Two arms (~85%)**: 2-arm logarithmic spiral (`r = a·eᵇθ · spread/200`, `a = 8`, adaptive `b = min(0.18, 2.42 / (maxK·angleStep))`). Systems alternate between arms every other index. Jitter is applied **perpendicular to the arm tangent** only (arm width ≈ 6% of radius, with a small absolute floor for innermost points), plus a tiny along-arm angle wobble (`0.012 rad`). This keeps the two arms tight and visually distinct.
+
+### Oval (`galaxyOvalPositions`)
+
+- All systems distributed inside an ellipse using **independent** sin-based pseudo-random values for angle (`sin(i·127.1 + 311.7)`) and radius (`sin(i·269.5 + 183.3)`). Independent sources avoid the spiral-arm artefacts produced by sequential quasi-random sequences (e.g. the golden angle).
+- Radius uses the same CDF inverse (`r/R = 1 − √(1−u)`) so density falls off linearly from centre to edge.
+- Per-galaxy ellipse aspect ratio in `[1.4, 2.2]` derived from `hashId(galaxyId) & 0xfff` — each oval galaxy has a distinct shape.
+- `maxR = spread × 0.3`.
+
+### Layout cache (`getOrBuildLayout`)
+
+`rawPositions` and star-radius stats are cached in `spiralLayoutCache` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction). Cache key: `"${shape}|${galaxyId}|${count}|${cx}|${cy}|${spread}"`. The shape and galaxyId are included because oval positions depend on aspect-ratio derived from the galaxy id, and the two layout functions produce different point clouds for the same `(count, cx, cy, spread)`.
+
+Both layout functions are only ever called through `getOrBuildLayout` — bypassing the cache reintroduces O(N) `Math.sin`/`Math.exp` calls per frame.
 
 ## Naming
 
@@ -151,15 +175,17 @@ This is the only piece of glue between the universe pipeline and the world-map p
 
 **Galaxy scene — `drawGalaxySpiral`**
 
-Systems are placed on a 2-arm logarithmic spiral by `galaxySpiralPositions` (adaptive tightness `b = min(0.18, 2.42 / (maxK × angleStep))` so outer arms stay within ~45 % of `spread` for large counts). A full-galaxy rigid-body rotation is applied each frame at `GALAXY_SPIN_SPEED = 0.018 rad/s` (≈ 5.8 min per revolution). Each in-view system renders as a cached glow stamp (`ctx.drawImage`) + a solid core circle (`drawCircle`). `starFill` returns `{ core, glowInner, glowOuter }`.
+Dispatches to `galaxySpiralPositions` or `galaxyOvalPositions` based on `galaxy.shape` (via `getOrBuildLayout`), then applies a full-galaxy rigid-body rotation at `GALAXY_SPIN_SPEED = 0.018 rad/s` (≈ 5.8 min per revolution). Each in-view system renders as a cached glow stamp (`ctx.drawImage`) + a solid core circle (`drawCircle`). `starFill` returns `{ core, glowInner, glowOuter }`.
+
+The function takes `shape` and `galaxyId` parameters alongside the existing geometry arguments. All three `drawGalaxyScene` code paths (legacy single-galaxy, focus mode, multi-galaxy) pass these through.
 
 **Star glow cache — `getOrBuildGlowCanvas`**
 
 Each unique star color gets a 64×64 `HTMLCanvasElement` with the radial gradient pre-rendered once (`createRadialGradient` called once per color, not per frame). Subsequent frames stamp it via `ctx.drawImage` — a cheap GPU blit. The cache is a module-level `Map<string, HTMLCanvasElement>` keyed by `glowInner` color. Outer glow radius = `sizePx * GLOW_OUTER_MULT` (`1.1` — half the original `2.2`).
 
-**Spiral layout cache — `getOrBuildLayout`**
+**Galaxy layout cache — `getOrBuildLayout`**
 
-`rawPositions` (from `galaxySpiralPositions`, which calls `Math.exp` per system) and `maxStarRadii / minR / maxR` are cached in a module-level `Map<string, SpiralLayout>` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction) keyed by `"${count}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}|${systems[0]?.id}"`. The rotation is inlined per-iteration in the draw loop rather than `.map()`-ing an intermediate `positions[]` array.
+`rawPositions` (computed by `galaxySpiralPositions` or `galaxyOvalPositions`) and `maxStarRadii / minR / maxR` are cached in a module-level `Map<string, GalaxyLayout>` (cap `SPIRAL_CACHE_MAX = 10`, FIFO eviction) keyed by `"${shape}|${galaxyId}|${count}|${cx.toFixed(1)}|${cy.toFixed(1)}|${spread.toFixed(1)}"`. The rotation is inlined per-iteration in the draw loop rather than `.map()`-ing an intermediate `positions[]` array.
 
 **O(1) system lookup — `systemById`**
 
@@ -207,7 +233,7 @@ Single star: solid circle at canvas center. Multi-star binary: stars orbit a tig
 - **Planet / satellite biomes are only assigned when `composition === 'ROCK' && life`.** Other planets / moons have `biome === undefined`. The hand-off code in `App.tsx` falls back to `'default'` for the world-map profile when biome is undefined — keep that fallback if you ever extend biome assignment.
 - **Hand-off seed format is part of the determinism contract.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on. Changing this format would break "the same universe seed always gives the same world for a given planet". Treat it like a stable interface.
 - **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.
-- **Do NOT call `galaxySpiralPositions` outside `getOrBuildLayout`.** The function calls `Math.exp` per system — at 10 000 systems this is significant. `getOrBuildLayout` caches the result; bypassing it reintroduces an O(N) cost every animation frame.
+- **Do NOT call `galaxySpiralPositions` or `galaxyOvalPositions` outside `getOrBuildLayout`.** Both call `Math.exp` / `Math.sin` per system — at 10 000 systems this is significant. `getOrBuildLayout` caches the result; bypassing it reintroduces an O(N) cost every animation frame.
 - **Do NOT allocate a `positions[]` array per frame.** The rotation is intentionally inlined in the draw loop (`px = cx + dx*cosG - dy*sinG`) to avoid a 10 000-object allocation + GC hit every tick. Keep it that way.
 - **Do NOT push hit circles before the cull check.** Offscreen systems cannot be clicked; accumulating hit circles for them wastes memory and GC budget at large system counts. The hit push must stay after the viewport bounds check (step 3 of the cull pipeline).
 - **Do NOT call `ctx.createRadialGradient` per visible system per frame.** The glow is rendered via `ctx.drawImage` from a pre-built offscreen canvas cached in `glowCanvasCache`. Adding a new per-frame `createRadialGradient` call would reintroduce the GPU state cost that made large universes slow. New glow variants must go through `getOrBuildGlowCanvas`.
