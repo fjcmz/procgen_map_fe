@@ -299,6 +299,8 @@ export interface CharacterSpellcasting {
   slotsPerLevel: number[];
   memorizedPerLevel: Spell[][];
   spellsKnown: Spell[];
+  /** Cumulative caster level bonus from equipped items (e.g. Orange Prism Ioun Stone). */
+  casterLevelBonus: number;
 }
 
 /**
@@ -370,6 +372,7 @@ export function rollCharacterSpellcasting(
         slotsPerLevel: [],
         memorizedPerLevel: [],
         spellsKnown: [],
+        casterLevelBonus: 0,
       });
       continue;
     }
@@ -447,6 +450,7 @@ export function rollCharacterSpellcasting(
       slotsPerLevel,
       memorizedPerLevel,
       spellsKnown,
+      casterLevelBonus: 0,
     });
   }
   return out;

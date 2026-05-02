@@ -77,6 +77,7 @@ export {
   SLOT_LABELS,
   SLOT_GROUPS,
   EQUIPMENT_CATALOG,
+  MAGICAL_EQUIPMENT_CATALOG,
   assignEquipment,
   equipBonusSummary,
   formatCrit,

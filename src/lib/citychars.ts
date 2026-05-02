@@ -34,6 +34,7 @@ import type { Deity } from './fantasy/Deity';
 import type { RaceType } from './fantasy/RaceType';
 import type { AlignmentType } from './fantasy/AlignmentType';
 import type { Ability } from './fantasy/Ability';
+import { abilityMod } from './fantasy/Ability';
 import type { PcClassType } from './fantasy/PcClassType';
 import type { ClassLevel, CombatStats, BonusType, BonusComponent } from './fantasy/Combat';
 import { computeCombatStats } from './fantasy/Combat';
@@ -547,33 +548,89 @@ function applyEquipmentToCombat(char: CityCharacter): void {
   for (const item of Object.values(eq)) {
     if (!item) continue;
     for (const bonus of item.bonuses) {
-      const component: BonusComponent = {
+      const comp = (): BonusComponent => ({
         source: item.name,
         value:  bonus.value,
         type:   (bonus.type ?? 'misc') as BonusType,
-      };
+      });
       switch (bonus.target) {
         case 'ac':
           char.combat.ac.total += bonus.value;
-          char.combat.ac.components.push(component);
+          char.combat.ac.components.push(comp());
           break;
         case 'bab':
           char.combat.bab.total += bonus.value;
-          char.combat.bab.components.push(component);
+          char.combat.bab.components.push(comp());
           break;
         case 'fort':
           char.combat.saves.fortitude.total += bonus.value;
-          char.combat.saves.fortitude.components.push(component);
+          char.combat.saves.fortitude.components.push(comp());
           break;
         case 'ref':
           char.combat.saves.reflex.total += bonus.value;
-          char.combat.saves.reflex.components.push(component);
+          char.combat.saves.reflex.components.push(comp());
           break;
         case 'will':
           char.combat.saves.will.total += bonus.value;
-          char.combat.saves.will.components.push(component);
+          char.combat.saves.will.components.push(comp());
           break;
-        // str / dex / con / int / wis / cha / hp — informational only
+        case 'hp':
+          char.hitPoints += bonus.value;
+          break;
+        case 'str': {
+          const old = abilityMod(char.abilities.strength    ?? 10);
+          char.abilities.strength    = (char.abilities.strength    ?? 10) + bonus.value;
+          const d = abilityMod(char.abilities.strength) - old;
+          if (d) { char.combat.bab.total += d; char.combat.bab.components.push({ source: item.name + ' (STR)', value: d, type: 'ability' as BonusType }); }
+          break;
+        }
+        case 'dex': {
+          const old = abilityMod(char.abilities.dexterity   ?? 10);
+          char.abilities.dexterity   = (char.abilities.dexterity   ?? 10) + bonus.value;
+          const d = abilityMod(char.abilities.dexterity) - old;
+          if (d) {
+            char.combat.ac.total += d; char.combat.ac.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
+            char.combat.saves.reflex.total += d; char.combat.saves.reflex.components.push({ source: item.name + ' (DEX)', value: d, type: 'ability' as BonusType });
+          }
+          break;
+        }
+        case 'con': {
+          const old = abilityMod(char.abilities.constitution ?? 10);
+          char.abilities.constitution = (char.abilities.constitution ?? 10) + bonus.value;
+          const d = abilityMod(char.abilities.constitution) - old;
+          if (d) {
+            char.hitPoints += d * char.level;
+            char.combat.saves.fortitude.total += d; char.combat.saves.fortitude.components.push({ source: item.name + ' (CON)', value: d, type: 'ability' as BonusType });
+          }
+          break;
+        }
+        case 'wis': {
+          const old = abilityMod(char.abilities.wisdom      ?? 10);
+          char.abilities.wisdom      = (char.abilities.wisdom      ?? 10) + bonus.value;
+          const d = abilityMod(char.abilities.wisdom) - old;
+          if (d) { char.combat.saves.will.total += d; char.combat.saves.will.components.push({ source: item.name + ' (WIS)', value: d, type: 'ability' as BonusType }); }
+          break;
+        }
+        case 'int':
+          char.abilities.intelligence = (char.abilities.intelligence ?? 10) + bonus.value;
+          break;
+        case 'cha':
+          char.abilities.charisma    = (char.abilities.charisma    ?? 10) + bonus.value;
+          break;
+        case 'spell_slots':
+          if (char.spellcasting?.length) {
+            const lvl = bonus.spellLevel ?? 1;
+            for (const sc of char.spellcasting) {
+              while (sc.slotsPerLevel.length <= lvl) sc.slotsPerLevel.push(0);
+              sc.slotsPerLevel[lvl] += bonus.value;
+            }
+          }
+          break;
+        case 'caster_level':
+          if (char.spellcasting?.length) {
+            for (const sc of char.spellcasting) sc.casterLevelBonus += bonus.value;
+          }
+          break;
       }
     }
   }
