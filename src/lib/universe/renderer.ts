@@ -762,7 +762,7 @@ function drawGalaxyGlyph(
     ? data.solarSystems.find(s => s.id === galaxy.systemIds[0]) ?? null
     : null;
   const dominantStar = sampleSystem?.stars[0] ?? null;
-  const dotColor = dominantStar ? starFill(dominantStar) : '#dde0ff';
+  const dotColor = dominantStar ? starFill(dominantStar).core : '#dde0ff';
 
   // Low-res spiral dots — same algorithm as the full spiral but with a
   // fixed dot count so the glyph reads as a "compressed" galaxy.
