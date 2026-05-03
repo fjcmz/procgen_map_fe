@@ -11,6 +11,7 @@ import type {
   UniverseGenerateRequest,
   UniverseWorkerMessage,
 } from '../lib/universe/types';
+import { extensionRegistry } from '../lib/extensions';
 
 const DEFAULT_SEED = 'cosmos';
 const DEFAULT_SOLAR_SYSTEMS = 500;
@@ -129,6 +130,9 @@ export function UniverseScreen({
       type: 'GENERATE',
       seed,
       numSolarSystems,
+      // Resolve the active subtype catalogue on the main thread so the
+      // worker doesn't need to share state with the extension registry.
+      subtypeCatalogue: extensionRegistry.getUniverseCatalogue(),
     };
     worker.postMessage(req);
   }, [generating, seed, numSolarSystems, onDataChange]);

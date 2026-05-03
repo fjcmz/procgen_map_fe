@@ -1,0 +1,124 @@
+{
+  "$schema": "procgen-pack/v1",
+  "id": "example-fantasy",
+  "name": "Example Fantasy Pack",
+  "version": "1.0.0",
+  "mode": "extend",
+  "description": "Adds a 'crimson_world' planet subtype, a 'shattered' landmass shape, and a 'volcanic_hellworld' terrain profile. Demonstrates every section of the pack format.",
+
+  "universe": {
+    "planet": {
+      "subtypes": [
+        {
+          "id": "crimson_world",
+          "composition": "ROCK",
+          "palette": {
+            "base": "#7a1e1e",
+            "accent": "#c44545",
+            "shadow": "#2a0808",
+            "hot": "#ff5a3a"
+          }
+        }
+      ],
+      "rollRules": [
+        {
+          "name": "crimson-rare-mid",
+          "match": { "composition": "ROCK", "orbitMin": 6, "orbitMax": 12 },
+          "pick": {
+            "kind": "thresholds",
+            "thresholds": [
+              { "until": 0.04, "subtype": "crimson_world" },
+              { "until": 1.0, "subtype": "terrestrial" }
+            ]
+          }
+        }
+      ]
+    }
+  },
+
+  "world": {
+    "terrainProfiles": {
+      "volcanic_hellworld": {
+        "numContinentalMin": 5,
+        "numContinentalMax": 8,
+        "numOceanicMin": 12,
+        "numOceanicMax": 16,
+        "continentalGrowthMin": 2.5,
+        "continentalGrowthMax": 4.0,
+        "seamBoostMin": 0.20,
+        "seamBoostMax": 0.30,
+        "seamSpreadRings": 6,
+        "convergentCCBoost": 0.65,
+        "convergentOCBoost": 0.45,
+        "polarIceStart": 0.99,
+        "polarIceEnd": 1.0,
+        "polarNoiseAmplitude": 0.3,
+        "polarBlendWeight": 0.5,
+        "polarLandSuppressStart": 0.99,
+        "polarLandSuppressStrength": 0.0,
+        "thermalErosionIters": 1,
+        "thermalErosionTalus": 0.05,
+        "latAmplitude": 0.20,
+        "latPolarDamping": 0.5,
+        "latFrequency": 3.0,
+        "latBias": -0.05,
+        "coastalMoistureSensitivity": 1.5,
+        "continentalityStrength": 0.5,
+        "continentalityMidpoint": 0.40,
+        "shadowStrength": 0.40,
+        "mountainThreshold": 0.55,
+        "elevationScale": 1.8,
+        "contStrength": 0.10,
+        "maritimeStrength": 0.05,
+        "windwardBonus": 0.5,
+        "lapseRate": 0.10,
+        "currentLandInfluence": 0.6,
+        "tempNoiseAmplitude": 0.03,
+        "iceTempThreshold": 0,
+        "snowTempThreshold": 0,
+        "tundraTempThreshold": 0,
+        "tempMoistureShift": 0.05,
+        "warmCurrentStrength": 0.16,
+        "coldCurrentStrength": 0.04,
+        "erosionK": 0.001,
+        "erosionIterations": 2,
+        "globalMoistureOffset": -0.5,
+        "globalTempOffset": 0.40,
+        "suppressRivers": false,
+        "riverFlowThreshold": 8,
+        "elevationPower": 0.80,
+        "marshOverride": false,
+        "shelfWidth": 3,
+        "shelfStrength": 0.6,
+        "shallowSeaThreshold": 0.1,
+        "lakeMaxSize": 5,
+        "lakeMinSize": 2,
+        "depressionFillEpsilon": 0.00001
+      }
+    },
+    "terrainShapes": {
+      "shattered": {
+        "numContinentalMin": 0,
+        "numContinentalMax": 1,
+        "numOceanicMin": 28,
+        "numOceanicMax": 36,
+        "seamBoostMin": 0,
+        "seamBoostMax": 0.01,
+        "seamSpreadRings": 0,
+        "elevationPower": 1.8
+      }
+    },
+    "profileWaterRatios": {
+      "volcanic_hellworld": 0.10
+    },
+    "profileLabels": {
+      "volcanic_hellworld": "Volcanic Hellworld"
+    },
+    "shapeLabels": {
+      "shattered": "Shattered Isles"
+    },
+    "profileBadgeColors": {
+      "volcanic_hellworld": "#c83a18"
+    }
+  }
+}

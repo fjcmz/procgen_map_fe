@@ -95,6 +95,12 @@ export interface UniverseGenerateRequest {
   type: 'GENERATE';
   seed: string;
   numSolarSystems: number;
+  /**
+   * Active subtype catalogue resolved on the main thread. The universe worker
+   * uses it for subtype rolls, biome rolls, and (transitively) for anything
+   * else driven by the extension registry.
+   */
+  subtypeCatalogue?: import('../extensions/registry').UniverseCatalogueSnapshot;
 }
 
 export type UniverseWorkerMessage =

@@ -11,24 +11,32 @@ export type PlanetComposition = 'GAS' | 'ROCK';
 
 /**
  * Compositional subtype — finer-grained than `PlanetComposition` and drives
- * the planet's visual palette / texture. Each subtype belongs to exactly one
- * `PlanetComposition`; mismatches are forbidden by `PLANET_SUBTYPE_COMPOSITION`.
+ * the planet's visual palette / texture. The set of subtypes is now data-
+ * driven via `lib/extensions` so loaded packs can add new entries; the type
+ * is `string` at runtime. The four name aliases below preserve back-compat
+ * for code that imported them as type-level documentation.
  */
-export type RockPlanetSubtype =
-  | 'terrestrial' | 'desert' | 'volcanic' | 'lava' | 'iron'
-  | 'carbon' | 'ocean' | 'ice_rock';
-export type GasPlanetSubtype =
-  | 'jovian' | 'hot_jupiter' | 'ice_giant' | 'methane_giant' | 'ammonia_giant';
-export type PlanetSubtype = RockPlanetSubtype | GasPlanetSubtype;
+export type PlanetSubtype = string;
+export type RockPlanetSubtype = string;
+export type GasPlanetSubtype = string;
 
-export const PLANET_SUBTYPE_COMPOSITION: Record<PlanetSubtype, PlanetComposition> = {
+/**
+ * @deprecated Use `extensionRegistry.getUniverseCatalogue().planet.composition`
+ * for runtime lookup. Retained for back-compat with the historical built-in
+ * 13-subtype set; loaded extension packs are NOT reflected here.
+ */
+export const PLANET_SUBTYPE_COMPOSITION: Record<string, PlanetComposition> = {
   terrestrial: 'ROCK', desert: 'ROCK', volcanic: 'ROCK', lava: 'ROCK', iron: 'ROCK',
   carbon: 'ROCK', ocean: 'ROCK', ice_rock: 'ROCK',
   jovian: 'GAS', hot_jupiter: 'GAS', ice_giant: 'GAS', methane_giant: 'GAS', ammonia_giant: 'GAS',
 };
 
-/** Terrain profile subtypes — only assigned to ROCK planets/satellites with life. */
-export type PlanetBiome = 'default' | 'desert' | 'ice' | 'forest' | 'swamp' | 'mountains' | 'ocean';
+/**
+ * Terrain profile biome — only assigned to ROCK planets/satellites with life.
+ * Now `string` at runtime so packs can add biomes; the historical 7-biome set
+ * is still the default.
+ */
+export type PlanetBiome = string;
 
 export class Planet {
   readonly id: string;

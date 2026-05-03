@@ -48,16 +48,23 @@ self.onmessage = (e: MessageEvent<GenerateRequest>) => {
 function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): void {
   const { seed, numCells, width, height, waterRatio, generateHistory: doHistory, numSimYears } = req;
 
-  // Resolve terrain profile from request. Shapes stack between the biome profile
-  // and any user overrides so the user override always wins and the biome layer
-  // shines through for every field the shape doesn't explicitly set.
-  const profileBase = PROFILES[req.profileName ?? 'default'] ?? DEFAULT_PROFILE;
-  const shapeOverlay = SHAPE_PROFILES[req.shapeName ?? 'default'] ?? {};
-  const profile: TerrainProfile = {
-    ...profileBase,
-    ...shapeOverlay,
-    ...(req.profileOverrides ?? {}),
-  };
+  // Resolve terrain profile from request. The main thread can supply a
+  // pre-resolved `profileSnapshot` (used by the extension registry to ship
+  // user-loaded profiles into the worker without registering them inside the
+  // worker's bundle). Otherwise, fall back to the built-in name lookup with
+  // the same three-way merge as before: profile → shape → user overrides.
+  let profile: TerrainProfile;
+  if (req.profileSnapshot) {
+    profile = { ...req.profileSnapshot, ...(req.profileOverrides ?? {}) };
+  } else {
+    const profileBase = PROFILES[req.profileName ?? 'default'] ?? DEFAULT_PROFILE;
+    const shapeOverlay = SHAPE_PROFILES[req.shapeName ?? 'default'] ?? {};
+    profile = {
+      ...profileBase,
+      ...shapeOverlay,
+      ...(req.profileOverrides ?? {}),
+    };
+  }
 
   // Resolve resource rarity weights from mode (default: 'natural')
   const rarityMode = req.resourceRarityMode ?? 'natural';

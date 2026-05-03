@@ -1,8 +1,9 @@
 import type { ChangeEvent } from 'react';
+import { useMemo } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Season, ResourceRarityMode } from '../../lib/types';
 import type { WorldOrigin } from '../../App';
 import { SEASON_LABELS } from '../../lib/terrain/biomes';
-import { PROFILE_WATER_RATIOS } from '../../lib/terrain';
+import { extensionRegistry, useRegistryVersion } from '../../lib/extensions';
 
 export interface GenerationTabProps {
   seed: string;
@@ -51,33 +52,6 @@ export interface GenerationTabProps {
 }
 
 const CELL_OPTIONS = [10000, 20000, 50000, 100000, 200000];
-
-const PROFILE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'default', label: 'Default (Earth-like)' },
-  { value: 'desert', label: 'Desert Planet' },
-  { value: 'ice', label: 'Ice World' },
-  { value: 'forest', label: 'Forest Planet' },
-  { value: 'swamp', label: 'Swamp World' },
-  { value: 'mountains', label: 'Mountain World' },
-  { value: 'ocean', label: 'Ocean World' },
-];
-
-const SHAPE_OPTIONS: { value: string; label: string }[] = [
-  { value: 'default', label: 'Default (from biome)' },
-  { value: 'pangaea', label: 'Pangaea' },
-  { value: 'continents', label: 'Continents' },
-  { value: 'islands', label: 'Islands' },
-  { value: 'archipelago', label: 'Archipelago' },
-];
-
-const PROFILE_BADGE_COLORS: Record<string, string> = {
-  desert: '#c4842d',
-  ice: '#5b8fa8',
-  forest: '#3a7a3a',
-  swamp: '#5a7a4a',
-  mountains: '#6a5a4a',
-  ocean: '#2a6a9a',
-};
 
 const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   rivers: 'Rivers',
@@ -139,6 +113,26 @@ export function GenerationTab({
   // When the planet flow was entered from the universe, the predefined
   // params are read-only — the universe planet is the source of truth.
   const locked = !!worldOrigin;
+
+  // Subscribe to registry changes so loaded extension packs appear in the
+  // profile / shape dropdowns immediately.
+  const registryVersion = useRegistryVersion();
+  const { profileOptions, shapeOptions, profileBadgeColors, profileWaterRatios } = useMemo(() => {
+    const cat = extensionRegistry.getWorldCatalogue();
+    const labelFor = (name: string, fallback: Record<string, string>) =>
+      cat.profileLabels[name] ?? fallback[name] ?? name;
+    const profiles = Object.keys(cat.terrainProfiles);
+    const shapes = Object.keys(cat.terrainShapes);
+    return {
+      profileOptions: profiles.map(p => ({ value: p, label: cat.profileLabels[p] ?? labelFor(p, {}) })),
+      shapeOptions: shapes.map(s => ({ value: s, label: cat.shapeLabels[s] ?? labelFor(s, {}) })),
+      profileBadgeColors: cat.profileBadgeColors,
+      profileWaterRatios: cat.profileWaterRatios,
+    };
+  // registryVersion bumps invalidate the memo — same pattern as useSyncExternalStore.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registryVersion]);
+
   return (
     <div style={styles.body}>
       {worldOrigin && (
@@ -179,15 +173,15 @@ export function GenerationTab({
           alignItems: 'center',
           padding: '2px 8px',
           borderRadius: 10,
-          background: `${PROFILE_BADGE_COLORS[profileName] ?? '#8b4513'}22`,
-          border: `1px solid ${PROFILE_BADGE_COLORS[profileName] ?? '#8b4513'}`,
+          background: `${profileBadgeColors[profileName] ?? '#8b4513'}22`,
+          border: `1px solid ${profileBadgeColors[profileName] ?? '#8b4513'}`,
           fontSize: 11,
           fontWeight: 'bold',
-          color: PROFILE_BADGE_COLORS[profileName] ?? '#8b4513',
+          color: profileBadgeColors[profileName] ?? '#8b4513',
           fontFamily: 'Georgia, serif',
           letterSpacing: 0.3,
         }}>
-          {PROFILE_OPTIONS.find(p => p.value === profileName)?.label ?? profileName}
+          {profileOptions.find(p => p.value === profileName)?.label ?? profileName}
         </div>
       )}
 
@@ -234,13 +228,13 @@ export function GenerationTab({
             onChange={(e: ChangeEvent<HTMLSelectElement>) => {
               const name = e.target.value;
               onProfileChange(name);
-              if (name in PROFILE_WATER_RATIOS) {
-                onWaterRatioChange(PROFILE_WATER_RATIOS[name]);
+              if (name in profileWaterRatios) {
+                onWaterRatioChange(profileWaterRatios[name]);
               }
             }}
             disabled={generating || locked}
           >
-            {PROFILE_OPTIONS.map(opt => (
+            {profileOptions.map(opt => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -256,7 +250,7 @@ export function GenerationTab({
             onChange={(e: ChangeEvent<HTMLSelectElement>) => onShapeChange(e.target.value)}
             disabled={generating || locked}
           >
-            {SHAPE_OPTIONS.map(opt => (
+            {shapeOptions.map(opt => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

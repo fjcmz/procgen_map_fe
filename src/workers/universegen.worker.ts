@@ -81,7 +81,7 @@ self.onmessage = (e: MessageEvent<UniverseGenerateRequest>) => {
 };
 
 function handleGenerate(req: UniverseGenerateRequest): void {
-  const { seed, numSolarSystems } = req;
+  const { seed, numSolarSystems, subtypeCatalogue } = req;
 
   try {
     post({ type: 'PROGRESS', step: 'Seeding RNG…', pct: 5 });
@@ -91,6 +91,7 @@ function handleGenerate(req: UniverseGenerateRequest): void {
     let lastReportedPct = 15;
     const universe = universeGenerator.generate(rng, seed, {
       numSolarSystems,
+      catalogue: subtypeCatalogue,
       onProgress: (fraction) => {
         // Map [0, 1] generator progress onto [15, 85] of the bar; throttle
         // to whole-percent steps to avoid postMessage spam on large counts.

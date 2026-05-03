@@ -10,17 +10,19 @@ function rngHex(rng: () => number): string {
 export type SatelliteComposition = 'ICE' | 'ROCK';
 
 /**
- * Compositional subtype — finer-grained than `SatelliteComposition` and drives
- * the satellite's visual palette. Each subtype belongs to exactly one
- * `SatelliteComposition`; mismatches are forbidden by `SATELLITE_SUBTYPE_COMPOSITION`.
+ * Compositional subtype — now data-driven via `lib/extensions`. The type
+ * aliases are `string` at runtime; loaded extension packs can add subtypes.
  */
-export type IceSatelliteSubtype =
-  | 'water_ice' | 'methane_ice' | 'sulfur_ice' | 'nitrogen_ice' | 'dirty_ice';
-export type RockSatelliteSubtype =
-  | 'terrestrial' | 'cratered' | 'volcanic' | 'iron_rich' | 'desert_moon';
-export type SatelliteSubtype = IceSatelliteSubtype | RockSatelliteSubtype;
+export type SatelliteSubtype = string;
+export type IceSatelliteSubtype = string;
+export type RockSatelliteSubtype = string;
 
-export const SATELLITE_SUBTYPE_COMPOSITION: Record<SatelliteSubtype, SatelliteComposition> = {
+/**
+ * @deprecated Use `extensionRegistry.getUniverseCatalogue().satellite.composition`
+ * for runtime lookup. Retained for back-compat with the historical built-in
+ * 10-subtype set; loaded extension packs are NOT reflected here.
+ */
+export const SATELLITE_SUBTYPE_COMPOSITION: Record<string, SatelliteComposition> = {
   water_ice: 'ICE', methane_ice: 'ICE', sulfur_ice: 'ICE', nitrogen_ice: 'ICE', dirty_ice: 'ICE',
   terrestrial: 'ROCK', cratered: 'ROCK', volcanic: 'ROCK', iron_rich: 'ROCK', desert_moon: 'ROCK',
 };

@@ -6,9 +6,8 @@ import type {
   PlanetData,
   SatelliteData,
 } from './types';
-import type { PlanetSubtype, PlanetBiome } from './Planet';
-import type { SatelliteSubtype } from './Satellite';
 import { computeLayoutExtent } from './galaxyLayout';
+import { extensionRegistry } from '../extensions/registry';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -399,69 +398,29 @@ interface BodyPalette {
   hot?: string;
 }
 
-const PLANET_PALETTES: Record<PlanetSubtype, BodyPalette> = {
-  // ROCK
-  terrestrial: { base: '#4a8ab8', accent: '#9ad0c8', shadow: '#1f3850' },
-  desert:      { base: '#d4a06a', accent: '#f0c890', shadow: '#5a3818' },
-  volcanic:    { base: '#3a2418', accent: '#7a4830', shadow: '#100804', hot: '#e84818' },
-  lava:        { base: '#c83a18', accent: '#ffb040', shadow: '#400808', hot: '#ffd060' },
-  iron:        { base: '#a05538', accent: '#d08868', shadow: '#3a1808' },
-  carbon:      { base: '#2c2a2a', accent: '#5a5858', shadow: '#0c0c0c' },
-  ocean:       { base: '#2a6aa8', accent: '#6ac0e8', shadow: '#0a2848' },
-  ice_rock:    { base: '#a8c0d0', accent: '#e8f4fc', shadow: '#506878' },
-  // GAS — bands ordered from north pole to south, listed lighter→darker→light
-  jovian:        { base: '#c89a64', accent: '#f0d4a0', shadow: '#583820',
-                   bands: ['#e8c898', '#a87848', '#d4a878', '#8a5828', '#e0bc88'] },
-  hot_jupiter:   { base: '#b8401c', accent: '#ffa050', shadow: '#380808',
-                   bands: ['#e88840', '#982818', '#d8602c', '#601808', '#f09858'] },
-  ice_giant:     { base: '#7ab8d0', accent: '#ccecf8', shadow: '#1a4858',
-                   bands: ['#bce0ec', '#5a98b8', '#9acce0', '#3878a0', '#a8d8e8'] },
-  methane_giant: { base: '#3868b8', accent: '#90b8e8', shadow: '#08183f',
-                   bands: ['#7aa8e0', '#1848a0', '#5888d0', '#0a2870', '#88b0e0'] },
-  ammonia_giant: { base: '#e8d8a0', accent: '#fff4c8', shadow: '#604818',
-                   bands: ['#fff0c0', '#c8b878', '#f0e0a8', '#a89848', '#fff8d0'] },
-};
-
-const SATELLITE_PALETTES: Record<SatelliteSubtype, BodyPalette> = {
-  // ICE
-  water_ice:    { base: '#dde8f0', accent: '#fafdff', shadow: '#90a0b0' },
-  methane_ice:  { base: '#e8c0c0', accent: '#fadcdc', shadow: '#806060' },
-  sulfur_ice:   { base: '#f0e088', accent: '#fff8c0', shadow: '#807038' },
-  nitrogen_ice: { base: '#c0d0d8', accent: '#e8f0f4', shadow: '#607080' },
-  dirty_ice:    { base: '#b8b0a0', accent: '#d8d0c0', shadow: '#605850' },
-  // ROCK
-  terrestrial:  { base: '#9a8e80', accent: '#c8bcaa', shadow: '#403828' },
-  cratered:     { base: '#7a7470', accent: '#a8a098', shadow: '#302820' },
-  volcanic:     { base: '#3c2c20', accent: '#785838', shadow: '#100804', hot: '#d04018' },
-  iron_rich:    { base: '#a06848', accent: '#c89070', shadow: '#402010' },
-  desert_moon:  { base: '#c89868', accent: '#e8bc88', shadow: '#604018' },
-};
-
 /**
- * Life-bearing rock planets/satellites get a biome-tinted palette so an
- * "ocean" world reads as deep blue instead of inheriting whatever rock
- * subtype was rolled underneath. Mirrors the existing biome → terrain
- * profile mapping so the universe disk previews the world the user would
- * generate inside.
+ * Last-resort fallback palette. Used when a body's subtype is missing from
+ * every loaded pack (e.g. a world serialized with a pack that's been since
+ * unloaded). The renderer never crashes on missing entries.
  */
-const BIOME_PALETTES: Record<PlanetBiome, BodyPalette> = {
-  default:   { base: '#5fa86a', accent: '#a0e0a8', shadow: '#1a3820' },
-  forest:    { base: '#3a7a3c', accent: '#7ac870', shadow: '#0a2810' },
-  ocean:     { base: '#2a6aa8', accent: '#6ac0e8', shadow: '#0a2848' },
-  desert:    { base: '#d4a06a', accent: '#f0c890', shadow: '#5a3818' },
-  swamp:     { base: '#5a6a3a', accent: '#90a868', shadow: '#1a2010' },
-  ice:       { base: '#a8c0d0', accent: '#e8f4fc', shadow: '#506878' },
-  mountains: { base: '#8a8478', accent: '#c0baa8', shadow: '#403830' },
-};
+const FALLBACK_PALETTE: BodyPalette = { base: '#888888', accent: '#bbbbbb', shadow: '#444444' };
 
 function planetPalette(p: PlanetData): BodyPalette {
-  if (p.life && p.biome && p.composition === 'ROCK') return BIOME_PALETTES[p.biome];
-  return PLANET_PALETTES[p.subtype] ?? PLANET_PALETTES.terrestrial;
+  const cat = extensionRegistry.getUniverseCatalogue();
+  if (p.life && p.biome && p.composition === 'ROCK') {
+    const biomePal = cat.biomePalettes[p.biome];
+    if (biomePal) return biomePal;
+  }
+  return cat.planet.palettes[p.subtype] ?? cat.planet.palettes.terrestrial ?? FALLBACK_PALETTE;
 }
 
 function satellitePalette(s: SatelliteData): BodyPalette {
-  if (s.life && s.biome && s.composition === 'ROCK') return BIOME_PALETTES[s.biome];
-  return SATELLITE_PALETTES[s.subtype] ?? SATELLITE_PALETTES.terrestrial;
+  const cat = extensionRegistry.getUniverseCatalogue();
+  if (s.life && s.biome && s.composition === 'ROCK') {
+    const biomePal = cat.biomePalettes[s.biome];
+    if (biomePal) return biomePal;
+  }
+  return cat.satellite.palettes[s.subtype] ?? cat.satellite.palettes.terrestrial ?? FALLBACK_PALETTE;
 }
 
 // Legacy single-color fallbacks — kept for the hit-test layer / any caller

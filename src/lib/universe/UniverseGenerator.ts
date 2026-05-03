@@ -5,6 +5,8 @@ import { rndSize } from './helpers';
 import { generateGalaxyName, generateUniverseName } from './universeNameGenerator';
 import { layoutGalaxies } from './galaxyLayout';
 import { seededPRNG } from '../terrain/noise';
+import type { UniverseCatalogueSnapshot } from '../extensions/registry';
+import { extensionRegistry } from '../extensions/registry';
 
 export interface UniverseGenerateOptions {
   /**
@@ -20,6 +22,13 @@ export interface UniverseGenerateOptions {
    * progress bar without coupling the generator to `postMessage`.
    */
   onProgress?: (fraction: number) => void;
+  /**
+   * Active extension catalogue snapshot — supplies subtype palettes, roll
+   * rules, and biome data. The worker resolves this from the registry on the
+   * main thread and passes it in. When omitted (e.g. tests), the registry is
+   * queried directly so the default catalogue is used.
+   */
+  catalogue?: UniverseCatalogueSnapshot;
 }
 
 /**
@@ -35,9 +44,10 @@ const MAX_SYSTEMS_PER_GALAXY = 100;
 export class UniverseGenerator {
   generate(rng: () => number, seed: string = '', opts: UniverseGenerateOptions = {}): Universe {
     const universe = new Universe(rng, seed);
+    const catalogue = opts.catalogue ?? extensionRegistry.getUniverseCatalogue();
     const solarSystemCount = opts.numSolarSystems ?? rndSize(rng, 5, 1);
     for (let i = 0; i < solarSystemCount; i++) {
-      solarSystemGenerator.generate(universe, rng);
+      solarSystemGenerator.generate(universe, rng, catalogue);
       if (opts.onProgress && solarSystemCount > 0) {
         opts.onProgress((i + 1) / solarSystemCount);
       }

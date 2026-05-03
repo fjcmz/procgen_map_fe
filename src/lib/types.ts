@@ -537,6 +537,13 @@ export interface GenerateMapRequest {
   profileName?: string;
   shapeName?: string;
   profileOverrides?: Partial<TerrainProfile>;
+  /**
+   * Pre-resolved terrain profile (full object) supplied by the main thread.
+   * When set, the worker uses this directly and ignores `profileName` /
+   * `shapeName` for resolution. Required when the active extension registry
+   * has loaded packs that the worker doesn't know about.
+   */
+  profileSnapshot?: TerrainProfile;
   resourceRarityMode?: ResourceRarityMode;
 }
 

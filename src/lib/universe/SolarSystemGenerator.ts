@@ -3,9 +3,10 @@ import type { Universe } from './Universe';
 import { starGenerator } from './StarGenerator';
 import { planetGenerator } from './PlanetGenerator';
 import { rndSize } from './helpers';
+import type { UniverseCatalogueSnapshot } from '../extensions/registry';
 
 export class SolarSystemGenerator {
-  generate(universe: Universe, rng: () => number): SolarSystem {
+  generate(universe: Universe, rng: () => number, catalogue: UniverseCatalogueSnapshot): SolarSystem {
     const solarSystem = new SolarSystem(rng);
     solarSystem.universeId = universe.id;
     solarSystem.composition = rng() < 0.5 ? 'ROCK' : 'GAS';
@@ -24,7 +25,7 @@ export class SolarSystemGenerator {
 
     const planetCount = solarSystem.stars.length * 2 + Math.floor(rng() * 15);
     for (let i = 0; i < planetCount; i++) {
-      planetGenerator.generate(solarSystem, rng, universe);
+      planetGenerator.generate(solarSystem, rng, universe, catalogue);
     }
 
     return solarSystem;

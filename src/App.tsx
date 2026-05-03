@@ -12,7 +12,12 @@ import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
 import type { UniverseData, PlanetData, SatelliteData, SolarSystemData } from './lib/universe/types';
-import { PROFILE_WATER_RATIOS } from './lib/terrain/profiles';
+import { extensionRegistry, restoreLoadedPacks } from './lib/extensions';
+
+// Restore any previously-loaded extension packs from localStorage on boot.
+// Done at module scope (before App mounts) so the registry is populated by the
+// time UI hooks first read it.
+restoreLoadedPacks();
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 100000;
@@ -370,6 +375,11 @@ export default function App() {
       setProgress(null);
     };
 
+    // Resolve the profile against the active extension registry on the main
+    // thread, then ship the fully-merged snapshot. The worker uses it directly
+    // so user-loaded packs work without the worker re-importing them.
+    const profileSnapshot = extensionRegistry.resolveTerrainProfile(profileName, shapeName);
+
     worker.postMessage({
       type: 'GENERATE',
       seed,
@@ -379,6 +389,7 @@ export default function App() {
       waterRatio,
       profileName,
       shapeName,
+      profileSnapshot,
       generateHistory,
       numSimYears,
       resourceRarityMode,
@@ -472,8 +483,12 @@ export default function App() {
       const biome = planet.biome ?? 'default';
       setSeed(planetSeed);
       setNumCells(cellCountForPlanetRadius(planet.radius));
-      setWaterRatio(PROFILE_WATER_RATIOS[biome] ?? 0.40);
-      setProfileName(biome);
+      {
+        const cat = extensionRegistry.getWorldCatalogue();
+        const profileName = cat.biomeToProfile[biome] ?? biome;
+        setWaterRatio(cat.profileWaterRatios[profileName] ?? 0.40);
+        setProfileName(profileName);
+      }
       setShapeName('default');
       setResourceRarityMode('natural');
       setGenerateHistory(false);
@@ -508,8 +523,12 @@ export default function App() {
 
       setSeed(satelliteSeed);
       setNumCells(cellCountForPlanetRadius(satellite.radius));
-      setWaterRatio(PROFILE_WATER_RATIOS[biome] ?? 0.40);
-      setProfileName(biome);
+      {
+        const cat = extensionRegistry.getWorldCatalogue();
+        const profileName = cat.biomeToProfile[biome] ?? biome;
+        setWaterRatio(cat.profileWaterRatios[profileName] ?? 0.40);
+        setProfileName(profileName);
+      }
       setShapeName('default');
       setResourceRarityMode('natural');
       setGenerateHistory(false);

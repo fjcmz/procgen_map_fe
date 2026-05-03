@@ -8,10 +8,11 @@ import { HierarchyTab } from './overlay/HierarchyTab';
 import { TechTab } from './overlay/TechTab';
 import { DetailsTab } from './overlay/DetailsTab';
 import { IllustratesTab } from './overlay/IllustratesTab';
+import { ExtensionsTab } from './overlay/ExtensionsTab';
 
-export type OverlayTab = 'generation' | 'events' | 'details' | 'hierarchy' | 'illustrates' | 'tech';
+export type OverlayTab = 'generation' | 'events' | 'details' | 'hierarchy' | 'illustrates' | 'tech' | 'extensions';
 
-const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'details', 'hierarchy', 'illustrates', 'tech'];
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'events', 'details', 'hierarchy', 'illustrates', 'tech', 'extensions'];
 
 interface UnifiedOverlayProps {
   // Generation tab — same shape as the old ControlsProps
@@ -75,6 +76,7 @@ const TAB_LABELS: Record<OverlayTab, string> = {
   hierarchy: 'Realm',
   illustrates: 'Figures',
   tech: 'Tech',
+  extensions: 'Packs',
 };
 
 // ── Focus-ring injection ──────────────────────────────────────────────
@@ -127,13 +129,14 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
     hierarchy: hasHistory,
     illustrates: hasHistory && (props.mapData?.history?.illustrateDetails ?? []).length > 0,
     tech: hasTechTimeline,
+    extensions: true,
   };
 
   // Keyboard nav: Alt+1..4 to switch tabs
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
-      const idx = ['1', '2', '3', '4', '5', '6'].indexOf(e.key);
+      const idx = ['1', '2', '3', '4', '5', '6', '7'].indexOf(e.key);
       if (idx === -1) return;
       const target = VALID_TABS[idx];
       if (!tabEnabled[target]) return;
@@ -296,6 +299,7 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 onNavigate={props.onEntityNavigate}
               />
             )}
+            {activeTab === 'extensions' && <ExtensionsTab />}
           </div>
         </>
       )}
