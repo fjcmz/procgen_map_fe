@@ -54,7 +54,7 @@ const SAT_MIN_PX = 2;
 const SAT_MAX_PX = 10;
 
 const SAT_BASE_ORBIT = 90;
-const SAT_ORBIT_STEP = 44;
+const SAT_ORBIT_STEP = 90;
 
 // ── FNV-1a hash for deterministic per-galaxy variability ─────────────────
 // Produces a uint32 from a string id so the same galaxy always gets the
@@ -1003,14 +1003,19 @@ export function drawSystemScene(
   // ── 2. Planet orbit ring bounds ───────────────────────────────────────────
   //
   // ringMin = 3 × outermost star extent so planet rings always start clearly
-  // beyond the stellar region. ringMax scales proportionally with a floor at
-  // minSide×0.45 to guarantee a comfortable spread even for compact systems.
+  // beyond the stellar region. ringMax uses linear scale (even pixel steps
+  // per planet) so outer rings are not bunched together. A per-planet minimum
+  // step ensures adequate separation even in dense systems.
 
   const orbits = system.planets.map(p => p.orbit);
   const orbitMin = orbits.length ? Math.min(...orbits) : 1;
   const orbitMax = orbits.length ? Math.max(...orbits) : 1;
   const ringMin = Math.max(outerStarExtent * 3, minSide * 0.05);
-  const ringMax = Math.max(minSide * 0.45, ringMin * 2);
+  const minStepPx = 52;
+  const ringMax = Math.max(
+    minSide * 0.46,
+    ringMin + system.planets.length * minStepPx,
+  );
 
   // Planet size mapping
   const planetRadii = system.planets.map(p => p.radius);
@@ -1020,8 +1025,8 @@ export function drawSystemScene(
   // ── 3. Draw orbit rings (planets first so stars render on top) ────────────
 
   for (const planet of system.planets) {
-    const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
-    const ecc = 0.05 + eccentricityFromId(planet.id) * 0.30;
+    const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'linear');
+    const ecc = 0.04 + eccentricityFromId(planet.id) * 0.14;
     const tilt = orbitTiltFromId(planet.id);
     drawOrbitRing(ctx, cx, cy, ringR, viewScale, ecc, tilt);
   }
@@ -1059,12 +1064,12 @@ export function drawSystemScene(
     { x: cx, y: cy, r: starHitR, kind: 'system', id: system.id },
   ];
   for (const planet of system.planets) {
-    const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
+    const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'linear');
     const omega = orbitalAngularVelocity(planet.orbit, PLANET_K)
                 * (0.8 + speedFromId(planet.id) * 0.4);
     const phase = phaseFromId(planet.id);
     const angle = phase + omega * timeSec;
-    const ecc = 0.05 + eccentricityFromId(planet.id) * 0.30;
+    const ecc = 0.04 + eccentricityFromId(planet.id) * 0.14;
     const tilt = orbitTiltFromId(planet.id);
     const a = ringR;
     const b = a * (1 - ecc);
@@ -1142,7 +1147,7 @@ export function drawPlanetScene(
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
     const ringR = orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
-    const satEcc = 0.03 + eccentricityFromId(sat.id) * 0.20;
+    const satEcc = 0.02 + eccentricityFromId(sat.id) * 0.10;
     const satTilt = orbitTiltFromId(sat.id);
     drawOrbitRing(ctx, cx, cy, ringR, viewScale, satEcc, satTilt);
     // Use (1+i) as the orbital rank so inner satellites are meaningfully faster
