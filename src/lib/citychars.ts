@@ -355,9 +355,13 @@ const CRAFT_INDUSTRY_LANDMARK_KINDS = new Set<LandmarkKind>([
  * number of qualifying landmarks the most important locations are filled first.
  */
 const GUARANTEED_LANDMARK_PRIORITY: readonly LandmarkKind[] = [
-  // Distinctive features come first — they're the city's signature, get
-  // 3× more characters than ordinary landmarks, and only one ever exists
-  // per city (megalopolis-only) so they consume at most one guaranteed slot.
+  // Tier 1 — palace / castle / temple lead the roster. These are the city's
+  // power seats and the highest-level characters claim them first, with
+  // class/race/deity affinity acting as a tiebreaker (see scoreCharForLandmark).
+  'palace', 'castle',
+  'temple', 'temple_quarter',
+  // Tier 2 — distinctive feature. The city's signature landmark gets the
+  // next pick (multiple slots per landmark, see DISTINCTIVE_GUARANTEED_SLOTS).
   'dist_volcanic_caldera', 'dist_sinkhole_cenote', 'dist_sky_plateau',
   'dist_ancient_grove', 'dist_geyser_field',
   'dist_bastion_citadel', 'dist_triumphal_way', 'dist_obsidian_wall_district',
@@ -370,8 +374,7 @@ const GUARANTEED_LANDMARK_PRIORITY: readonly LandmarkKind[] = [
   'dist_shrine_labyrinth', 'dist_world_tree_pillar',
   'dist_meteor_crater', 'dist_petrified_titan', 'dist_crystal_bloom',
   'dist_ancient_portal_ruin', 'dist_time_frozen_quarter',
-  'palace', 'castle',
-  'temple', 'temple_quarter',
+  // Tier 3 — every other landmark / quarter, ordered by importance.
   'civic_square', 'wonder',
   'barracks', 'citadel', 'watchmen',
   'academia', 'archive',
@@ -383,6 +386,15 @@ const GUARANTEED_LANDMARK_PRIORITY: readonly LandmarkKind[] = [
   'necropolis', 'plague_ward',
   'gallows', 'ghetto_marker',
 ];
+
+/**
+ * LandmarkKinds that anchor power: palaces / castles / temples. The guarantee
+ * pass selects characters for these slots level-first (class/race/deity
+ * affinity is a tiebreaker, not the primary axis). See `scoreCharForLandmark`.
+ */
+const POWER_LANDMARK_KINDS: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
+  'palace', 'castle', 'temple', 'temple_quarter',
+]);
 
 function makeLandmarkAffiliation(cityMap: CityMapDataV2, lmIndex: number): CharacterAffiliation {
   const lm = cityMap.landmarks[lmIndex];
@@ -408,22 +420,39 @@ function scoreCharForLandmark(
   const classLm = CLASS_LANDMARK_AFFINITY[c.pcClass] ?? [];
   const raceLm = RACE_LANDMARK_AFFINITY[c.race] ?? [];
   let s = 1; // baseline so the slot is always fillable
+
+  // Power landmarks (palace / castle / temple / temple_quarter) — level
+  // dominates. A high-level character with no class/race fit still beats a
+  // low-level character with perfect affinity. Class / race / deity bonuses
+  // act as tiebreakers among similarly-leveled candidates.
+  if (POWER_LANDMARK_KINDS.has(lmKind)) {
+    s += c.level * 5;
+    if (classLm.includes(lmKind)) s += 4 + c.level * 0.4;
+    if (raceLm.includes(lmKind))  s += 2 + c.level * 0.25;
+    if ((lmKind === 'temple' || lmKind === 'temple_quarter') && c.deity !== 'none') {
+      s += 4 + c.level * 0.5;
+    }
+    return s;
+  }
+
   if (classLm.includes(lmKind)) s += 5 + c.level * 0.5;
   if (raceLm.includes(lmKind))  s += 2 + c.level * 0.3;
-  if (lmKind === 'temple' && c.deity !== 'none') s += 3 + c.level * 0.4;
   // Distinctive feature category affinity — applied per-category instead of
   // listing all 30 dist_* kinds in CLASS_LANDMARK_AFFINITY individually.
   if (distinctiveCategory !== null) {
     const classDist = CLASS_DISTINCTIVE_AFFINITY[c.pcClass] ?? [];
     const raceDist = RACE_DISTINCTIVE_AFFINITY[c.race] ?? [];
+    // Distinctive features value level too, just less than power landmarks
+    // (they're prestige sites but not necessarily seats of power). Class /
+    // race / deity fit still matters and stacks on top.
+    s += c.level * 1.5;
     if (classDist.includes(distinctiveCategory)) s += 5 + c.level * 0.6;
     if (raceDist.includes(distinctiveCategory))  s += 2 + c.level * 0.35;
     if (distinctiveCategory === 'religious' && c.deity !== 'none') {
       s += 3 + c.level * 0.4;
     }
+    return s;
   }
-  // Palaces / castles bias toward higher-level characters (rulers, captains).
-  if (lmKind === 'palace' || lmKind === 'castle') s += c.level * 0.5;
   // Civic square: important public figures skew higher-level.
   if (lmKind === 'civic_square') s += c.level * 0.3;
   // Wonders: prestige sites skew higher-level and sorcerers / bards.
