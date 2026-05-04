@@ -192,12 +192,13 @@ export function UniverseScreen({
     if (popupEntity.kind === 'galaxy') {
       // ↑ Universe — multi-galaxy overview (clear focus).
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
-    } else if (popupEntity.kind === 'system' || popupEntity.kind === 'star') {
+    } else if (popupEntity.kind === 'system') {
+      // ↑ Universe — clear any galaxy focus and drop to the multi-galaxy
+      // overview (or the single-galaxy view when N=1, which is the same
+      // scene as the universe).
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
+    } else if (popupEntity.kind === 'star') {
       const galId = galaxyIdOfSystem(popupEntity.systemId);
-      // In a grouped universe, ↑ Galaxy lands in focus mode for the parent
-      // galaxy. In a single-galaxy universe `galId` is `gal_0` (focus mode
-      // there is identical to the legacy single-spiral view, so this is
-      // visually a no-op — same renderer path).
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, galId ?? undefined);
     } else if (popupEntity.kind === 'planet') {
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
