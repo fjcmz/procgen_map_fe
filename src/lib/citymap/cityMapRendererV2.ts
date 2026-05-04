@@ -127,6 +127,10 @@ const INNER_WALL_WIDTH = 2.5;
 const TOWER_RADIUS = 4.5;  // outer wall towers
 const MIDDLE_TOWER_RADIUS = 3.5;  // middle wall towers
 const INNER_TOWER_RADIUS = 3;     // inner wall towers
+// Chaikin corner-cutting iterations applied to wall paths at draw time.
+// Applied only for rendering — the underlying polygon-edge data is unchanged
+// so road/street coverage lookups remain byte-stable.
+const WALL_CHAIKIN_ITERATIONS = 2;
 
 
 // Layer 5 — river styling (PR 3).
@@ -636,6 +640,52 @@ function drawBlockBackgrounds(
   }
 }
 
+// [Wall rendering] Chaikin corner-cutting algorithm — smooths a polygonal wall
+// path without moving it far from the original. Closed rings (path[0]===path[last])
+// are handled cyclically so the smoothed ring closes perfectly. Open chains
+// (coastal walls with a water-facing gap) keep their endpoints fixed so the wall
+// still meets the coast at the right positions. Applied only at draw time; the
+// underlying polygon-edge data is preserved for coverage/road computations.
+function chaikinSmooth(path: [number, number][], iterations: number): [number, number][] {
+  if (path.length < 4 || iterations <= 0) return path;
+
+  const closed = (
+    path[0][0] === path[path.length - 1][0] &&
+    path[0][1] === path[path.length - 1][1]
+  );
+
+  let pts = path;
+  for (let iter = 0; iter < iterations; iter++) {
+    const n = pts.length;
+    if (closed) {
+      // Cyclic: work on the n-1 distinct vertices, then close the ring.
+      const ring = pts.slice(0, n - 1);
+      const m = ring.length;
+      const next: [number, number][] = [];
+      for (let i = 0; i < m; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % m];
+        next.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+        next.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+      }
+      next.push([next[0][0], next[0][1]]);
+      pts = next;
+    } else {
+      // Open chain: fix both endpoints, smooth interior.
+      const next: [number, number][] = [pts[0]];
+      for (let i = 0; i < n - 1; i++) {
+        const a = pts[i];
+        const b = pts[i + 1];
+        if (i > 0) next.push([0.75 * a[0] + 0.25 * b[0], 0.75 * a[1] + 0.25 * b[1]]);
+        if (i < n - 2) next.push([0.25 * a[0] + 0.75 * b[0], 0.25 * a[1] + 0.75 * b[1]]);
+      }
+      next.push(pts[n - 1]);
+      pts = next;
+    }
+  }
+  return pts;
+}
+
 // [Voronoi-polygon] Draw the outer wall as one or more thick polylines.
 // When mountains / water gaps split the footprint boundary, `wallSegments`
 // holds each disconnected section; we draw all of them. For cities with a
@@ -643,24 +693,24 @@ function drawBlockBackgrounds(
 function drawWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.wallSegments && data.wallSegments.length > 0) {
     for (const seg of data.wallSegments) {
-      strokePolyline(ctx, seg, WALL_INK, WALL_WIDTH);
+      strokePolyline(ctx, chaikinSmooth(seg, WALL_CHAIKIN_ITERATIONS), WALL_INK, WALL_WIDTH);
     }
   } else {
     // Fallback for data generated before wallSegments was added.
-    strokePolyline(ctx, data.wallPath, WALL_INK, WALL_WIDTH);
+    strokePolyline(ctx, chaikinSmooth(data.wallPath, WALL_CHAIKIN_ITERATIONS), WALL_INK, WALL_WIDTH);
   }
 }
 
 // [Voronoi-polygon] Draw the intermediate wall ring (megalopolis only).
 function drawMiddleWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (!data.middleWallPath || data.middleWallPath.length < 2) return;
-  strokePolyline(ctx, data.middleWallPath, MIDDLE_WALL_INK, MIDDLE_WALL_WIDTH);
+  strokePolyline(ctx, chaikinSmooth(data.middleWallPath, WALL_CHAIKIN_ITERATIONS), MIDDLE_WALL_INK, MIDDLE_WALL_WIDTH);
 }
 
 // [Voronoi-polygon] Draw the inner wall (metropolis+ only) thinner.
 function drawInnerWalls(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (!data.innerWallPath || data.innerWallPath.length < 2) return;
-  strokePolyline(ctx, data.innerWallPath, INNER_WALL_INK, INNER_WALL_WIDTH);
+  strokePolyline(ctx, chaikinSmooth(data.innerWallPath, WALL_CHAIKIN_ITERATIONS), INNER_WALL_INK, INNER_WALL_WIDTH);
 }
 
 // [Voronoi-polygon] Draw tower dots on all active wall rings. Outer towers
