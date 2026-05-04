@@ -37,6 +37,23 @@ const TOWER_EDGE_INTERVAL = 3;
 // Dot-product threshold below which a wall bend is "sharp" enough to force a tower.
 const TOWER_SHARP_DOT = 0.3;
 
+// ── Wall footprint morphological smoothing ───────────────────────────────────
+// The outer wall traces a morphologically smoothed version of the city interior
+// rather than the exact city footprint. This lets the wall skip minor peninsulas
+// (erosion) and bridge shallow bays (dilation), producing a more circular,
+// natural wall circuit. Some city polygons will sit outside the wall; some
+// non-city polygons will be enclosed inside it — matching real city-wall behaviour.
+//
+// Dilation threshold: a non-interior polygon is pulled inside the wall when at
+// least this many of its Voronoi neighbours are interior.
+const WALL_DILATE_THRESHOLD = 3;
+// Erosion threshold: an interior polygon is pruned from the wall footprint when
+// it has this many or fewer interior neighbours (i.e. it's a thin peninsula tip).
+const WALL_ERODE_THRESHOLD = 1;
+// Number of dilate→erode passes. One pass is enough for clear smoothing without
+// collapsing the shape; more passes would over-regularise small cities.
+const WALL_SMOOTH_ITERATIONS = 1;
+
 // Gate counts per city size tier.
 // metropolis: 5-6, megalopolis: 6-8
 const GATE_COUNT_MIN: Record<CitySize, number> = {
@@ -145,7 +162,16 @@ export function generateWallsAndGates(
   let gates: { edge: Edge; dir: GateDir }[] = [];
   let wallTowers: Point[] = [];
 
-  const boundaryEdges = collectWallBoundaryEdges(polygons, interior, edgeOwnership, water);
+  // For walled cities, smooth the wall interior before tracing: the wall
+  // circuit follows a morphologically simplified polygon set rather than the
+  // exact city footprint, so it skips minor peninsulas and bridges shallow bays.
+  // Unwalled cities keep the original interior so their virtual gate positions
+  // (road endpoints) stay on the city footprint boundary.
+  const wallInterior = wallConfig.hasOuterWall
+    ? smoothWallInterior(polygons, interior, water, canvasSize)
+    : interior;
+
+  const boundaryEdges = collectWallBoundaryEdges(polygons, wallInterior, edgeOwnership, water);
   // Extract ALL disconnected wall chains — mountains / water gaps in the
   // footprint boundary split it into multiple disjoint sections. The legacy
   // `chainWallPath` only returned one; `chainAllWallPaths` returns all of them
@@ -269,6 +295,84 @@ function selectWallRingInterior(
     }
   }
   return inner;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Wall footprint smoothing (morphological close → open on polygon graph)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// [Voronoi-polygon] Derive the wall interior: a morphologically smoothed
+// superset/subset of the city footprint. One pass of dilation (fills bays) +
+// erosion (removes peninsulas) produces a simpler boundary that the wall
+// circuit traces. Water and canvas-edge polygons are never pulled in.
+// The result is BFS-pruned to stay connected, seeding from the most-central
+// polygon so isolated artifacts from the erosion step are dropped.
+function smoothWallInterior(
+  polygons: CityPolygon[],
+  interior: Set<number>,
+  waterPolygonIds: Set<number>,
+  canvasSize: number,
+): Set<number> {
+  let current = new Set<number>(interior);
+
+  for (let iter = 0; iter < WALL_SMOOTH_ITERATIONS; iter++) {
+    // Dilation: pull non-interior polygons into the wall footprint when they
+    // are surrounded on most sides by interior polygons (fills bays).
+    const toAdd: number[] = [];
+    for (const p of polygons) {
+      if (current.has(p.id) || p.isEdge || waterPolygonIds.has(p.id)) continue;
+      let interiorNb = 0;
+      for (const nb of p.neighbors) {
+        if (current.has(nb)) interiorNb++;
+      }
+      if (interiorNb >= WALL_DILATE_THRESHOLD) toAdd.push(p.id);
+    }
+    for (const id of toAdd) current.add(id);
+
+    // Erosion: remove tip polygons with almost no interior neighbours
+    // (peninsula spikes that would make the wall unnecessarily jagged).
+    const toRemove: number[] = [];
+    for (const id of current) {
+      const p = polygons[id];
+      if (!p) continue;
+      let interiorNb = 0;
+      for (const nb of p.neighbors) {
+        if (current.has(nb)) interiorNb++;
+      }
+      if (interiorNb <= WALL_ERODE_THRESHOLD) toRemove.push(id);
+    }
+    for (const id of toRemove) current.delete(id);
+  }
+
+  if (current.size === 0) return current;
+
+  // BFS-prune to the connected component containing the most-central polygon.
+  const cx = canvasSize / 2;
+  const cy = canvasSize / 2;
+  let seedId = -1;
+  let bestD2 = Infinity;
+  for (const id of current) {
+    const p = polygons[id];
+    if (!p) continue;
+    const dx = p.site[0] - cx;
+    const dy = p.site[1] - cy;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) { bestD2 = d2; seedId = id; }
+  }
+  if (seedId === -1) return current;
+
+  const pruned = new Set<number>([seedId]);
+  const queue: number[] = [seedId];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    for (const nb of polygons[id].neighbors) {
+      if (current.has(nb) && !pruned.has(nb)) {
+        pruned.add(nb);
+        queue.push(nb);
+      }
+    }
+  }
+  return pruned;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
