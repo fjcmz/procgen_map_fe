@@ -45,6 +45,11 @@ const PLANET_MIN_PX = 1;
 const PLANET_MAX_PX = 6;
 const STAR_MIN_PX = 5;
 const STAR_MAX_PX = 16;
+// Absolute generation bounds for star radius (StarGenerator: [400, 900]).
+// Used for size mapping so visual disk size is proportional to actual radius
+// regardless of which other stars share the system.
+const STAR_RADIUS_MIN = 400;
+const STAR_RADIUS_MAX = 900;
 const SAT_MIN_PX = 2;
 const SAT_MAX_PX = 10;
 
@@ -917,69 +922,89 @@ export function drawSystemScene(
   const cy = vh / 2;
   const minSide = Math.min(vw, vh);
 
-  // Orbit radius mapping: planet.orbit values are loosely in [1, 50] from
-  // PlanetGenerator; map them to a comfortable on-screen ring spread.
+  // ── 1. Compute star layout (sizes + orbits) before drawing anything ──────
+  //
+  // Disk sizes use absolute generation bounds [STAR_RADIUS_MIN, STAR_RADIUS_MAX]
+  // so visual size is proportional to the real radius attribute across all
+  // systems, not just normalised within this one.
+  //
+  // Multi-star: stars sorted smallest-first (innermost/fastest orbit).
+  // Single star: sits at centre with no orbit ring.
+
+  type StarLayout = { star: (typeof system.stars)[0]; px: number; ringR: number; omega: number; phase: number; };
+  let starLayouts: StarLayout[];
+  let starOrbitRings: number[] = [];
+  let outerStarExtent: number; // content-space radius bounding the stellar region
+  let starHitR: number;
+
+  if (system.stars.length === 1) {
+    const star = system.stars[0];
+    const px = scaleMap(star.radius, STAR_RADIUS_MIN, STAR_RADIUS_MAX, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale;
+    starLayouts = [{ star, px, ringR: 0, omega: 0, phase: 0 }];
+    outerStarExtent = px; // disk radius is the stellar "zone" for a solo star
+    starHitR = px * GLOW_OUTER_MULT * 1.2;
+  } else {
+    // Sort smallest-first: index 0 → innermost (fastest) orbit.
+    const sorted = [...system.stars]
+      .map(star => ({
+        star,
+        px: scaleMap(star.radius, STAR_RADIUS_MIN, STAR_RADIUS_MAX, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale,
+      }))
+      .sort((a, b) => a.star.radius - b.star.radius);
+
+    // Orbit radii in content-space (scale with viewport like planet rings).
+    // Step of minSide×0.04 keeps the cluster well inside the stellar zone for
+    // binary and triple systems.
+    starOrbitRings = sorted.map((_, i) => minSide * (0.03 + i * 0.04));
+    outerStarExtent = starOrbitRings[starOrbitRings.length - 1];
+    starHitR = outerStarExtent * 1.2;
+
+    starLayouts = sorted.map(({ star, px }, i) => ({
+      star,
+      px,
+      ringR: starOrbitRings[i],
+      omega: orbitalAngularVelocity(i + 1, STAR_K),
+      phase: phaseFromId(star.id),
+    }));
+  }
+
+  // ── 2. Planet orbit ring bounds ───────────────────────────────────────────
+  //
+  // ringMin = 3 × outermost star extent so planet rings always start clearly
+  // beyond the stellar region. ringMax scales proportionally with a floor at
+  // minSide×0.45 to guarantee a comfortable spread even for compact systems.
+
   const orbits = system.planets.map(p => p.orbit);
   const orbitMin = orbits.length ? Math.min(...orbits) : 1;
   const orbitMax = orbits.length ? Math.max(...orbits) : 1;
-  const ringMin = minSide * 0.10;
-  const ringMax = minSide * 0.45;
+  const ringMin = Math.max(outerStarExtent * 3, minSide * 0.05);
+  const ringMax = Math.max(minSide * 0.45, ringMin * 2);
 
   // Planet size mapping
   const planetRadii = system.planets.map(p => p.radius);
   const pRadMin = planetRadii.length ? Math.min(...planetRadii) : 0;
   const pRadMax = planetRadii.length ? Math.max(...planetRadii) : 1;
 
-  // Star size mapping (within this system)
-  const starRadii = system.stars.map(s => s.radius);
-  const sRadMin = starRadii.length ? Math.min(...starRadii) : 0;
-  const sRadMax = starRadii.length ? Math.max(...starRadii) : 1;
+  // ── 3. Draw orbit rings (planets first so stars render on top) ────────────
 
-  // Draw orbit rings first so planets and stars layer on top
   for (const planet of system.planets) {
     const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
     drawOrbitRing(ctx, cx, cy, ringR, viewScale);
   }
+  for (const r of starOrbitRings) {
+    drawOrbitRing(ctx, cx, cy, r, viewScale);
+  }
 
-  // Stars — single star at centre; multi-star systems each star gets its own
-  // orbit. Smallest stars → innermost orbit (fastest per Kepler r^-1.5);
-  // largest stars → outermost orbit (slowest). Disk sizes divided by viewScale
-  // to stay constant in screen pixels; orbit radii scale with the viewport like
-  // planet rings so the cluster expands visibly when the user zooms in.
-  let starHitR = STAR_MAX_PX * 1.2 / viewScale;
-  if (system.stars.length === 1) {
-    const star = system.stars[0];
-    const starPx = scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale;
+  // ── 4. Draw stars ─────────────────────────────────────────────────────────
+
+  if (starLayouts.length === 1) {
+    const { star, px: starPx } = starLayouts[0];
     const palette = starFill(star);
     const outerR = starPx * GLOW_OUTER_MULT;
     ctx.drawImage(getOrBuildGlowCanvas(palette), cx - outerR, cy - outerR, outerR * 2, outerR * 2);
     drawCircle(ctx, cx, cy, starPx, palette.core);
   } else {
-    // Sort smallest-first so index 0 = innermost (fastest) orbit.
-    const sorted = [...system.stars]
-      .map(star => ({
-        star,
-        px: scaleMap(star.radius, sRadMin, sRadMax, STAR_MIN_PX, STAR_MAX_PX, 'sqrt') / viewScale,
-      }))
-      .sort((a, b) => a.star.radius - b.star.radius);
-
-    // Orbit radii in content-space (scale with viewport like planet rings).
-    // Step of minSide*0.04 keeps the cluster well inside the innermost planet
-    // ring (minSide*0.10) for binary and triple systems.
-    const starOrbitR = sorted.map((_, i) => minSide * (0.03 + i * 0.04));
-
-    // Draw a subtle orbit ring for each star.
-    for (const r of starOrbitR) {
-      drawOrbitRing(ctx, cx, cy, r, viewScale);
-    }
-
-    // Draw each star at its Kepler-animated position.
-    // orbitUnit = i+1 so the innermost star (rank 1) spins fastest.
-    for (let i = 0; i < sorted.length; i++) {
-      const { star, px: starPx } = sorted[i];
-      const ringR = starOrbitR[i];
-      const omega = orbitalAngularVelocity(i + 1, STAR_K);
-      const phase = phaseFromId(star.id);
+    for (const { star, px: starPx, ringR, omega, phase } of starLayouts) {
       const angle = phase + omega * timeSec;
       const sx = cx + Math.cos(angle) * ringR;
       const sy = cy + Math.sin(angle) * ringR;
@@ -988,18 +1013,14 @@ export function drawSystemScene(
       ctx.drawImage(getOrBuildGlowCanvas(palette), sx - outerR, sy - outerR, outerR * 2, outerR * 2);
       drawCircle(ctx, sx, sy, starPx, palette.core);
     }
-
-    // Expand the hit target to cover the full multi-star orbit cluster.
-    starHitR = starOrbitR[starOrbitR.length - 1] * 1.2;
   }
 
-  // Planets — Kepler ω ∝ r^-1.5 with seeded phase.
-  // omega uses planet.orbit (simulation units ~[0,20]) not the pixel ringR so
-  // the Kepler exponent produces human-scale periods (seconds, not hours).
-  // speedFromId multiplies by [0.8, 1.2) so two planets at the same orbit
-  // value still have distinct periods.
-  // Star hit circle — clicking the central star(s) opens the system popup.
-  // Added first so planet disks (appended later) take priority on any overlap.
+  // ── 5. Draw planets ───────────────────────────────────────────────────────
+  //
+  // Star hit circle added first so planet disks (appended below) take priority
+  // on any click overlap.
+  // omega uses planet.orbit (simulation units) not pixel ringR so the Kepler
+  // exponent keeps human-scale periods regardless of zoom.
   const hit: HitCircle[] = [
     { x: cx, y: cy, r: starHitR, kind: 'system', id: system.id },
   ];
