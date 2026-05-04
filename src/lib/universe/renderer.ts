@@ -145,6 +145,26 @@ function speedFromId(id: string): number {
   return (h >>> 0) / 0x100000000;
 }
 
+/** Deterministic orbit eccentricity raw value [0, 1) for a body id. */
+function eccentricityFromId(id: string): number {
+  let h = 0x0f00ba12;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0) / 0x100000000;
+}
+
+/** Deterministic orbit tilt (major-axis rotation) in [0, π) for a body id. */
+function orbitTiltFromId(id: string): number {
+  let h = 0xc0ffee00;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) / 0x100000000) * Math.PI;
+}
+
 // ── Galaxy layout functions ───────────────────────────────────────────────
 
 /**
@@ -315,9 +335,21 @@ function drawCircle(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
 }
 
 
-function drawOrbitRing(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, viewScale: number = 1): void {
+function drawOrbitRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  viewScale: number = 1,
+  ecc: number = 0,
+  tilt: number = 0,
+): void {
   ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  if (ecc > 0) {
+    ctx.ellipse(cx, cy, r, r * (1 - ecc), tilt, 0, Math.PI * 2);
+  } else {
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  }
   ctx.strokeStyle = 'rgba(180, 200, 240, 0.18)';
   ctx.lineWidth = 1 / viewScale;
   ctx.stroke();
@@ -989,7 +1021,9 @@ export function drawSystemScene(
 
   for (const planet of system.planets) {
     const ringR = scaleMap(planet.orbit, orbitMin, orbitMax, ringMin, ringMax, 'sqrt');
-    drawOrbitRing(ctx, cx, cy, ringR, viewScale);
+    const ecc = 0.05 + eccentricityFromId(planet.id) * 0.30;
+    const tilt = orbitTiltFromId(planet.id);
+    drawOrbitRing(ctx, cx, cy, ringR, viewScale, ecc, tilt);
   }
   for (const r of starOrbitRings) {
     drawOrbitRing(ctx, cx, cy, r, viewScale);
@@ -1030,8 +1064,14 @@ export function drawSystemScene(
                 * (0.8 + speedFromId(planet.id) * 0.4);
     const phase = phaseFromId(planet.id);
     const angle = phase + omega * timeSec;
-    const px = cx + Math.cos(angle) * ringR;
-    const py = cy + Math.sin(angle) * ringR;
+    const ecc = 0.05 + eccentricityFromId(planet.id) * 0.30;
+    const tilt = orbitTiltFromId(planet.id);
+    const a = ringR;
+    const b = a * (1 - ecc);
+    const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+    const lx = a * Math.cos(angle), ly = b * Math.sin(angle);
+    const px = cx + lx * cosT - ly * sinT;
+    const py = cy + lx * sinT + ly * cosT;
     // Divide by viewScale so the disk stays at a constant screen-pixel size
     // regardless of zoom level (orbit radii still scale, only the body shrinks).
     const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
@@ -1102,7 +1142,9 @@ export function drawPlanetScene(
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
     const ringR = orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
-    drawOrbitRing(ctx, cx, cy, ringR, viewScale);
+    const satEcc = 0.03 + eccentricityFromId(sat.id) * 0.20;
+    const satTilt = orbitTiltFromId(sat.id);
+    drawOrbitRing(ctx, cx, cy, ringR, viewScale, satEcc, satTilt);
     // Use (1+i) as the orbital rank so inner satellites are meaningfully faster
     // than outer ones; speedFromId gives each satellite a unique [0.7, 1.3)
     // multiplier so siblings at adjacent rings have distinct periods.
@@ -1110,8 +1152,12 @@ export function drawPlanetScene(
                 * (0.7 + speedFromId(sat.id) * 0.6);
     const phase = phaseFromId(sat.id);
     const angle = phase + omega * timeSec;
-    const sx = cx + Math.cos(angle) * ringR;
-    const sy = cy + Math.sin(angle) * ringR;
+    const sa = ringR;
+    const sb = sa * (1 - satEcc);
+    const cosST = Math.cos(satTilt), sinST = Math.sin(satTilt);
+    const slx = sa * Math.cos(angle), sly = sb * Math.sin(angle);
+    const sx = cx + slx * cosST - sly * sinST;
+    const sy = cy + slx * sinST + sly * cosST;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
     drawSatelliteBody(ctx, sx, sy, sizePx, sat, viewScale);
     if (sat.life) {
