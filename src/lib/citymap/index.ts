@@ -8,6 +8,7 @@ export type {
   LandmarkV2,
   CitySize,
   DistrictType,
+  DistinctiveFeatureCategory,
   LandmarkKind,
 } from './cityMapTypesV2';
 export {

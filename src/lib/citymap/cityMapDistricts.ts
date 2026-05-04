@@ -283,6 +283,45 @@ const LANDMARK_KIND_TO_DISTRICT: Record<LandmarkKind, DistrictType | null> = {
   gallows: 'excluded',
   workhouse: 'excluded',
   ghetto_marker: 'excluded',
+  // Distinctive — geographical (natural / agricultural-flavored cluster)
+  dist_volcanic_caldera: 'excluded',
+  dist_sinkhole_cenote: 'agricultural',
+  dist_sky_plateau: 'excluded',
+  dist_ancient_grove: 'agricultural',
+  dist_geyser_field: 'agricultural',
+  // Distinctive — military
+  dist_bastion_citadel: 'military',
+  dist_triumphal_way: 'military',
+  dist_obsidian_wall_district: 'military',
+  dist_siege_memorial_field: 'military',
+  dist_under_warrens: 'military',
+  // Distinctive — magical (lump under education_faith — closest existing
+  // intellectual / esoteric district)
+  dist_floating_spires: 'education_faith',
+  dist_arcane_laboratorium: 'education_faith',
+  dist_ley_convergence: 'education_faith',
+  dist_mage_tower_constellation: 'education_faith',
+  dist_eldritch_mirror_lake: 'education_faith',
+  // Distinctive — entertainment
+  dist_grand_colosseum: 'entertainment',
+  dist_pleasure_gardens: 'entertainment',
+  dist_carnival_quarter: 'entertainment',
+  dist_royal_hippodrome: 'entertainment',
+  dist_opera_quarter: 'entertainment',
+  // Distinctive — religious
+  dist_pilgrimage_cathedral: 'education_faith',
+  dist_necropolis_hill: 'education_faith',
+  dist_pantheon_of_all_gods: 'education_faith',
+  dist_shrine_labyrinth: 'education_faith',
+  dist_world_tree_pillar: 'education_faith',
+  // Distinctive — extraordinary (mythic / forbidden — `excluded` reads as
+  // "set apart" in the renderer, which fits the meteor / titan / crystal /
+  // portal / time-frozen flavor)
+  dist_meteor_crater: 'excluded',
+  dist_petrified_titan: 'excluded',
+  dist_crystal_bloom: 'excluded',
+  dist_ancient_portal_ruin: 'excluded',
+  dist_time_frozen_quarter: 'excluded',
 };
 
 /** Wealth scoring treats these as positive proximity sources. */
@@ -409,6 +448,26 @@ export function assignDistricts(
         out[nb] = 'harbor';
         assigned[nb] = true;
       }
+    }
+  }
+
+  // ── Step 6a: distinctive feature cluster lock-in ────────────────────────
+  // Distinctive landmarks (megalopolis-only, one per city) own a 20–50 polygon
+  // BFS cluster. The standard 2-hop landmark BFS below cannot cover that, so
+  // tag every polygon in the cluster directly here BEFORE the BFS step.
+  // Cluster polygons that happen to sit on water/mountain are skipped (kept
+  // at their sentinel district) so the renderer's water/mountain layers stay
+  // visible underneath.
+  for (const lm of landmarksNew) {
+    if (!lm.distinctive) continue;
+    const district = LANDMARK_KIND_TO_DISTRICT[lm.kind];
+    if (district === null) continue;
+    const cluster = lm.polygonIds ?? [lm.polygonId];
+    for (const pid of cluster) {
+      if (waterPolygonIds.has(pid)) continue;
+      if (mountainPolygonIds.has(pid)) continue;
+      out[pid] = district;
+      assigned[pid] = true;
     }
   }
 

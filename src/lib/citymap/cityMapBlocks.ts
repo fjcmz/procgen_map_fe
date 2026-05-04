@@ -20,6 +20,7 @@ import type {
   CityPolygon,
   CitySize,
   DistrictType,
+  LandmarkV2,
 } from './cityMapTypesV2';
 
 // Name combiner: retry attempts before falling back to a numeric DISTRICT N.
@@ -155,6 +156,7 @@ export function buildBlocksFromDistricts(
   waterPolygonIds: Set<number>,
   mountainPolygonIds: Set<number>,
   citySize: CitySize,
+  landmarksNew: LandmarkV2[] = [],
 ): CityBlockNewV2[] {
   if (polygons.length < 4 || districtsNew.length === 0) return [];
 
@@ -163,6 +165,16 @@ export function buildBlocksFromDistricts(
   const visited = new Set<number>();
   const blocks: CityBlockNewV2[] = [];
   const nonResLimit = NON_RES_BLOCK_SIZE_LIMIT[citySize];
+
+  // Per-polygon override: when a polygon belongs to a distinctive cluster,
+  // any block touching it inherits the feature's name (e.g. "The Volcanic
+  // Caldera"). Built once so the BFS loop doesn't re-scan landmarks per block.
+  const distinctiveNameByPolygon = new Map<number, string>();
+  for (const lm of landmarksNew) {
+    if (!lm.distinctive || !lm.name) continue;
+    const cluster = lm.polygonIds ?? [lm.polygonId];
+    for (const pid of cluster) distinctiveNameByPolygon.set(pid, lm.name);
+  }
 
   for (let startId = 0; startId < polygons.length; startId++) {
     if (visited.has(startId)) continue;
@@ -203,10 +215,31 @@ export function buildBlocksFromDistricts(
       }
     }
 
+    // Distinctive cluster override — use the feature's display name (e.g.
+    // "The Volcanic Caldera") instead of a procedural prefix+suffix combo
+    // when ANY polygon in the component belongs to a distinctive cluster.
+    let blockName: string | undefined;
+    if (distinctiveNameByPolygon.size > 0) {
+      for (const pid of component) {
+        const distName = distinctiveNameByPolygon.get(pid);
+        if (distName !== undefined) {
+          blockName = distName;
+          break;
+        }
+      }
+    }
+    if (blockName === undefined) {
+      blockName = pickProceduralName(role, rng, usedNames, blocks.length);
+    } else {
+      // Mark the override name as used so a subsequent procedural roll
+      // doesn't accidentally collide with it.
+      usedNames.add(blockName);
+    }
+
     blocks.push({
       polygonIds: component,
       role,
-      name: pickProceduralName(role, rng, usedNames, blocks.length),
+      name: blockName,
     });
   }
 

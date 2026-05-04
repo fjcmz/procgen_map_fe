@@ -679,6 +679,7 @@ export function generateCityMapV2(
     waterPolygonIds,
     mountainPolygonIds,
     env.size,
+    landmarksNew,
   );
 
   // Spec: "if a landmark is set on mountains, there must be a street from

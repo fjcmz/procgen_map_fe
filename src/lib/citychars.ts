@@ -43,7 +43,13 @@ import { assignEquipment } from './fantasy/Equipment';
 import type { CharacterSpellcasting } from './fantasy/Spellcasting';
 import { rollCharacterSpellcasting } from './fantasy/Spellcasting';
 import type { City, Country, ReligionDetail, IllustrateDetail } from './types';
-import type { CityMapDataV2, DistrictType, LandmarkKind } from './citymap';
+import type {
+  CityMapDataV2,
+  DistinctiveFeatureCategory,
+  DistrictType,
+  LandmarkKind,
+  LandmarkV2,
+} from './citymap';
 
 /** Re-exported so DetailsTab can use the same enum without re-importing the sim layer. */
 export type IllustrateType = IllustrateDetail['type'];
@@ -286,6 +292,47 @@ interface AffiliationCandidate {
 }
 
 /**
+ * Per-category class affinity for distinctive (`dist_*`) landmarks. Applied
+ * across all 5 features in a category so the table doesn't have to enumerate
+ * 30 individual `LandmarkKind`s. Higher-level characters with a matching class
+ * out-bid residential placement at the city's signature feature.
+ */
+const CLASS_DISTINCTIVE_AFFINITY: Partial<Record<PcClassType, DistinctiveFeatureCategory[]>> = {
+  cleric:    ['religious'],
+  paladin:   ['religious', 'military'],
+  monk:      ['religious'],
+  wizard:    ['magical'],
+  sorcerer:  ['magical', 'extraordinary'],
+  bard:      ['entertainment'],
+  fighter:   ['military'],
+  barbarian: ['military', 'extraordinary'],
+  ranger:    ['geographical'],
+  druid:     ['geographical'],
+  rogue:     ['entertainment', 'extraordinary'],
+};
+
+/**
+ * Per-category race affinity. Same per-category collapsing as the class table.
+ */
+const RACE_DISTINCTIVE_AFFINITY: Partial<Record<RaceType, DistinctiveFeatureCategory[]>> = {
+  elf:      ['magical', 'geographical'],
+  half_elf: ['geographical'],
+  dwarf:    ['military', 'geographical'],
+  gnome:    ['magical'],
+  halfling: ['entertainment'],
+  human:    [],
+  half_orc: ['military', 'extraordinary'],
+  orc:      ['extraordinary'],
+};
+
+/** Multiplier on landmark candidate weight + score for distinctive features. */
+const DISTINCTIVE_WEIGHT_MULTIPLIER = 3;
+
+function distinctiveCategoryOf(lm: LandmarkV2): DistinctiveFeatureCategory | null {
+  return lm.distinctive?.category ?? null;
+}
+
+/**
  * Landmarks classified as craft / production sites — characters are NOT
  * guaranteed here (smiths and weavers aren't adventurers).
  */
@@ -299,6 +346,21 @@ const CRAFT_INDUSTRY_LANDMARK_KINDS = new Set<LandmarkKind>([
  * number of qualifying landmarks the most important locations are filled first.
  */
 const GUARANTEED_LANDMARK_PRIORITY: readonly LandmarkKind[] = [
+  // Distinctive features come first — they're the city's signature, get
+  // 3× more characters than ordinary landmarks, and only one ever exists
+  // per city (megalopolis-only) so they consume at most one guaranteed slot.
+  'dist_volcanic_caldera', 'dist_sinkhole_cenote', 'dist_sky_plateau',
+  'dist_ancient_grove', 'dist_geyser_field',
+  'dist_bastion_citadel', 'dist_triumphal_way', 'dist_obsidian_wall_district',
+  'dist_siege_memorial_field', 'dist_under_warrens',
+  'dist_floating_spires', 'dist_arcane_laboratorium', 'dist_ley_convergence',
+  'dist_mage_tower_constellation', 'dist_eldritch_mirror_lake',
+  'dist_grand_colosseum', 'dist_pleasure_gardens', 'dist_carnival_quarter',
+  'dist_royal_hippodrome', 'dist_opera_quarter',
+  'dist_pilgrimage_cathedral', 'dist_necropolis_hill', 'dist_pantheon_of_all_gods',
+  'dist_shrine_labyrinth', 'dist_world_tree_pillar',
+  'dist_meteor_crater', 'dist_petrified_titan', 'dist_crystal_bloom',
+  'dist_ancient_portal_ruin', 'dist_time_frozen_quarter',
   'palace', 'castle',
   'temple', 'temple_quarter',
   'civic_square', 'wonder',
@@ -329,13 +391,28 @@ function makeLandmarkAffiliation(cityMap: CityMapDataV2, lmIndex: number): Chara
  * forced into the slot when the city has more guaranteed landmarks than
  * affinity-matching characters.
  */
-function scoreCharForLandmark(c: CityCharacter, lmKind: LandmarkKind): number {
+function scoreCharForLandmark(
+  c: CityCharacter,
+  lmKind: LandmarkKind,
+  distinctiveCategory: DistinctiveFeatureCategory | null = null,
+): number {
   const classLm = CLASS_LANDMARK_AFFINITY[c.pcClass] ?? [];
   const raceLm = RACE_LANDMARK_AFFINITY[c.race] ?? [];
   let s = 1; // baseline so the slot is always fillable
   if (classLm.includes(lmKind)) s += 5 + c.level * 0.5;
   if (raceLm.includes(lmKind))  s += 2 + c.level * 0.3;
   if (lmKind === 'temple' && c.deity !== 'none') s += 3 + c.level * 0.4;
+  // Distinctive feature category affinity — applied per-category instead of
+  // listing all 30 dist_* kinds in CLASS_LANDMARK_AFFINITY individually.
+  if (distinctiveCategory !== null) {
+    const classDist = CLASS_DISTINCTIVE_AFFINITY[c.pcClass] ?? [];
+    const raceDist = RACE_DISTINCTIVE_AFFINITY[c.race] ?? [];
+    if (classDist.includes(distinctiveCategory)) s += 5 + c.level * 0.6;
+    if (raceDist.includes(distinctiveCategory))  s += 2 + c.level * 0.35;
+    if (distinctiveCategory === 'religious' && c.deity !== 'none') {
+      s += 3 + c.level * 0.4;
+    }
+  }
   // Palaces / castles bias toward higher-level characters (rulers, captains).
   if (lmKind === 'palace' || lmKind === 'castle') s += c.level * 0.5;
   // Civic square: important public figures skew higher-level.
@@ -391,7 +468,9 @@ function assignGuaranteedLandmarks(
     let bestScore = -1;
     for (let ci = 0; ci < out.length; ci++) {
       if (assigned.has(ci)) continue;
-      const score = scoreCharForLandmark(out[ci], lm.kind) + rng() * 0.01;
+      const score = scoreCharForLandmark(
+        out[ci], lm.kind, distinctiveCategoryOf(lm),
+      ) + rng() * 0.01;
       if (score > bestScore) { bestScore = score; bestChar = ci; }
     }
     if (bestChar < 0) {
@@ -459,6 +538,8 @@ function pickAffiliation(
     if (weight > 0) candidates.push({ kind: 'block', index: i, weight });
   }
 
+  const classDistCat = CLASS_DISTINCTIVE_AFFINITY[char.pcClass] ?? [];
+  const raceDistCat  = RACE_DISTINCTIVE_AFFINITY[char.race] ?? [];
   for (let i = 0; i < landmarks.length; i++) {
     const lm = landmarks[i];
     let weight = 0;
@@ -466,6 +547,19 @@ function pickAffiliation(
     if (raceLm.includes(lm.kind))  weight += 0.5 + level * 0.3;
     if (isFaithful && (lm.kind === 'temple' || lm.kind === 'temple_quarter')) {
       weight += 0.5 + level * 0.4;
+    }
+    const cat = lm.distinctive?.category;
+    if (cat) {
+      if (classDistCat.includes(cat)) weight += 1.5 + level * 0.6;
+      if (raceDistCat.includes(cat))  weight += 0.7 + level * 0.35;
+      if (isFaithful && cat === 'religious') weight += 0.7 + level * 0.4;
+      // Baseline so distinctive features always have non-zero weight even
+      // when the character has no class/race/deity affinity — every roster
+      // member is a candidate for the city's signature feature.
+      if (weight === 0) weight = 0.5;
+      // 3× pump so distinctive landmarks pull ~3× as many characters as a
+      // typical landmark of the same affinity profile.
+      weight *= DISTINCTIVE_WEIGHT_MULTIPLIER;
     }
     if (weight > 0) candidates.push({ kind: 'landmark', index: i, weight });
   }
