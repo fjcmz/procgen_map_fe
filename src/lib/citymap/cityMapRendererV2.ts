@@ -84,6 +84,7 @@ import type {
 } from './cityMapTypesV2';
 import type { BiomeType } from '../types';
 import { seededPRNG } from '../terrain/noise';
+import { drawDistinctiveDecorations } from './cityMapDistinctiveDecor';
 
 const BASE_FILL = '#ece5d3';
 const POLYGON_EDGE_STROKE = 'rgba(180, 180, 180, 0.5)';
@@ -274,12 +275,11 @@ const LANDMARK_LABEL_TYPES: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
 
 // Per-cluster fill alpha — distinctive features paint their cluster as a
 // translucent wash so wall / road / building ink stays visible on top.
+// Cluster fill alphas for the translucent base wash painted by
+// `drawLandmarkFills`. The per-kind decoration pass in
+// `cityMapDistinctiveDecor.ts` draws on top of this fill.
 const DISTINCTIVE_NATURAL_ALPHA = 0.85;
 const DISTINCTIVE_STRIKING_ALPHA = 0.92;
-// Scatter densities for the natural variants (tree dots, ripples, glow specks).
-const DISTINCTIVE_SCATTER_PER_POLYGON_MIN = 5;
-const DISTINCTIVE_SCATTER_PER_POLYGON_MAX = 12;
-const DISTINCTIVE_SCATTER_RADIUS = 2.2;
 
 // Light pastel block fills keyed by city biome — used for both slum and
 // agricultural outside-wall districts so the fringe reads as the surrounding
@@ -1394,52 +1394,16 @@ function drawLandmarkGlyphs(
     }
   }
 
-  // ── Distinctive scatter pass (natural variants) ───────────────────────────
-  // Tree dots, ripples, glow specks scattered across the natural-variant
-  // cluster polygons. Striking variants get a single architectural anchor
-  // glyph at the cluster centroid instead.
+  // ── Distinctive feature decoration pass ───────────────────────────────────
+  // Each of the 30 distinctive landmarks gets its own per-kind painter (see
+  // `cityMapDistinctiveDecor.ts`). Decorations sit on top of the cluster
+  // fill that `drawLandmarkFills` already painted; the per-feature visual
+  // identity (cathedral floor plan, crystal scatter, lava specks, etc.) is
+  // what makes one megalopolis recognizably different from another.
   const distRng = seededPRNG(`${seed}_city_${cityName}_distinctive_render`);
   for (const lm of data.landmarks) {
     if (!lm.distinctive) continue;
-    const colors = LANDMARK_COLORS[lm.kind] ?? LANDMARK_FALLBACK_COLORS;
-    if (lm.distinctive.visual === 'natural') {
-      ctx.fillStyle = colors.ink;
-      const pids = lm.polygonIds ?? [lm.polygonId];
-      for (const pid of pids) {
-        const polygon = data.polygons[pid];
-        if (!polygon || polygon.vertices.length < 3) continue;
-        const count = randIntInclusive(
-          distRng,
-          DISTINCTIVE_SCATTER_PER_POLYGON_MIN,
-          DISTINCTIVE_SCATTER_PER_POLYGON_MAX,
-        );
-        const spread = Math.sqrt(polygon.area) * 0.3;
-        for (let i = 0; i < count; i++) {
-          const [px, py] = scatterInsidePolygon(polygon, distRng, spread);
-          ctx.beginPath();
-          ctx.arc(px, py, DISTINCTIVE_SCATTER_RADIUS, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-    } else {
-      // Striking: anchor glyph at cluster centroid. Use the existing district
-      // glyph helper for visual coherence with the rest of the city map.
-      const pids = lm.polygonIds ?? [lm.polygonId];
-      let sx = 0, sy = 0, n = 0;
-      for (const pid of pids) {
-        const poly = data.polygons[pid];
-        if (!poly) continue;
-        sx += poly.site[0];
-        sy += poly.site[1];
-        n++;
-      }
-      if (n === 0) continue;
-      const cx = sx / n;
-      const cy = sy / n;
-      const anchorPoly = data.polygons[lm.polygonId];
-      const sz = anchorPoly ? landmarkGlyphSize(anchorPoly) * 1.2 : LANDMARK_SIZE_MAX;
-      drawMonumentGlyph(ctx, cx, cy, sz, colors.fill, colors.ink);
-    }
+    drawDistinctiveDecorations(ctx, data, lm, distRng);
   }
 
   // ── Scatter pass: market stalls ──────────────────────────────────────────
