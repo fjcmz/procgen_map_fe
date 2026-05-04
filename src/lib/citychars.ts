@@ -328,6 +328,15 @@ const RACE_DISTINCTIVE_AFFINITY: Partial<Record<RaceType, DistinctiveFeatureCate
 /** Multiplier on landmark candidate weight + score for distinctive features. */
 const DISTINCTIVE_WEIGHT_MULTIPLIER = 3;
 
+/**
+ * Number of characters the guarantee pass pre-assigns to a distinctive
+ * landmark. Distinctive features are the city's signature; with the regular
+ * pass distributing 48 characters across ~30 landmarks + ~30 residential
+ * blocks, a single guarantee slot leaves the feature looking under-populated.
+ * Three slots reliably yields a roster cluster the user can see.
+ */
+const DISTINCTIVE_GUARANTEED_SLOTS = 3;
+
 function distinctiveCategoryOf(lm: LandmarkV2): DistinctiveFeatureCategory | null {
   return lm.distinctive?.category ?? null;
 }
@@ -454,13 +463,20 @@ function assignGuaranteedLandmarks(
     GUARANTEED_LANDMARK_PRIORITY.map((k, i) => [k, i] as [LandmarkKind, number]),
   );
 
-  // Collect all non-craft/industry landmarks and sort by priority.
-  const qualifying = cityMap.landmarks
-    .map((lm, i) => ({ lm, i }))
-    .filter(({ lm }) => !CRAFT_INDUSTRY_LANDMARK_KINDS.has(lm.kind))
-    .sort((a, b) =>
-      (priorityIndex.get(a.lm.kind) ?? 999) - (priorityIndex.get(b.lm.kind) ?? 999),
-    );
+  // Collect all non-craft/industry landmarks and sort by priority. Distinctive
+  // features get DISTINCTIVE_GUARANTEED_SLOTS entries so each one pre-claims
+  // multiple characters, producing a visibly populated cluster instead of a
+  // single token resident.
+  const qualifying: { lm: LandmarkV2; i: number }[] = [];
+  for (let i = 0; i < cityMap.landmarks.length; i++) {
+    const lm = cityMap.landmarks[i];
+    if (CRAFT_INDUSTRY_LANDMARK_KINDS.has(lm.kind)) continue;
+    const slots = lm.distinctive ? DISTINCTIVE_GUARANTEED_SLOTS : 1;
+    for (let s = 0; s < slots; s++) qualifying.push({ lm, i });
+  }
+  qualifying.sort((a, b) =>
+    (priorityIndex.get(a.lm.kind) ?? 999) - (priorityIndex.get(b.lm.kind) ?? 999),
+  );
 
   for (const { lm, i: lmIdx } of qualifying) {
     // Pick the best unassigned character for this slot. Tie-break by RNG.
@@ -553,12 +569,14 @@ function pickAffiliation(
       if (classDistCat.includes(cat)) weight += 1.5 + level * 0.6;
       if (raceDistCat.includes(cat))  weight += 0.7 + level * 0.35;
       if (isFaithful && cat === 'religious') weight += 0.7 + level * 0.4;
-      // Baseline so distinctive features always have non-zero weight even
-      // when the character has no class/race/deity affinity — every roster
-      // member is a candidate for the city's signature feature.
-      if (weight === 0) weight = 0.5;
-      // 3× pump so distinctive landmarks pull ~3× as many characters as a
-      // typical landmark of the same affinity profile.
+      // Strong baseline so the distinctive feature competes with residential
+      // blocks (which have 0.6–3.0 weight) for any character without affinity.
+      // The guarantee pass already pre-assigns DISTINCTIVE_GUARANTEED_SLOTS
+      // characters; this baseline keeps the affinity pass biased toward the
+      // feature for the remaining roster.
+      if (weight === 0) weight = 1.5;
+      // 3× pump on top so even a no-affinity character is more likely to
+      // pull toward the distinctive feature than a typical residential block.
       weight *= DISTINCTIVE_WEIGHT_MULTIPLIER;
     }
     if (weight > 0) candidates.push({ kind: 'landmark', index: i, weight });
