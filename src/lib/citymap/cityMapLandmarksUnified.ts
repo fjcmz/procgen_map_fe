@@ -38,9 +38,11 @@ import {
   placeTradeLandmarks as placeTradeLandmarksImpl,
   placeExcludedLandmarks as placeExcludedLandmarksImpl,
 } from './cityMapLandmarksQuarters';
+import { placeDistinctiveFeature as placeDistinctiveFeatureImpl } from './cityMapLandmarksDistinctive';
 
 export type AlignmentGroup =
   | 'named'
+  | 'distinctive'
   | 'industrial'
   | 'military'
   | 'faith_aux'
@@ -93,6 +95,42 @@ export const LANDMARK_ALIGNMENT: Record<LandmarkKind, AlignmentGroup> = {
   gallows: 'excluded',
   workhouse: 'excluded',
   ghetto_marker: 'excluded',
+  // Distinctive — geographical
+  dist_volcanic_caldera: 'distinctive',
+  dist_sinkhole_cenote: 'distinctive',
+  dist_sky_plateau: 'distinctive',
+  dist_ancient_grove: 'distinctive',
+  dist_geyser_field: 'distinctive',
+  // Distinctive — military
+  dist_bastion_citadel: 'distinctive',
+  dist_triumphal_way: 'distinctive',
+  dist_obsidian_wall_district: 'distinctive',
+  dist_siege_memorial_field: 'distinctive',
+  dist_under_warrens: 'distinctive',
+  // Distinctive — magical
+  dist_floating_spires: 'distinctive',
+  dist_arcane_laboratorium: 'distinctive',
+  dist_ley_convergence: 'distinctive',
+  dist_mage_tower_constellation: 'distinctive',
+  dist_eldritch_mirror_lake: 'distinctive',
+  // Distinctive — entertainment
+  dist_grand_colosseum: 'distinctive',
+  dist_pleasure_gardens: 'distinctive',
+  dist_carnival_quarter: 'distinctive',
+  dist_royal_hippodrome: 'distinctive',
+  dist_opera_quarter: 'distinctive',
+  // Distinctive — religious
+  dist_pilgrimage_cathedral: 'distinctive',
+  dist_necropolis_hill: 'distinctive',
+  dist_pantheon_of_all_gods: 'distinctive',
+  dist_shrine_labyrinth: 'distinctive',
+  dist_world_tree_pillar: 'distinctive',
+  // Distinctive — extraordinary
+  dist_meteor_crater: 'distinctive',
+  dist_petrified_titan: 'distinctive',
+  dist_crystal_bloom: 'distinctive',
+  dist_ancient_portal_ruin: 'distinctive',
+  dist_time_frozen_quarter: 'distinctive',
 };
 
 export interface PlacerContext {
@@ -136,8 +174,15 @@ function placeNamedLandmarks(ctx: PlacerContext, used: Set<number>): LandmarkV2[
 export function placeUnifiedLandmarks(ctx: PlacerContext): LandmarkV2[] {
   const used = new Set<number>();
   const named = placeNamedLandmarks(ctx, used);
+  // Distinctive feature runs after named so named landmarks claim the most
+  // central / civic polygons first, but before the alignment-quarter placers
+  // so the 20–50 polygon cluster is reserved before industrial / military /
+  // etc. compete for the same candidate pool. Returns `[]` for any tier
+  // other than megalopolis.
+  const distinctive = placeDistinctiveFeatureImpl(ctx, used);
   return [
     ...named,
+    ...distinctive,
     ...placeIndustrialLandmarksImpl(ctx, used, named),
     ...placeMilitaryLandmarksImpl(ctx, used, named),
     ...placeFaithAuxLandmarksImpl(ctx, used, named),

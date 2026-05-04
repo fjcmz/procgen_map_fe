@@ -53,7 +53,9 @@ export type DistrictType =
 
 // Phase 1 — landmark kinds the unified placer (cityMapLandmarksUnified.ts in
 // Phase 2) will produce. Phase 3 implements the first 7 (user-named); Phase 4
-// implements the remaining 25 (quarter landmarks).
+// implements the next 25 (quarter landmarks). Distinctive features add 30 more
+// kinds, one per authored mega-landmark; they are placed only in megalopolis
+// cities (one per city) by `cityMapLandmarksDistinctive.ts`.
 export type LandmarkKind =
   // Phase 3 — named (consume env.wonderNames + isCapital + religionCount)
   | 'wonder' | 'palace' | 'castle' | 'civic_square' | 'temple' | 'market' | 'park'
@@ -68,7 +70,38 @@ export type LandmarkKind =
   // Phase 4 — trade
   | 'foreign_quarter' | 'caravanserai' | 'bankers_row' | 'warehouse'
   // Phase 4 — excluded
-  | 'gallows' | 'workhouse' | 'ghetto_marker';
+  | 'gallows' | 'workhouse' | 'ghetto_marker'
+  // Distinctive — geographical
+  | 'dist_volcanic_caldera' | 'dist_sinkhole_cenote' | 'dist_sky_plateau'
+  | 'dist_ancient_grove' | 'dist_geyser_field'
+  // Distinctive — military
+  | 'dist_bastion_citadel' | 'dist_triumphal_way' | 'dist_obsidian_wall_district'
+  | 'dist_siege_memorial_field' | 'dist_under_warrens'
+  // Distinctive — magical
+  | 'dist_floating_spires' | 'dist_arcane_laboratorium' | 'dist_ley_convergence'
+  | 'dist_mage_tower_constellation' | 'dist_eldritch_mirror_lake'
+  // Distinctive — entertainment
+  | 'dist_grand_colosseum' | 'dist_pleasure_gardens' | 'dist_carnival_quarter'
+  | 'dist_royal_hippodrome' | 'dist_opera_quarter'
+  // Distinctive — religious
+  | 'dist_pilgrimage_cathedral' | 'dist_necropolis_hill' | 'dist_pantheon_of_all_gods'
+  | 'dist_shrine_labyrinth' | 'dist_world_tree_pillar'
+  // Distinctive — extraordinary
+  | 'dist_meteor_crater' | 'dist_petrified_titan' | 'dist_crystal_bloom'
+  | 'dist_ancient_portal_ruin' | 'dist_time_frozen_quarter';
+
+/**
+ * Six categories grouping the 30 distinctive `dist_*` LandmarkKinds. Drives
+ * district BFS seed selection (`cityMapDistricts.ts`), character class/race
+ * affinity (`citychars.ts`), and renderer dispatch (`cityMapRendererV2.ts`).
+ */
+export type DistinctiveFeatureCategory =
+  | 'geographical'
+  | 'military'
+  | 'magical'
+  | 'entertainment'
+  | 'religious'
+  | 'extraordinary';
 
 export interface CityEnvironment {
   biome: BiomeType;
@@ -164,11 +197,23 @@ export interface LandmarkV2 {
    */
   name?: string;
   /**
-   * Cluster polygons for kinds that span multiple polygons (parks). Single-
-   * polygon kinds leave this undefined; consumers should treat absence as
-   * `[polygonId]`. Phase 3's park placer sets it to the BFS cluster.
+   * Cluster polygons for kinds that span multiple polygons (parks +
+   * distinctive features). Single-polygon kinds leave this undefined;
+   * consumers should treat absence as `[polygonId]`. Phase 3's park placer
+   * sets it to the BFS cluster; distinctive features fill it with a 20–50
+   * polygon BFS cluster.
    */
   polygonIds?: number[];
+  /**
+   * Populated only for distinctive (`dist_*`) landmarks — one per megalopolis.
+   * Carries the category + visual mode the renderer dispatches on, plus the
+   * cluster-level district seed type so the district classifier doesn't have
+   * to redo the category lookup.
+   */
+  distinctive?: {
+    category: DistinctiveFeatureCategory;
+    visual: 'natural' | 'striking';
+  };
 }
 
 /**

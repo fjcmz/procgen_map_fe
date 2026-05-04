@@ -208,6 +208,42 @@ const LANDMARK_COLORS: Partial<Record<LandmarkKind, { fill: string; ink: string 
   gallows:         { fill: '#c8ccd4', ink: '#1a1c22' },
   workhouse:       { fill: '#c8ccd4', ink: '#1a1c22' },
   ghetto_marker:   { fill: '#c8ccd4', ink: '#1a1c22' },
+  // Distinctive — geographical (natural earth tones, mountain greys, lake blue)
+  dist_volcanic_caldera:         { fill: '#3a1a14', ink: '#ffb060' },
+  dist_sinkhole_cenote:          { fill: '#5a90b4', ink: '#1a3850' },
+  dist_sky_plateau:              { fill: '#a89c88', ink: '#2a2418' },
+  dist_ancient_grove:            { fill: '#3c6824', ink: '#0c2010' },
+  dist_geyser_field:             { fill: '#dce8f0', ink: '#3a607c' },
+  // Distinctive — military (deep iron / blood / obsidian)
+  dist_bastion_citadel:          { fill: '#4a4a52', ink: '#080810' },
+  dist_triumphal_way:            { fill: '#dccfb0', ink: '#2a1a08' },
+  dist_obsidian_wall_district:   { fill: '#1c1c24', ink: '#dca838' },
+  dist_siege_memorial_field:     { fill: '#a89880', ink: '#2a1808' },
+  dist_under_warrens:            { fill: '#3a342a', ink: '#a48848' },
+  // Distinctive — magical (violets, ley-glow blues, arcane purples)
+  dist_floating_spires:          { fill: '#9c8cd8', ink: '#1a0a3c' },
+  dist_arcane_laboratorium:      { fill: '#8870b4', ink: '#1c0a30' },
+  dist_ley_convergence:          { fill: '#c4a8e8', ink: '#240840' },
+  dist_mage_tower_constellation: { fill: '#7c6cb8', ink: '#180834' },
+  dist_eldritch_mirror_lake:     { fill: '#7090b8', ink: '#1c0838' },
+  // Distinctive — entertainment (saffron, rose, festival reds)
+  dist_grand_colosseum:          { fill: '#dcb474', ink: '#3a1a08' },
+  dist_pleasure_gardens:         { fill: '#dce4a8', ink: '#3a4a08' },
+  dist_carnival_quarter:         { fill: '#e8a460', ink: '#3a1408' },
+  dist_royal_hippodrome:         { fill: '#d4a878', ink: '#3a2008' },
+  dist_opera_quarter:            { fill: '#e8c8a8', ink: '#3a1c08' },
+  // Distinctive — religious (cathedral cream, sanctified gold, deep violet)
+  dist_pilgrimage_cathedral:     { fill: '#f0e8d0', ink: '#3a2008' },
+  dist_necropolis_hill:          { fill: '#a8a4b4', ink: '#080810' },
+  dist_pantheon_of_all_gods:     { fill: '#e8d8a8', ink: '#3a2008' },
+  dist_shrine_labyrinth:         { fill: '#c8b890', ink: '#2a1808' },
+  dist_world_tree_pillar:        { fill: '#5a8438', ink: '#0c1c08' },
+  // Distinctive — extraordinary (alien / forbidden palette)
+  dist_meteor_crater:            { fill: '#3c1c1c', ink: '#e8b840' },
+  dist_petrified_titan:          { fill: '#74685c', ink: '#080810' },
+  dist_crystal_bloom:            { fill: '#a8d4e8', ink: '#0a3850' },
+  dist_ancient_portal_ruin:      { fill: '#3a3454', ink: '#dca838' },
+  dist_time_frozen_quarter:      { fill: '#c0c8d0', ink: '#1a2030' },
 };
 const LANDMARK_FALLBACK_COLORS = { fill: '#f5f0e8', ink: '#2a241c' };
 const LANDMARK_SIZE_MIN = 20;
@@ -221,7 +257,29 @@ const LANDMARK_LABEL_TYPES: ReadonlySet<LandmarkKind> = new Set<LandmarkKind>([
   'temple',
   'park',
   'market',
+  // All 30 distinctive features get a label centered on the cluster.
+  'dist_volcanic_caldera', 'dist_sinkhole_cenote', 'dist_sky_plateau',
+  'dist_ancient_grove', 'dist_geyser_field',
+  'dist_bastion_citadel', 'dist_triumphal_way', 'dist_obsidian_wall_district',
+  'dist_siege_memorial_field', 'dist_under_warrens',
+  'dist_floating_spires', 'dist_arcane_laboratorium', 'dist_ley_convergence',
+  'dist_mage_tower_constellation', 'dist_eldritch_mirror_lake',
+  'dist_grand_colosseum', 'dist_pleasure_gardens', 'dist_carnival_quarter',
+  'dist_royal_hippodrome', 'dist_opera_quarter',
+  'dist_pilgrimage_cathedral', 'dist_necropolis_hill', 'dist_pantheon_of_all_gods',
+  'dist_shrine_labyrinth', 'dist_world_tree_pillar',
+  'dist_meteor_crater', 'dist_petrified_titan', 'dist_crystal_bloom',
+  'dist_ancient_portal_ruin', 'dist_time_frozen_quarter',
 ]);
+
+// Per-cluster fill alpha — distinctive features paint their cluster as a
+// translucent wash so wall / road / building ink stays visible on top.
+const DISTINCTIVE_NATURAL_ALPHA = 0.85;
+const DISTINCTIVE_STRIKING_ALPHA = 0.92;
+// Scatter densities for the natural variants (tree dots, ripples, glow specks).
+const DISTINCTIVE_SCATTER_PER_POLYGON_MIN = 5;
+const DISTINCTIVE_SCATTER_PER_POLYGON_MAX = 12;
+const DISTINCTIVE_SCATTER_RADIUS = 2.2;
 
 // Light pastel block fills keyed by city biome — used for both slum and
 // agricultural outside-wall districts so the fringe reads as the surrounding
@@ -1217,6 +1275,31 @@ function drawOutlinedText(
 // those polygons get the cream base and the glyph drawn on top.
 function drawLandmarkFills(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.landmarks.length === 0) return;
+  // ── Distinctive feature cluster fill (Phase: distinctive features) ──────
+  // Drawn first so the cluster wash sits below park/market/civic fills if a
+  // park happens to neighbor the cluster. The whole 20–50 polygon cluster is
+  // painted as one translucent area; striking variants get an outline ring,
+  // natural variants stay un-outlined for an organic feel.
+  for (const lm of data.landmarks) {
+    if (!lm.distinctive) continue;
+    const colors = LANDMARK_COLORS[lm.kind] ?? LANDMARK_FALLBACK_COLORS;
+    const pids = lm.polygonIds ?? [lm.polygonId];
+    const isStriking = lm.distinctive.visual === 'striking';
+    ctx.save();
+    ctx.globalAlpha = isStriking ? DISTINCTIVE_STRIKING_ALPHA : DISTINCTIVE_NATURAL_ALPHA;
+    ctx.fillStyle = colors.fill;
+    ctx.strokeStyle = colors.ink;
+    ctx.lineWidth = isStriking ? 1.5 : 0.5;
+    ctx.lineJoin = 'round';
+    for (const pid of pids) {
+      const polygon = data.polygons[pid];
+      if (!polygon || polygon.vertices.length < 3) continue;
+      tracePolygonRing(ctx, polygon);
+      ctx.fill();
+      if (isStriking) ctx.stroke();
+    }
+    ctx.restore();
+  }
   for (const lm of data.landmarks) {
     if (lm.kind === 'civic_square') {
       const polygon = data.polygons[lm.polygonId];
@@ -1282,6 +1365,10 @@ function drawLandmarkGlyphs(
 
   // ── Glyph pass ────────────────────────────────────────────────────────────
   for (const lm of data.landmarks) {
+    // Distinctive features paint their cluster in `drawLandmarkFills` and add
+    // a scatter pass below; no center glyph (their visual style is the cluster
+    // itself + its centered name label drawn in `drawLandmarkLabels`).
+    if (lm.distinctive) continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
     const sz = landmarkGlyphSize(polygon);
@@ -1304,6 +1391,54 @@ function drawLandmarkGlyphs(
       default:
         drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, lm.kind, fill, ink);
         break;
+    }
+  }
+
+  // ── Distinctive scatter pass (natural variants) ───────────────────────────
+  // Tree dots, ripples, glow specks scattered across the natural-variant
+  // cluster polygons. Striking variants get a single architectural anchor
+  // glyph at the cluster centroid instead.
+  const distRng = seededPRNG(`${seed}_city_${cityName}_distinctive_render`);
+  for (const lm of data.landmarks) {
+    if (!lm.distinctive) continue;
+    const colors = LANDMARK_COLORS[lm.kind] ?? LANDMARK_FALLBACK_COLORS;
+    if (lm.distinctive.visual === 'natural') {
+      ctx.fillStyle = colors.ink;
+      const pids = lm.polygonIds ?? [lm.polygonId];
+      for (const pid of pids) {
+        const polygon = data.polygons[pid];
+        if (!polygon || polygon.vertices.length < 3) continue;
+        const count = randIntInclusive(
+          distRng,
+          DISTINCTIVE_SCATTER_PER_POLYGON_MIN,
+          DISTINCTIVE_SCATTER_PER_POLYGON_MAX,
+        );
+        const spread = Math.sqrt(polygon.area) * 0.3;
+        for (let i = 0; i < count; i++) {
+          const [px, py] = scatterInsidePolygon(polygon, distRng, spread);
+          ctx.beginPath();
+          ctx.arc(px, py, DISTINCTIVE_SCATTER_RADIUS, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    } else {
+      // Striking: anchor glyph at cluster centroid. Use the existing district
+      // glyph helper for visual coherence with the rest of the city map.
+      const pids = lm.polygonIds ?? [lm.polygonId];
+      let sx = 0, sy = 0, n = 0;
+      for (const pid of pids) {
+        const poly = data.polygons[pid];
+        if (!poly) continue;
+        sx += poly.site[0];
+        sy += poly.site[1];
+        n++;
+      }
+      if (n === 0) continue;
+      const cx = sx / n;
+      const cy = sy / n;
+      const anchorPoly = data.polygons[lm.polygonId];
+      const sz = anchorPoly ? landmarkGlyphSize(anchorPoly) * 1.2 : LANDMARK_SIZE_MAX;
+      drawMonumentGlyph(ctx, cx, cy, sz, colors.fill, colors.ink);
     }
   }
 
@@ -1355,16 +1490,37 @@ function drawLandmarkGlyphs(
 function drawLandmarkLabels(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.landmarks.length === 0) return;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
   for (const lm of data.landmarks) {
     if (!LANDMARK_LABEL_TYPES.has(lm.kind)) continue;
     const polygon = data.polygons[lm.polygonId];
     if (!polygon) continue;
+    const label = lm.name ?? lm.kind.replace(/_/g, ' ').toUpperCase();
+    if (lm.distinctive) {
+      // Center the distinctive feature label on its cluster centroid; render
+      // larger than ordinary landmark labels so the feature reads as the
+      // city's signature.
+      const pids = lm.polygonIds ?? [lm.polygonId];
+      let sx = 0, sy = 0, n = 0;
+      for (const pid of pids) {
+        const poly = data.polygons[pid];
+        if (!poly) continue;
+        sx += poly.site[0];
+        sy += poly.site[1];
+        n++;
+      }
+      if (n === 0) continue;
+      const cx = sx / n;
+      const cy = sy / n;
+      ctx.textBaseline = 'middle';
+      ctx.font = `bold 18px Georgia, 'Times New Roman', serif`;
+      drawOutlinedText(ctx, label, cx, cy, 3);
+      continue;
+    }
+    ctx.textBaseline = 'top';
     const sz = landmarkGlyphSize(polygon);
     const [cx, cy] = polygon.site;
     const fontPx = Math.max(8, Math.round(sz * 0.35));
     ctx.font = `bold ${fontPx}px Georgia, 'Times New Roman', serif`;
-    const label = lm.name ?? lm.kind.replace(/_/g, ' ').toUpperCase();
     drawOutlinedText(ctx, label, cx, cy + sz / 2 + 1, 2.5);
   }
 }
@@ -1594,8 +1750,15 @@ function blockCentroid(polygonIds: number[], polygons: CityPolygon[]): [number, 
 function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
   if (data.blocks.length === 0) return;
 
-  // Set of polygons that host a landmark — skip those blocks.
-  const landmarkPolygons = new Set((data.landmarks).map(lm => lm.polygonId));
+  // Set of polygons that host a landmark — skip those blocks. Includes
+  // every polygon in a multi-polygon cluster (parks + distinctive features)
+  // so a 20–50 polygon distinctive cluster suppresses the district glyph
+  // on every block it overlaps, not just the anchor polygon's block.
+  const landmarkPolygons = new Set<number>();
+  for (const lm of data.landmarks) {
+    landmarkPolygons.add(lm.polygonId);
+    if (lm.polygonIds) for (const pid of lm.polygonIds) landmarkPolygons.add(pid);
+  }
 
   for (const block of data.blocks) {
     if (NO_DISTRICT_ICON.has(block.role)) continue;

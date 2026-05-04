@@ -176,6 +176,42 @@ const LANDMARK_KIND_INFO: Record<LandmarkKind, { icon: string; label: string }> 
   gallows:         { icon: '☠',  label: 'Gallows Hill' },
   workhouse:       { icon: '⛓',  label: 'Workhouse' },
   ghetto_marker:   { icon: '🔒', label: 'Ghetto' },
+  // Distinctive features — geographical
+  dist_volcanic_caldera:         { icon: '▲', label: 'Volcanic Caldera' },
+  dist_sinkhole_cenote:          { icon: '◯', label: 'Cenote' },
+  dist_sky_plateau:              { icon: '⛰', label: 'Sky Plateau' },
+  dist_ancient_grove:            { icon: '♣', label: 'Ancient Grove' },
+  dist_geyser_field:             { icon: '↑', label: 'Geyser Field' },
+  // Distinctive features — military
+  dist_bastion_citadel:          { icon: '◆', label: 'Bastion Citadel' },
+  dist_triumphal_way:            { icon: '∩', label: 'Triumphal Way' },
+  dist_obsidian_wall_district:   { icon: '▮', label: 'Obsidian Wall' },
+  dist_siege_memorial_field:     { icon: '†', label: 'Siege Memorial' },
+  dist_under_warrens:            { icon: '▽', label: 'Under-Warrens' },
+  // Distinctive features — magical
+  dist_floating_spires:          { icon: '✦', label: 'Floating Spires' },
+  dist_arcane_laboratorium:      { icon: '⚗', label: 'Arcane Laboratorium' },
+  dist_ley_convergence:          { icon: '✺', label: 'Ley-Line Convergence' },
+  dist_mage_tower_constellation: { icon: '✷', label: 'Tower Constellation' },
+  dist_eldritch_mirror_lake:     { icon: '☉', label: 'Mirror Lake' },
+  // Distinctive features — entertainment
+  dist_grand_colosseum:          { icon: '◍', label: 'Grand Colosseum' },
+  dist_pleasure_gardens:         { icon: '❀', label: 'Pleasure Gardens' },
+  dist_carnival_quarter:         { icon: '✿', label: 'Carnival Quarter' },
+  dist_royal_hippodrome:         { icon: '◎', label: 'Royal Hippodrome' },
+  dist_opera_quarter:            { icon: '♪', label: 'Opera Quarter' },
+  // Distinctive features — religious
+  dist_pilgrimage_cathedral:     { icon: '✟', label: 'Pilgrimage Cathedral' },
+  dist_necropolis_hill:          { icon: '✠', label: 'Necropolis Hill' },
+  dist_pantheon_of_all_gods:     { icon: '☸', label: 'Pantheon of All Gods' },
+  dist_shrine_labyrinth:         { icon: '⌘', label: 'Shrine Labyrinth' },
+  dist_world_tree_pillar:        { icon: '⚘', label: 'World Tree' },
+  // Distinctive features — extraordinary
+  dist_meteor_crater:            { icon: '☄', label: 'Meteor Crater' },
+  dist_petrified_titan:          { icon: '⚱', label: 'Petrified Titan' },
+  dist_crystal_bloom:            { icon: '◈', label: 'Crystal Bloom' },
+  dist_ancient_portal_ruin:      { icon: '◉', label: 'Ancient Portal Ruin' },
+  dist_time_frozen_quarter:      { icon: '⌛', label: 'Time-Frozen Quarter' },
 };
 
 interface PolygonHit {
