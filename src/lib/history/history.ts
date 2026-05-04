@@ -47,11 +47,7 @@ function bfsTerritory(
     const idx = queue[head++];
     const owner = ownership[idx];
     for (const ni of cells[idx].neighbors) {
-      if (
-        ownership[ni] === -1 &&
-        !cells[ni].isWater &&
-        cells[ni].elevation < MOUNTAIN_THRESHOLD
-      ) {
+      if (ownership[ni] === -1 && !cells[ni].isWater) {
         ownership[ni] = owner;
         queue.push(ni);
       }
@@ -844,9 +840,7 @@ export function generateHistory(
   // Coastal water cells with a regionId stay claimable (territorial waters).
   const ownership = new Int16Array(numCells).fill(-1);
   for (let i = 0; i < numCells; i++) {
-    if (cells[i].elevation >= MOUNTAIN_THRESHOLD) {
-      ownership[i] = -2;
-    } else if (cells[i].isWater && !cells[i].regionId) {
+    if (cells[i].isWater && !cells[i].regionId) {
       ownership[i] = -2;
     }
   }

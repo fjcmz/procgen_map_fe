@@ -676,13 +676,12 @@ function computeOwnership(
   const n = cells.length;
   const ownership = new Int16Array(n).fill(-1);
 
-  // Mark impassable cells — deep ocean and high mountains.
+  // Mark impassable cells — deep ocean only.
   // Coastal water cells that belong to a region (have regionId) stay claimable
-  // so countries can own their territorial waters.
+  // so countries can own their territorial waters. Mountains are claimable too,
+  // so they fill in inside their surrounding country's borders.
   for (let i = 0; i < n; i++) {
-    if (cells[i].elevation >= 0.72) {
-      ownership[i] = -2;
-    } else if (cells[i].isWater && !cells[i].regionId) {
+    if (cells[i].isWater && !cells[i].regionId) {
       ownership[i] = -2;
     }
   }
