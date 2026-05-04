@@ -1,7 +1,5 @@
 import type { Cell, City } from '../types';
 
-const MOUNTAIN_THRESHOLD = 0.72;
-
 /** BFS flood-fill kingdom borders from capital cities. */
 export function assignKingdoms(cells: Cell[], cities: City[]): void {
   const capitals = cities.filter(c => c.isCapital);
@@ -24,11 +22,7 @@ export function assignKingdoms(cells: Cell[], cities: City[]): void {
 
     for (const ni of cell.neighbors) {
       const neighbor = cells[ni];
-      if (
-        neighbor.kingdom === null &&
-        !neighbor.isWater &&
-        neighbor.elevation < MOUNTAIN_THRESHOLD
-      ) {
+      if (neighbor.kingdom === null && !neighbor.isWater) {
         neighbor.kingdom = cell.kingdom;
         queue.push(ni);
       }
