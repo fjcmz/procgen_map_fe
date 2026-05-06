@@ -17,9 +17,10 @@
 
 import { Delaunay } from 'd3-delaunay';
 import { seededPRNG } from '../terrain/noise';
-import type { Cell, City, MapData, WonderSnapshotEntry } from '../types';
+import type { BiomeType, Cell, City, MapData, WonderSnapshotEntry } from '../types';
 import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type {
+  BaseCulture,
   CityBlockNewV2,
   CityEnvironment,
   CityMapDataV2,
@@ -51,6 +52,26 @@ import { placeUnifiedLandmarks } from './cityMapLandmarksUnified';
 import { assignDistricts } from './cityMapDistricts';
 
 // ── Environment derivation ──
+
+/**
+ * Map a biome to a base architectural culture for city-map rendering.
+ * Deterministic — no RNG. Desert / scorched cities read as Arabic, hot or
+ * temperate rain forest cities as Eastern, everything else as Western.
+ */
+function deriveBaseCulture(biome: BiomeType): BaseCulture {
+  switch (biome) {
+    case 'SUBTROPICAL_DESERT':
+    case 'TEMPERATE_DESERT':
+    case 'SCORCHED':
+      return 'arabic';
+    case 'TROPICAL_RAIN_FOREST':
+    case 'TROPICAL_SEASONAL_FOREST':
+    case 'TEMPERATE_RAIN_FOREST':
+      return 'eastern';
+    default:
+      return 'western';
+  }
+}
 
 export function deriveCityEnvironment(
   city: City,
@@ -113,6 +134,7 @@ export function deriveCityEnvironment(
     isRuin,
     neighborBiomes: neighborCells.map(n => n.biome),
     mountainDirection: findNearestMountainDirection(cell, cells),
+    baseCulture: deriveBaseCulture(cell.biome),
   };
 }
 
