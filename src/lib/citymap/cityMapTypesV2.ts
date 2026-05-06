@@ -248,9 +248,9 @@ export interface CityMapDataV2 {
   canvasSize: number;
   /**
    * Total polygons in the canvas. Always equals `polygons.length` and is
-   * fixed at `CANVAS_POLYGON_COUNT` (1500) regardless of city tier — the
-   * canvas is a constant-size Voronoi graph; tier only changes the city
-   * footprint allocation (see `cityPolygonCount`).
+   * resolved from `CANVAS_POLYGON_COUNTS[env.size]` (3000 for
+   * small/medium/large, 4000 for metropolis, 5000 for megalopolis). Tier
+   * also changes the city footprint allocation (see `cityPolygonCount`).
    */
   polygonCount: number;
   /**
