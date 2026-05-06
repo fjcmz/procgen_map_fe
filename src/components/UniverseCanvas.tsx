@@ -56,7 +56,7 @@ interface UniverseCanvasProps {
 
 interface ViewTransform { scale: number; tx: number; ty: number }
 
-const MIN_SCALE = 0.15;
+const MIN_SCALE = 0.015;
 const MAX_SCALE = 2000;
 
 function clampScale(s: number): number {
