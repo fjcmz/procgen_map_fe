@@ -76,6 +76,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type {
+  BaseCulture,
   CityEnvironment,
   CityMapDataV2,
   CityPolygon,
@@ -403,10 +404,10 @@ export function renderCityMapV2(
   // scatter. Drawn after buildings so glyphs sit on top. Landmark name
   // labels are drawn later under `showLabels` (Layer 13.5) so the Icons /
   // Labels checkboxes are independent.
-  if (showIcons) drawLandmarkGlyphs(ctx, data, seed, cityName);
+  if (showIcons) drawLandmarkGlyphs(ctx, data, seed, cityName, env.baseCulture);
 
   // ── Layer 12.5: district icons — small role glyphs at block centroids ──
-  if (showIcons) drawDistrictIcons(ctx, data);
+  if (showIcons) drawDistrictIcons(ctx, data, env.baseCulture);
 
   // ── Wall rings — drawn innermost first so outer rings sit visually on top ──
   drawInnerWalls(ctx, data);
@@ -616,8 +617,9 @@ function drawBlockBackgrounds(
 ): void {
   if (data.blocks.length === 0) return;
   const biomeFill = BIOME_OUTSIDE_FILL[env.biome] ?? '#e0dcc8';
+  const culturePalette = COARSE_DISTRICT_BG_FILL[env.baseCulture];
   for (const block of data.blocks) {
-    const coarseFill = COARSE_DISTRICT_BG_FILL[block.role];
+    const coarseFill = culturePalette[block.role];
     if (coarseFill) {
       ctx.fillStyle = coarseFill;
       for (const pid of block.polygonIds) {
@@ -1018,17 +1020,45 @@ const BUILDING_OUTLINE = '#2a241c';
 const BUILDING_STROKE_WIDTH = 0.75;
 
 // Coarse DistrictType background fills for named interior district kinds.
-const COARSE_DISTRICT_BG_FILL: Partial<Record<DistrictType, string>> = {
-  industry:           '#c8b498', // warm brown, like old craft
-  education_faith:    '#e8cce8', // lavender, like old SFH
-  military:           '#b0c880', // army green
-  trade:              '#f0dc98', // gold-yellow
-  entertainment:      '#f8c890', // orange
-  excluded:           '#d8dce4', // silver-grey
-  // Residential wealth tiers — medium stays at base cream, poor is lighter/airier,
-  // rich is darker/warmer amber to signal density and prosperity.
-  residential_high:   '#d4c8a4', // darker amber-parchment — dense & prosperous
-  residential_low:    '#f4ede0', // lighter cream — sparse & poor
+//
+// Culture-keyed: only `residential_high`, `residential_low`, and `industry`
+// vary across cultures (per the cultural-shapes design — those plus harbor
+// are the user-listed colour-varying districts; harbor doesn't have a
+// background fill entry, only an icon palette below). Every other district
+// kind (military, trade, entertainment, excluded, education_faith) mirrors
+// the western entry across all three rows so non-culture-affected districts
+// stay visually identical regardless of the city's culture.
+const COARSE_DISTRICT_BG_FILL: Record<BaseCulture, Partial<Record<DistrictType, string>>> = {
+  western: {
+    industry:           '#c8b498', // warm brown, like old craft
+    education_faith:    '#e8cce8', // lavender, like old SFH
+    military:           '#b0c880', // army green
+    trade:              '#f0dc98', // gold-yellow
+    entertainment:      '#f8c890', // orange
+    excluded:           '#d8dce4', // silver-grey
+    residential_high:   '#d4c8a4', // darker amber-parchment — dense & prosperous
+    residential_low:    '#f4ede0', // lighter cream — sparse & poor
+  },
+  arabic: {
+    industry:           '#c8a878', // kiln-fired earth
+    education_faith:    '#e8cce8', // (unchanged across cultures)
+    military:           '#b0c880',
+    trade:              '#f0dc98',
+    entertainment:      '#f8c890',
+    excluded:           '#d8dce4',
+    residential_high:   '#d8b88a', // warm sandstone — dense & prosperous
+    residential_low:    '#f0e0c0', // bleached cream — sparse & poor
+  },
+  eastern: {
+    industry:           '#b0a890', // cold stone / ash
+    education_faith:    '#e8cce8',
+    military:           '#b0c880',
+    trade:              '#f0dc98',
+    entertainment:      '#f8c890',
+    excluded:           '#d8dce4',
+    residential_high:   '#c8d4b8', // jade-grey — dense & prosperous
+    residential_low:    '#e8ecd4', // pale tea — sparse & poor
+  },
 };
 
 // Layer 4 — outside-walls sprawl ink (PR 5 slice). Same #2a241c ink as
@@ -1410,6 +1440,7 @@ function drawLandmarkGlyphs(
   data: CityMapDataV2,
   seed: string,
   cityName: string,
+  culture: BaseCulture,
 ): void {
   if (data.landmarks.length === 0) return;
 
@@ -1426,9 +1457,9 @@ function drawLandmarkGlyphs(
     const colors = LANDMARK_COLORS[lm.kind] ?? LANDMARK_FALLBACK_COLORS;
     const { fill, ink } = colors;
     switch (lm.kind) {
-      case 'castle':   drawCastleGlyph(ctx, cx, cy, sz, fill, ink); break;
-      case 'palace':   drawPalaceGlyph(ctx, cx, cy, sz, fill, ink); break;
-      case 'temple':   drawTempleGlyph(ctx, cx, cy, sz, fill, ink); break;
+      case 'castle':   drawCastleGlyphForCulture(ctx, cx, cy, sz, fill, ink, culture); break;
+      case 'palace':   drawPalaceGlyphForCulture(ctx, cx, cy, sz, fill, ink, culture); break;
+      case 'temple':   drawTempleGlyphForCulture(ctx, cx, cy, sz, fill, ink, culture); break;
       case 'wonder':   drawMonumentGlyph(ctx, cx, cy, sz, fill, ink); break;
       // park/market/civic_square fills were already drawn in drawLandmarkFills;
       // glyphs and scatter are handled in the passes below.
@@ -1439,7 +1470,7 @@ function drawLandmarkGlyphs(
       // Phase 4 quarter kinds: dispatch through the shared role-icon helper
       // so each quarter gets its own white-disc + role glyph at its polygon.
       default:
-        drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, lm.kind, fill, ink);
+        drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, lm.kind, fill, ink, culture);
         break;
     }
   }
@@ -1457,8 +1488,12 @@ function drawLandmarkGlyphs(
   }
 
   // ── Scatter pass: market stalls ──────────────────────────────────────────
+  // Position roll order is unchanged across cultures (same RNG sub-stream
+  // and same `scatterInsidePolygon` calls) so scatter placements stay
+  // seed-stable; only the per-stall painter swaps based on culture.
   const stallRng = seededPRNG(`${seed}_city_${cityName}_landmarks_render_markets`);
   ctx.fillStyle = MARKET_STALL_INK;
+  ctx.strokeStyle = MARKET_STALL_INK;
   for (const lm of data.landmarks) {
     if (lm.kind !== 'market') continue;
     const polygon = data.polygons[lm.polygonId];
@@ -1467,9 +1502,7 @@ function drawLandmarkGlyphs(
     const spread = Math.sqrt(polygon.area) * 0.32;
     for (let i = 0; i < stallCount; i++) {
       const [px, py] = scatterInsidePolygon(polygon, stallRng, spread);
-      ctx.beginPath();
-      ctx.arc(px, py, MARKET_STALL_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
+      drawMarketStallScatter(ctx, px, py, culture);
     }
   }
 
@@ -1709,6 +1742,430 @@ function drawMonumentGlyph(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Arabic & Eastern glyph variants for castle / palace / temple. Same
+// (ctx, cx, cy, size, fill, ink) signature as the western originals so
+// they're drop-in dispatchable. All shapes inscribe themselves in a
+// `size × size` bounding box centered on (cx, cy).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Arabic castle: square keep with single tall round tower + horseshoe gate.
+function drawCastleGlyphArabic(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const inset = size * 0.14;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset * 1.4;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.06);
+
+  // Main keep wall.
+  ctx.fillRect(x, y + h * 0.25, w, h * 0.75);
+  ctx.strokeRect(x, y + h * 0.25, w, h * 0.75);
+
+  // Tapered crenellation along the top.
+  const merlons = 6;
+  const merlonW = w / (merlons * 2 - 1);
+  ctx.fillStyle = ink;
+  for (let i = 0; i < merlons; i++) {
+    const mx = x + i * 2 * merlonW;
+    ctx.fillRect(mx, y + h * 0.25 - merlonW * 0.55, merlonW, merlonW * 0.55);
+  }
+
+  // Tall round tower on the left side.
+  const towerR = size * 0.13;
+  const towerCx = x + towerR;
+  const towerTopY = y - inset * 0.2;
+  const towerBaseY = y + h;
+  ctx.fillStyle = fill;
+  ctx.fillRect(towerCx - towerR, towerTopY + towerR, towerR * 2, towerBaseY - towerTopY - towerR);
+  ctx.strokeRect(towerCx - towerR, towerTopY + towerR, towerR * 2, towerBaseY - towerTopY - towerR);
+  // Domed cap on the tower.
+  ctx.beginPath();
+  ctx.arc(towerCx, towerTopY + towerR, towerR, Math.PI, 0, false);
+  ctx.fill();
+  ctx.stroke();
+  // Crescent-pip atop the dome.
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(towerCx, towerTopY - size * 0.02, size * 0.04, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Horseshoe-arch gate centered.
+  const gateW = w * 0.22;
+  const gateH = h * 0.5;
+  const gateX = cx - gateW / 2;
+  const gateY = y + h - gateH;
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(gateX, y + h);
+  ctx.lineTo(gateX, gateY + gateH * 0.45);
+  ctx.arc(gateX + gateW / 2, gateY + gateH * 0.45, gateW / 2, Math.PI, 0, false);
+  ctx.lineTo(gateX + gateW, y + h);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Eastern castle: stacked tiered roofs with upturned eaves over a base.
+function drawCastleGlyphEastern(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const baseY = cy + size / 2 - size * 0.12;
+  const totalH = size * 0.78;
+  const topY = baseY - totalH;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.06);
+
+  // Two body tiers + one base step.
+  const tiers = 2;
+  const tierH = totalH / (tiers + 1);
+  for (let t = 0; t < tiers; t++) {
+    const tierTop = topY + t * tierH;
+    const tierW = size * (0.78 - t * 0.18);
+    ctx.fillRect(cx - tierW / 2, tierTop + tierH * 0.4, tierW, tierH * 0.6);
+    ctx.strokeRect(cx - tierW / 2, tierTop + tierH * 0.4, tierW, tierH * 0.6);
+
+    // Upturned-eave roof — wider trapezoid with curved ends.
+    const roofW = tierW + size * 0.16;
+    const roofH = tierH * 0.4;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.moveTo(cx - roofW / 2, tierTop + roofH);
+    ctx.quadraticCurveTo(cx - roofW / 2 - size * 0.04, tierTop + roofH * 0.4, cx - tierW / 2 + size * 0.05, tierTop);
+    ctx.lineTo(cx + tierW / 2 - size * 0.05, tierTop);
+    ctx.quadraticCurveTo(cx + roofW / 2 + size * 0.04, tierTop + roofH * 0.4, cx + roofW / 2, tierTop + roofH);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = fill;
+  }
+
+  // Base step.
+  const stepW = size * 0.92;
+  const stepH = size * 0.08;
+  ctx.fillRect(cx - stepW / 2, baseY, stepW, stepH);
+  ctx.strokeRect(cx - stepW / 2, baseY, stepW, stepH);
+
+  // Central door.
+  const doorW = size * 0.12;
+  const doorH = size * 0.18;
+  ctx.fillStyle = ink;
+  ctx.fillRect(cx - doorW / 2, baseY - doorH, doorW, doorH);
+}
+
+// Arabic palace: onion dome over arcade with iwan archway and slim minarets.
+function drawPalaceGlyphArabic(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const inset = size * 0.10;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+
+  // Main hall body.
+  ctx.fillRect(x, y + h * 0.45, w, h * 0.55);
+  ctx.strokeRect(x, y + h * 0.45, w, h * 0.55);
+
+  // Central onion dome — two-segment bezier silhouette.
+  const domeR = size * 0.18;
+  const domeBase = y + h * 0.45;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(cx - domeR, domeBase);
+  ctx.bezierCurveTo(cx - domeR * 1.05, domeBase - domeR * 0.6, cx - domeR * 0.55, domeBase - domeR * 1.6, cx, domeBase - domeR * 1.55);
+  ctx.bezierCurveTo(cx + domeR * 0.55, domeBase - domeR * 1.6, cx + domeR * 1.05, domeBase - domeR * 0.6, cx + domeR, domeBase);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Crescent pip on top of dome.
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(cx, domeBase - domeR * 1.7, size * 0.035, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Iwan (pointed-arch) entrance.
+  const iwanW = w * 0.22;
+  const iwanH = h * 0.45;
+  const iwanX = cx - iwanW / 2;
+  const iwanY = y + h - iwanH;
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(iwanX, y + h);
+  ctx.lineTo(iwanX, iwanY + iwanH * 0.35);
+  ctx.lineTo(cx, iwanY);
+  ctx.lineTo(iwanX + iwanW, iwanY + iwanH * 0.35);
+  ctx.lineTo(iwanX + iwanW, y + h);
+  ctx.closePath();
+  ctx.fill();
+
+  // Two slim corner minarets.
+  const minaretW = size * 0.06;
+  const minaretH = h * 0.85;
+  for (const mx of [x - minaretW * 0.2, x + w - minaretW * 0.8]) {
+    ctx.fillStyle = fill;
+    ctx.fillRect(mx, y + h - minaretH, minaretW, minaretH);
+    ctx.strokeRect(mx, y + h - minaretH, minaretW, minaretH);
+    // Bulb cap.
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(mx + minaretW / 2, y + h - minaretH, minaretW * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
+// Eastern palace: hipped multi-tier roof, central hall, flanking pavilions.
+function drawPalaceGlyphEastern(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const baseY = cy + size / 2 - size * 0.10;
+  const topY = cy - size / 2 + size * 0.08;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+
+  // Three pavilions: central tall, flanked by lower wings.
+  const pavilions = [
+    { x: cx - size * 0.45, w: size * 0.25, top: topY + size * 0.22 },
+    { x: cx - size * 0.18, w: size * 0.36, top: topY },
+    { x: cx + size * 0.20, w: size * 0.25, top: topY + size * 0.22 },
+  ];
+  for (const p of pavilions) {
+    // Wall body.
+    ctx.fillStyle = fill;
+    ctx.fillRect(p.x, p.top + size * 0.20, p.w, baseY - p.top - size * 0.20);
+    ctx.strokeRect(p.x, p.top + size * 0.20, p.w, baseY - p.top - size * 0.20);
+    // Hipped roof — wider trapezoid with curved ends.
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.moveTo(p.x - size * 0.05, p.top + size * 0.20);
+    ctx.quadraticCurveTo(p.x - size * 0.07, p.top + size * 0.10, p.x + size * 0.04, p.top + size * 0.04);
+    ctx.lineTo(p.x + p.w - size * 0.04, p.top + size * 0.04);
+    ctx.quadraticCurveTo(p.x + p.w + size * 0.07, p.top + size * 0.10, p.x + p.w + size * 0.05, p.top + size * 0.20);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Stepped base across all three.
+  const baseW = size * 0.92;
+  ctx.fillStyle = fill;
+  ctx.fillRect(cx - baseW / 2, baseY, baseW, size * 0.08);
+  ctx.strokeRect(cx - baseW / 2, baseY, baseW, size * 0.08);
+
+  // Central door (matches central pavilion).
+  const doorW = size * 0.10;
+  const doorH = size * 0.15;
+  ctx.fillStyle = ink;
+  ctx.fillRect(cx - doorW / 2, baseY - doorH, doorW, doorH);
+}
+
+// Arabic temple: domed mosque silhouette with single tall minaret + crescent.
+function drawTempleGlyphArabic(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const inset = size * 0.14;
+  const x = cx - size / 2 + inset;
+  const y = cy - size / 2 + inset * 0.8;
+  const w = size - inset * 2;
+  const h = size - inset * 2;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+
+  // Prayer-hall body.
+  const bodyTop = y + h * 0.5;
+  ctx.fillRect(x + w * 0.18, bodyTop, w * 0.82, h - bodyTop + y);
+  ctx.strokeRect(x + w * 0.18, bodyTop, w * 0.82, h - bodyTop + y);
+
+  // Big central onion dome.
+  const domeR = size * 0.16;
+  const domeCx = x + w * 0.6;
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(domeCx - domeR, bodyTop);
+  ctx.bezierCurveTo(domeCx - domeR * 1.1, bodyTop - domeR * 0.6, domeCx - domeR * 0.55, bodyTop - domeR * 1.65, domeCx, bodyTop - domeR * 1.6);
+  ctx.bezierCurveTo(domeCx + domeR * 0.55, bodyTop - domeR * 1.65, domeCx + domeR * 1.1, bodyTop - domeR * 0.6, domeCx + domeR, bodyTop);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Crescent finial atop the dome.
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.beginPath();
+  ctx.arc(domeCx, bodyTop - domeR * 1.95, size * 0.05, Math.PI * 0.25, Math.PI * 1.75, false);
+  ctx.stroke();
+
+  // Tall minaret on the left side.
+  const minaretW = size * 0.10;
+  const minaretH = h * 1.0;
+  const minaretX = x - inset * 0.2;
+  const minaretBase = y + h;
+  const minaretTop = minaretBase - minaretH;
+  ctx.fillStyle = fill;
+  ctx.fillRect(minaretX, minaretTop + minaretW * 0.6, minaretW, minaretBase - minaretTop - minaretW * 0.6);
+  ctx.strokeRect(minaretX, minaretTop + minaretW * 0.6, minaretW, minaretBase - minaretTop - minaretW * 0.6);
+  // Balcony ring.
+  ctx.fillStyle = ink;
+  ctx.fillRect(minaretX - minaretW * 0.15, minaretTop + minaretW * 0.6, minaretW * 1.3, size * 0.025);
+  // Bulb cap.
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(minaretX + minaretW / 2, minaretTop + minaretW * 0.6, minaretW * 0.7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  // Tiny spire pip.
+  ctx.fillStyle = ink;
+  ctx.fillRect(minaretX + minaretW / 2 - size * 0.01, minaretTop, size * 0.02, minaretW * 0.6);
+
+  // Arched entry on body.
+  const arch_w = w * 0.18;
+  const arch_h = h * 0.30;
+  const archX = x + w * 0.55 - arch_w / 2;
+  const archY = y + h - arch_h;
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(archX, y + h);
+  ctx.lineTo(archX, archY + arch_h * 0.4);
+  ctx.lineTo(archX + arch_w / 2, archY);
+  ctx.lineTo(archX + arch_w, archY + arch_h * 0.4);
+  ctx.lineTo(archX + arch_w, y + h);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Eastern temple: 3-tier pagoda silhouette with upturned eaves on stepped base.
+function drawTempleGlyphEastern(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  fill: string,
+  ink: string,
+): void {
+  const baseY = cy + size / 2 - size * 0.10;
+  const totalH = size * 0.86;
+  const topY = baseY - totalH;
+
+  ctx.fillStyle = fill;
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = Math.max(1, size * 0.05);
+
+  const tiers = 3;
+  const tierH = totalH / (tiers + 1);
+  for (let t = 0; t < tiers; t++) {
+    const tierTop = topY + t * tierH;
+    const tierW = size * (0.62 - t * 0.06);
+    // Tier wall.
+    ctx.fillStyle = fill;
+    ctx.fillRect(cx - tierW / 2, tierTop + tierH * 0.4, tierW, tierH * 0.6);
+    ctx.strokeRect(cx - tierW / 2, tierTop + tierH * 0.4, tierW, tierH * 0.6);
+
+    // Upturned-eave roof.
+    const roofW = tierW + size * 0.20;
+    ctx.fillStyle = ink;
+    ctx.beginPath();
+    ctx.moveTo(cx - roofW / 2, tierTop + tierH * 0.4);
+    ctx.quadraticCurveTo(cx - roofW / 2 - size * 0.05, tierTop + tierH * 0.20, cx - tierW / 2 + size * 0.04, tierTop);
+    ctx.lineTo(cx + tierW / 2 - size * 0.04, tierTop);
+    ctx.quadraticCurveTo(cx + roofW / 2 + size * 0.05, tierTop + tierH * 0.20, cx + roofW / 2, tierTop + tierH * 0.4);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Stepped base.
+  const stepW = size * 0.78;
+  ctx.fillStyle = fill;
+  ctx.fillRect(cx - stepW / 2, baseY, stepW, size * 0.08);
+  ctx.strokeRect(cx - stepW / 2, baseY, stepW, size * 0.08);
+
+  // Spire on top.
+  ctx.fillStyle = ink;
+  ctx.fillRect(cx - size * 0.012, topY - size * 0.08, size * 0.024, size * 0.10);
+}
+
+// Culture-aware glyph dispatch helpers. Each falls back to the western
+// (current) implementation when culture is 'western' so existing visuals
+// are byte-identical to pre-change output for any non-arabic / non-eastern
+// city.
+
+function drawCastleGlyphForCulture(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, size: number,
+  fill: string, ink: string,
+  culture: BaseCulture,
+): void {
+  switch (culture) {
+    case 'arabic':  return drawCastleGlyphArabic(ctx, cx, cy, size, fill, ink);
+    case 'eastern': return drawCastleGlyphEastern(ctx, cx, cy, size, fill, ink);
+    case 'western': return drawCastleGlyph(ctx, cx, cy, size, fill, ink);
+  }
+}
+
+function drawPalaceGlyphForCulture(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, size: number,
+  fill: string, ink: string,
+  culture: BaseCulture,
+): void {
+  switch (culture) {
+    case 'arabic':  return drawPalaceGlyphArabic(ctx, cx, cy, size, fill, ink);
+    case 'eastern': return drawPalaceGlyphEastern(ctx, cx, cy, size, fill, ink);
+    case 'western': return drawPalaceGlyph(ctx, cx, cy, size, fill, ink);
+  }
+}
+
+function drawTempleGlyphForCulture(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, size: number,
+  fill: string, ink: string,
+  culture: BaseCulture,
+): void {
+  switch (culture) {
+    case 'arabic':  return drawTempleGlyphArabic(ctx, cx, cy, size, fill, ink);
+    case 'eastern': return drawTempleGlyphEastern(ctx, cx, cy, size, fill, ink);
+    case 'western': return drawTempleGlyph(ctx, cx, cy, size, fill, ink);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // District icons — small role-identifying glyphs drawn at each block's
 // centroid. Shown only when `showIcons` is true in `renderCityMapV2`.
 //
@@ -1727,18 +2184,51 @@ const DISTRICT_ICON_SIZE = 16;
 const DISTRICT_ICON_BG_ALPHA = 0.85;
 
 // Icon palette: slightly lighter/brighter than the block background fills.
-const DISTRICT_ICON_PALETTE: Partial<Record<DistrictType, [fill: string, ink: string]>> = {
-  civic:              ['#f0e8d8', '#3a2810'],
-  market:             ['#f8eebc', '#5a3000'],
-  harbor:             ['#b8d4e8', '#1a3858'],
-  residential_high:   ['#d8ceb0', '#3a2810'], // darker amber, matches block fill
-  residential_medium: ['#e8e0d0', '#3a2810'], // base cream, unchanged
-  residential_low:    ['#f4ede0', '#3a2810'], // lighter cream, matches block fill
-  industry:           ['#dcc8a8', '#2a1a0a'],
-  education_faith:    ['#e8cce8', '#280838'],
-  military:           ['#b0c078', '#20280a'],
-  trade:              ['#f4e4ac', '#3a2a08'],
-  entertainment:      ['#f8c890', '#3a1a00'],
+//
+// Culture-keyed: only `harbor`, `industry`, and the three `residential_*`
+// tiers actually vary across cultures (per the cultural-shapes design).
+// All other district kinds mirror the western entry across all three rows
+// so their icons stay visually identical regardless of culture.
+const DISTRICT_ICON_PALETTE: Record<BaseCulture, Partial<Record<DistrictType, [fill: string, ink: string]>>> = {
+  western: {
+    civic:              ['#f0e8d8', '#3a2810'],
+    market:             ['#f8eebc', '#5a3000'],
+    harbor:             ['#b8d4e8', '#1a3858'],
+    residential_high:   ['#d8ceb0', '#3a2810'], // darker amber, matches block fill
+    residential_medium: ['#e8e0d0', '#3a2810'], // base cream, unchanged
+    residential_low:    ['#f4ede0', '#3a2810'], // lighter cream, matches block fill
+    industry:           ['#dcc8a8', '#2a1a0a'],
+    education_faith:    ['#e8cce8', '#280838'],
+    military:           ['#b0c078', '#20280a'],
+    trade:              ['#f4e4ac', '#3a2a08'],
+    entertainment:      ['#f8c890', '#3a1a00'],
+  },
+  arabic: {
+    civic:              ['#f0e8d8', '#3a2810'],
+    market:             ['#f8eebc', '#5a3000'],
+    harbor:             ['#cce0e0', '#245060'], // turquoise / lagoon water
+    residential_high:   ['#e0c89c', '#3a2008'], // warm sandstone
+    residential_medium: ['#f4e6c8', '#3a2008'], // sun-bleached cream
+    residential_low:    ['#f8efd8', '#3a2008'], // pale linen
+    industry:           ['#e0c890', '#3a2008'], // saffron / spice earth
+    education_faith:    ['#e8cce8', '#280838'],
+    military:           ['#b0c078', '#20280a'],
+    trade:              ['#f4e4ac', '#3a2a08'],
+    entertainment:      ['#f8c890', '#3a1a00'],
+  },
+  eastern: {
+    civic:              ['#f0e8d8', '#3a2810'],
+    market:             ['#f8eebc', '#5a3000'],
+    harbor:             ['#a8c0d0', '#1c2840'], // slate / ink-blue water
+    residential_high:   ['#c8d4b8', '#1c2820'], // jade-grey
+    residential_medium: ['#dce4cc', '#1c2820'], // pale tea
+    residential_low:    ['#e8ecd4', '#1c2820'], // washed celadon
+    industry:           ['#bcb8a8', '#1c1c14'], // ash / iron-grey
+    education_faith:    ['#e8cce8', '#280838'],
+    military:           ['#b0c078', '#20280a'],
+    trade:              ['#f4e4ac', '#3a2a08'],
+    entertainment:      ['#f8c890', '#3a1a00'],
+  },
 };
 
 // Roles that do not receive a district icon (exterior / outcast ground).
@@ -1761,7 +2251,11 @@ function blockCentroid(polygonIds: number[], polygons: CityPolygon[]): [number, 
 // [Voronoi-polygon] Render a small role icon at the centroid of every
 // interior block that has a defined palette entry. Blocks that already host
 // a landmark glyph on any of their polygons are skipped to avoid overlap.
-function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+function drawDistrictIcons(
+  ctx: CanvasRenderingContext2D,
+  data: CityMapDataV2,
+  culture: BaseCulture,
+): void {
   if (data.blocks.length === 0) return;
 
   // Set of polygons that host a landmark — skip those blocks. Includes
@@ -1774,15 +2268,16 @@ function drawDistrictIcons(ctx: CanvasRenderingContext2D, data: CityMapDataV2): 
     if (lm.polygonIds) for (const pid of lm.polygonIds) landmarkPolygons.add(pid);
   }
 
+  const culturePalette = DISTRICT_ICON_PALETTE[culture];
   for (const block of data.blocks) {
     if (NO_DISTRICT_ICON.has(block.role)) continue;
-    const palette = DISTRICT_ICON_PALETTE[block.role];
+    const palette = culturePalette[block.role];
     if (!palette) continue;
     if (block.polygonIds.some(pid => landmarkPolygons.has(pid))) continue;
 
     const [cx, cy] = blockCentroid(block.polygonIds, data.polygons);
     const [fill, ink] = palette;
-    drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, block.role, fill, ink);
+    drawDistrictGlyph(ctx, cx, cy, DISTRICT_ICON_SIZE, block.role, fill, ink, culture);
   }
 }
 
@@ -1822,6 +2317,7 @@ function drawDistrictGlyph(
   role: string,
   fill: string,
   ink: string,
+  culture: BaseCulture,
 ): void {
   const s = size / 2;
 
@@ -1843,7 +2339,7 @@ function drawDistrictGlyph(
     case 'residential_medium':
     case 'residential_low':   drawResidentialIcon(ctx, s, fill, ink); break;
     case 'harbor':            drawHarborIcon(ctx, s, fill, ink); break;
-    case 'market':            drawMarketIcon(ctx, s, fill, ink); break;
+    case 'market':            drawMarketIconForCulture(ctx, s, fill, ink, culture); break;
     case 'industry':          drawForgeIcon(ctx, s, fill, ink); break;
     case 'education_faith':   drawAcademiaIcon(ctx, s, fill, ink); break;
     case 'military':          drawBarracksIcon(ctx, s, fill, ink); break;
@@ -1971,6 +2467,141 @@ function drawMarketIcon(ctx: CanvasRenderingContext2D, s: number, fill: string, 
   ctx.fillStyle = ink;
   ctx.fillRect(-s * 0.38, s * 0.08, s * 0.24, s * 0.26);
   ctx.fillRect(s * 0.14, s * 0.08, s * 0.24, s * 0.26);
+}
+
+// ── Market (Arabic): pointed-arch awning + draped textiles + amphorae ────────
+function drawMarketIconArabic(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Stall body
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.fillRect(-s * 0.52, -s * 0.05, s * 1.04, s * 0.68);
+  ctx.strokeRect(-s * 0.52, -s * 0.05, s * 1.04, s * 0.68);
+
+  // Pointed-arch awning — peak in the centre, support poles on the sides.
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.72, -s * 0.05);
+  ctx.lineTo(-s * 0.50, -s * 0.40);
+  ctx.lineTo(0,          -s * 0.72);
+  ctx.lineTo( s * 0.50, -s * 0.40);
+  ctx.lineTo( s * 0.72, -s * 0.05);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+
+  // Draped fringe under the awning (three short tassels).
+  ctx.fillStyle = ink;
+  for (const fx of [-s * 0.30, 0, s * 0.30]) {
+    ctx.beginPath();
+    ctx.moveTo(fx - s * 0.04, -s * 0.05);
+    ctx.lineTo(fx + s * 0.04, -s * 0.05);
+    ctx.lineTo(fx, s * 0.04);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Two amphorae (rounded jugs with narrow necks) replacing the boxy goods.
+  for (const ax of [-s * 0.28, s * 0.28]) {
+    ctx.fillStyle = ink;
+    // Body — circle.
+    ctx.beginPath();
+    ctx.arc(ax, s * 0.30, s * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    // Neck.
+    ctx.fillRect(ax - s * 0.04, s * 0.10, s * 0.08, s * 0.10);
+  }
+}
+
+// ── Market (Eastern): curved-eave pavilion + lantern + crate stacks ─────────
+function drawMarketIconEastern(ctx: CanvasRenderingContext2D, s: number, fill: string, ink: string): void {
+  ctx.lineWidth = Math.max(0.4, s * 0.1);
+  // Stall body
+  ctx.fillStyle = fill; ctx.strokeStyle = ink;
+  ctx.fillRect(-s * 0.50, -s * 0.05, s * 1.00, s * 0.68);
+  ctx.strokeRect(-s * 0.50, -s * 0.05, s * 1.00, s * 0.68);
+
+  // Pavilion roof — wider trapezoid with curved upturned eaves, horizontal ridge.
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.78, -s * 0.05);
+  ctx.quadraticCurveTo(-s * 0.86, -s * 0.30, -s * 0.55, -s * 0.50);
+  ctx.lineTo(s * 0.55, -s * 0.50);
+  ctx.quadraticCurveTo(s * 0.86, -s * 0.30, s * 0.78, -s * 0.05);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+
+  // Roof ridge ornament.
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.04, -s * 0.62, s * 0.08, s * 0.12);
+
+  // Hanging lantern from the eave centre.
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.01, -s * 0.20, s * 0.02, s * 0.10);
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(0, -s * 0.08, s * 0.10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Two crate stacks (small box on top of larger box) replacing the flat goods.
+  ctx.fillStyle = ink;
+  ctx.fillRect(-s * 0.40, s * 0.20, s * 0.26, s * 0.18);
+  ctx.fillRect(-s * 0.34, s * 0.06, s * 0.16, s * 0.14);
+  ctx.fillRect(s * 0.14, s * 0.20, s * 0.26, s * 0.18);
+  ctx.fillRect(s * 0.20, s * 0.06, s * 0.16, s * 0.14);
+}
+
+function drawMarketIconForCulture(
+  ctx: CanvasRenderingContext2D,
+  s: number,
+  fill: string, ink: string,
+  culture: BaseCulture,
+): void {
+  switch (culture) {
+    case 'arabic':  return drawMarketIconArabic(ctx, s, fill, ink);
+    case 'eastern': return drawMarketIconEastern(ctx, s, fill, ink);
+    case 'western': return drawMarketIcon(ctx, s, fill, ink);
+  }
+}
+
+// Tiny per-stall painter used by the market polygon scatter pass. Western
+// stays as the original filled circle; Arabic draws a mini awning silhouette
+// (a small upward triangle); Eastern draws a mini pavilion (a flat rect with
+// a curved hat). Kept intentionally small (~MARKET_STALL_RADIUS scale) so
+// dozens per polygon still read as scatter rather than icons.
+function drawMarketStallScatter(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  culture: BaseCulture,
+): void {
+  const r = MARKET_STALL_RADIUS;
+  switch (culture) {
+    case 'western': {
+      ctx.beginPath();
+      ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+    case 'arabic': {
+      // Pointed awning: small triangle peak above a tiny base bar.
+      ctx.beginPath();
+      ctx.moveTo(px - r * 1.4, py + r * 0.4);
+      ctx.lineTo(px,            py - r * 1.2);
+      ctx.lineTo(px + r * 1.4, py + r * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+    case 'eastern': {
+      // Pavilion: rounded eave hat above a tiny base.
+      ctx.beginPath();
+      ctx.moveTo(px - r * 1.3, py + r * 0.3);
+      ctx.quadraticCurveTo(px - r * 1.5, py - r * 0.3, px - r * 0.6, py - r * 0.7);
+      ctx.lineTo(px + r * 0.6, py - r * 0.7);
+      ctx.quadraticCurveTo(px + r * 1.5, py - r * 0.3, px + r * 1.3, py + r * 0.3);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+  }
 }
 
 // ── Forge: anvil shape ──────────────────────────────────────────────────────

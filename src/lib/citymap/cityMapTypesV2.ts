@@ -24,6 +24,23 @@ import type { BiomeType } from '../types';
 
 export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
 
+/**
+ * Base architectural / aesthetic culture of a city. Drives renderer-only
+ * styling — different glyph silhouettes for the four "named" landmarks
+ * (castle / palace / temple / market) and different colour palettes for
+ * residential / harbor / industrial blocks. Every other landmark and
+ * district renders identically across cultures.
+ *
+ * Assigned by `deriveCityEnvironment` from the city cell's biome:
+ *   - desert / scorched biomes → 'arabic'
+ *   - tropical / temperate rain forest → 'eastern'
+ *   - everything else → 'western'
+ *
+ * Pure visual styling: city-map generation is render-only, so culture has
+ * zero effect on the simulation, the world map, or `npm run sweep`.
+ */
+export type BaseCulture = 'western' | 'arabic' | 'eastern';
+
 // Coarse district classification driven by the unified landmark layer.
 // Populated by the district classifier in `cityMapDistricts.ts`.
 //
@@ -129,6 +146,11 @@ export interface CityEnvironment {
    * within range — downstream mountain-polygon generation is skipped.
    */
   mountainDirection: { dx: number; dy: number; distance: number } | null;
+  /**
+   * Architectural / aesthetic culture driving renderer-only styling.
+   * Derived deterministically from `biome` in `deriveCityEnvironment`.
+   */
+  baseCulture: BaseCulture;
 }
 
 /**

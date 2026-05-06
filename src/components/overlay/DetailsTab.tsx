@@ -675,6 +675,12 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
           {city && <InfoRow label="Size" value={resolveCitySize(city, mapData, citySizesAtYear)} />}
           {city && <InfoRow label="Founded" value={formatYear(history.startOfTime, city.foundedYear, convertYears)} />}
           {popSnap[cellIndex] != null && <InfoRow label="Population" value={formatPopulation(popSnap[cellIndex])} />}
+          {cityEnvironment && (
+            <InfoRow
+              label="Base culture"
+              value={cityEnvironment.baseCulture.charAt(0).toUpperCase() + cityEnvironment.baseCulture.slice(1)}
+            />
+          )}
           {country && (
             <InfoRow label="Country">
               <button
