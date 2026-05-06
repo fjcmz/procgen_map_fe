@@ -190,19 +190,26 @@ function findNearestMountainDirection(
   return null;
 }
 
-// Every city renders on a fixed-size polygon canvas regardless of city
-// tier. The CITY itself (the polygons inside the walls) is allocated as a
-// subset of these via `cityMapShape.ts::selectCityFootprint`, with the
-// per-tier subset count coming from `POLYGON_COUNTS` below. The rest of
-// the canvas (~500–1350 polygons) hosts outside-walls sprawl,
-// agricultural/slum blocks, gate-exiting roads, and any other extramural
-// detail.
-export const CANVAS_POLYGON_COUNT = 3000;
+// Total polygon count of the city canvas, keyed by city tier. The CITY
+// itself (the polygons inside the walls) is allocated as a subset of
+// these via `cityMapShape.ts::selectCityFootprint`, with the per-tier
+// subset count coming from `POLYGON_COUNTS` below. The rest of the canvas
+// hosts outside-walls sprawl, agricultural/slum blocks, gate-exiting
+// roads, and any other extramural detail. Larger tiers get a larger
+// canvas so metropolis / megalopolis cities have proportionally more
+// extramural acreage to host their sprawl.
+export const CANVAS_POLYGON_COUNTS: Record<CitySize, number> = {
+  small: 3000,
+  medium: 3000,
+  large: 3000,
+  metropolis: 4000,
+  megalopolis: 5000,
+};
 
 // Single source of truth for the V2 CITY polygon counts per size tier.
 // These now describe the in-wall city footprint (what
 // `cityMapShape.ts::selectCityFootprint` allocates out of the
-// `CANVAS_POLYGON_COUNT` total), not the canvas polygon count.
+// `CANVAS_POLYGON_COUNTS[size]` total), not the canvas polygon count.
 //
 // Previously the wall coverage was a percentage roll over the canvas
 // (`COVERAGE_MIN..MAX` lerp in `cityMapWalls.ts`); that percentage logic
@@ -489,20 +496,22 @@ export function generateCityMapV2(
   // suffixes (e.g. `_voronoi`, `_shape`, `_river`, `_buildings`).
   seededPRNG(`${seed}_city_${cityName}`);
 
-  // Always build the same canvas size in polygons regardless of city tier
-  // (refactor: city size now controls the IN-WALL footprint, not the
-  // canvas, so every map has identical extramural acreage to host sprawl).
+  // Canvas polygon count varies by city tier: metropolis (4000) and
+  // megalopolis (5000) get a larger canvas so they have proportionally
+  // more extramural acreage to host sprawl; smaller tiers stay at 3000.
+  // City size still controls the IN-WALL footprint via POLYGON_COUNTS.
+  const canvasPolygonCount = CANVAS_POLYGON_COUNTS[env.size];
   const polygons = buildCityPolygonGraph(
     `${seed}_city_${cityName}_voronoi`,
-    CANVAS_POLYGON_COUNT,
+    canvasPolygonCount,
     CANVAS_SIZE,
   );
 
   // Contract guard — cheap, catches d3 / clipping surprises before
-  // downstream assumes `polygons.length === CANVAS_POLYGON_COUNT`.
-  if (polygons.length !== CANVAS_POLYGON_COUNT) {
+  // downstream assumes `polygons.length === canvasPolygonCount`.
+  if (polygons.length !== canvasPolygonCount) {
     throw new Error(
-      `City V2 canvas polygon count mismatch: expected ${CANVAS_POLYGON_COUNT}, got ${polygons.length}`,
+      `City V2 canvas polygon count mismatch: expected ${canvasPolygonCount}, got ${polygons.length}`,
     );
   }
 

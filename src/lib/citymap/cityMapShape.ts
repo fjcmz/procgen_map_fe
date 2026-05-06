@@ -3,11 +3,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // V2 IS VORONOI-POLYGON-BASED. DO NOT reintroduce tiles.
 //
-// Every city renders on a fixed 1500-polygon canvas (`CANVAS_POLYGON_COUNT`
-// in `cityMapGeneratorV2.ts`). This module picks WHICH polygons make up the
-// actual built city — the set the wall traces around. The number of polygons
-// per size tier comes from the single-source `POLYGON_COUNTS` table in
-// `cityMapGeneratorV2.ts`.
+// Every city renders on a polygon canvas whose total polygon count is
+// keyed by city tier (`CANVAS_POLYGON_COUNTS` in `cityMapGeneratorV2.ts`:
+// 3000 for small/medium/large, 4000 for metropolis, 5000 for megalopolis).
+// This module picks WHICH polygons make up the actual built city — the
+// set the wall traces around. The number of polygons per size tier comes
+// from the single-source `POLYGON_COUNTS` table in `cityMapGeneratorV2.ts`.
 //
 // Allocation grows from the canvas center outwards, biased by an organic
 // shape sampled from a fixed distribution:

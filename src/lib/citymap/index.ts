@@ -15,7 +15,7 @@ export {
   deriveCityEnvironment,
   generateCityMapV2,
   POLYGON_COUNTS,
-  CANVAS_POLYGON_COUNT,
+  CANVAS_POLYGON_COUNTS,
 } from './cityMapGeneratorV2';
 export { selectCityFootprint } from './cityMapShape';
 export type { CityShapeType, CityFootprintResult } from './cityMapShape';
