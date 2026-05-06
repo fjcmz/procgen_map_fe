@@ -55,6 +55,7 @@ const SAT_MAX_PX = 10;
 
 const SAT_BASE_ORBIT = 90;
 const SAT_ORBIT_STEP = 90;
+const PLANET_ORBIT_SCALE = 5;
 
 // ── FNV-1a hash for deterministic per-galaxy variability ─────────────────
 // Produces a uint32 from a string id so the same galaxy always gets the
@@ -1010,12 +1011,13 @@ export function drawSystemScene(
   const orbits = system.planets.map(p => p.orbit);
   const orbitMin = orbits.length ? Math.min(...orbits) : 1;
   const orbitMax = orbits.length ? Math.max(...orbits) : 1;
-  const ringMin = Math.max(outerStarExtent * 3, minSide * 0.05);
+  const _ringMinBase = Math.max(outerStarExtent * 3, minSide * 0.05);
   const minStepPx = 52;
+  const ringMin = _ringMinBase * PLANET_ORBIT_SCALE;
   const ringMax = Math.max(
     minSide * 0.46,
-    ringMin + system.planets.length * minStepPx,
-  );
+    _ringMinBase + system.planets.length * minStepPx,
+  ) * PLANET_ORBIT_SCALE;
 
   // Planet size mapping
   const planetRadii = system.planets.map(p => p.radius);
@@ -1146,7 +1148,7 @@ export function drawPlanetScene(
 
   for (let i = 0; i < planet.satellites.length; i++) {
     const sat = planet.satellites[i];
-    const ringR = orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP;
+    const ringR = (orbitLayoutBase + SAT_BASE_ORBIT + i * SAT_ORBIT_STEP) * PLANET_ORBIT_SCALE;
     const satEcc = 0.02 + eccentricityFromId(sat.id) * 0.10;
     const satTilt = orbitTiltFromId(sat.id);
     drawOrbitRing(ctx, cx, cy, ringR, viewScale, satEcc, satTilt);
