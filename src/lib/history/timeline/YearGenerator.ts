@@ -15,7 +15,7 @@ import { wonderGenerator, getStandingWonderTierSum } from './Wonder';
 import { cataclysmGenerator } from './Cataclysm';
 import { warGenerator } from './War';
 import type { War } from './War';
-import { techGenerator, getCityTechLevel, getCountryTechLevel } from './Tech';
+import { techGenerator, getCityTechLevel, getCountryTechLevel, getCityEffectiveTechs } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
 import { expandGenerator } from './Expand';
@@ -523,6 +523,15 @@ export class YearGenerator {
           year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
           if (city.ownedCells.size > 0) {
             year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
+          }
+          // Effective tech sum (region → country → empire-founder). Pure read,
+          // no RNG: sweep-baseline-safe. Used by the renderer to apply a
+          // per-cell tint over polygons in City.ownedCells.
+          const techMap = getCityEffectiveTechs(world, city);
+          if (techMap && techMap.size > 0) {
+            let sum = 0;
+            for (const tech of techMap.values()) sum += tech.level;
+            if (sum > 0) year.cityTechSumByCell[city.cellIndex] = sum;
           }
         }
       }
