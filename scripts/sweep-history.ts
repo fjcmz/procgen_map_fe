@@ -6,14 +6,20 @@
  * exact sequence of calls from `src/workers/mapgen.worker.ts` so results are
  * byte-identical to a browser run at the same seed + params.
  *
+ * Seeds run in parallel via Node `worker_threads` (one worker per seed up to
+ * the concurrency cap). Each seed is fully independent — no cross-seed state,
+ * no shared globals — so JSON output is byte-identical to the previous
+ * sequential harness modulo `generatedAt` and per-seed `elapsedMs`.
+ *
  * Usage:
  *   npm run sweep                                    # default: 5 seeds, 5000 years, 3000 cells
  *   npm run sweep -- --label baseline-a              # tag the output filename
  *   npm run sweep -- --seeds 3 --years 2000          # smaller run for iteration
  *   npm run sweep -- --cells 5000                    # override cell count
+ *   npm run sweep -- --concurrency 1                 # force sequential execution
  *
  * Outputs:
- *   - stdout: compact aggregate table (min / median / max across seeds)
+ *   - stdout: per-seed completion lines (out-of-order) + aggregate table
  *   - scripts/results/<label>.json                   # full per-seed + aggregate report
  *
  * The harness is deterministic: re-running with the same args must produce
@@ -23,39 +29,22 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { availableParallelism } from 'node:os';
+import { Worker } from 'node:worker_threads';
 
-import {
-  buildCellGraph,
-  createNoiseSamplers3D,
-  seededPRNG,
-  assignElevation,
-  computeOceanCurrents,
-  assignMoisture,
-  assignTemperature,
-  assignBiomes,
-  generateRivers,
-  hydraulicErosion,
-  fillDepressions,
-  DEFAULT_PROFILE,
-} from '../src/lib/terrain/index.ts';
-import { historyGenerator } from '../src/lib/history/HistoryGenerator.ts';
 import type { HistoryStats } from '../src/lib/history/HistoryGenerator.ts';
 import type { TechField } from '../src/lib/history/timeline/Tech.ts';
+import type { SeedResult, SweepArgs } from './sweep-worker.ts';
 
 // ---------- CLI parsing ----------
 
-interface CliArgs {
-  seeds: number;
-  years: number;
-  cells: number;
-  width: number;
-  height: number;
-  waterRatio: number;
-  label: string;
+interface ParsedArgs {
+  args: SweepArgs;
+  concurrency: number; // 0 = auto, resolved in main()
 }
 
-function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = {
+function parseArgs(argv: string[]): ParsedArgs {
+  const args: SweepArgs = {
     seeds: 5,
     years: 5000,
     cells: 3000,
@@ -64,6 +53,7 @@ function parseArgs(argv: string[]): CliArgs {
     waterRatio: 0.4,
     label: 'sweep',
   };
+  let concurrency = 0;
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i];
     const val = argv[i + 1];
@@ -75,13 +65,14 @@ function parseArgs(argv: string[]): CliArgs {
       case '--height': args.height = Number(val); i++; break;
       case '--water': args.waterRatio = Number(val); i++; break;
       case '--label': args.label = String(val); i++; break;
+      case '--concurrency': concurrency = Number(val); i++; break;
       default:
         if (flag.startsWith('--')) {
           throw new Error(`Unknown flag: ${flag}`);
         }
     }
   }
-  return args;
+  return { args, concurrency };
 }
 
 // Fixed spec-mandated seed list; truncated if --seeds < 5.
@@ -92,54 +83,54 @@ const TECH_FIELDS: TechField[] = [
   'exploration', 'biology', 'art', 'government',
 ];
 
-// ---------- Single-seed run ----------
+// ---------- Worker pool ----------
 
-interface SeedResult {
-  seed: string;
-  stats: HistoryStats;
-  elapsedMs: number;
+function runSeedInWorker(seed: string, args: SweepArgs, workerUrl: URL): Promise<SeedResult> {
+  return new Promise((resolve, reject) => {
+    // Worker inherits process.execArgv from the parent by default, which
+    // includes tsx's --require preflight + --import loader hooks. That's what
+    // lets the worker resolve .ts files (and extensionless imports inside src/).
+    const worker = new Worker(workerUrl, {
+      workerData: { seed, args },
+    });
+    worker.once('message', (msg: { ok: true; result: SeedResult } | { ok: false; error: string }) => {
+      if (msg.ok) resolve(msg.result);
+      else reject(new Error(`Worker for ${seed} failed:\n${msg.error}`));
+    });
+    worker.once('error', reject);
+    worker.once('exit', code => {
+      if (code !== 0) reject(new Error(`Worker for ${seed} exited with code ${code}`));
+    });
+  });
 }
 
-function runSeed(seed: string, args: CliArgs): SeedResult {
-  const t0 = Date.now();
+async function runSeedsParallel(seeds: readonly string[], args: SweepArgs, concurrency: number): Promise<SeedResult[]> {
+  // Use the .mjs bootstrap as the Worker entry; it registers tsx's ESM loader
+  // inside the worker thread and then dynamic-imports sweep-worker.ts.
+  const workerUrl = new URL('./sweep-worker-bootstrap.mjs', import.meta.url);
+  const results: SeedResult[] = [];
+  let nextIndex = 0;
 
-  // Mirror mapgen.worker.ts exactly. The sweep uses DEFAULT_PROFILE with no
-  // biome or shape overlay so runs against baseline-a.json stay byte-identical.
-  // If this harness ever accepts a --profile or --shape CLI flag, mirror the
-  // worker's three-way merge: PROFILES[profileName] → SHAPE_PROFILES[shapeName]
-  // → user overrides (see src/workers/mapgen.worker.ts).
-  const profile = DEFAULT_PROFILE;
-  const { cells } = buildCellGraph(seed, args.cells, args.width, args.height);
-  const noise = createNoiseSamplers3D(seed);
-  assignElevation(cells, args.width, args.height, noise, args.waterRatio, seed, profile);
-  const { sstAnomaly } = computeOceanCurrents(cells, args.width, args.height, profile);
-  const distFromOcean = assignMoisture(cells, args.width, args.height, noise, sstAnomaly, profile);
-  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
-  assignBiomes(cells, args.width, args.height, noise, profile);
-  if (!profile.suppressRivers) {
-    // Mirror the worker's depression-fill + retrace sequence exactly.
-    const { drainageElevation: drainageElev1 } = fillDepressions(cells, profile);
-    generateRivers(cells, profile, drainageElev1);
-    hydraulicErosion(cells, profile);
-    const { drainageElevation: drainageElev2 } = fillDepressions(cells, profile);
-    generateRivers(cells, profile, drainageElev2);
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= seeds.length) return;
+      const seed = seeds[i];
+      const result = await runSeedInWorker(seed, args, workerUrl);
+      // Stream completion to stdout as soon as each seed finishes. Order is
+      // non-deterministic but content per seed is identical.
+      process.stdout.write(
+        `  [${seed}] ${(result.elapsedMs / 1000).toFixed(1)}s  ` +
+        `techs=${result.stats.totalTechs} pop=${fmt(result.stats.peakPopulation)} ` +
+        `countries=${result.stats.totalCountries} ended=${result.stats.worldEnded}\n`,
+      );
+      results.push(result);
+    }
   }
-  assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
-  assignBiomes(cells, args.width, args.height, noise, profile);
 
-  // Worker uses `seed + '_history'` for the history RNG (see mapgen.worker.ts:84).
-  const rng = seededPRNG(seed + '_history');
-  // Pass `seed` so isolated PRNG sub-streams (race bias, deity binding) match
-  // the worker exactly. Race bias and deity decisions don't enter HistoryStats,
-  // so this trailing arg is byte-equivalent to the old call when the sweep
-  // baseline was generated — the sub-stream draws don't perturb the main RNG.
-  const result = historyGenerator.generate(cells, args.width, rng, args.years, undefined, seed);
-
-  return {
-    seed,
-    stats: result.stats,
-    elapsedMs: Date.now() - t0,
-  };
+  const lanes = Math.max(1, Math.min(concurrency, seeds.length));
+  await Promise.all(Array.from({ length: lanes }, () => worker()));
+  return results;
 }
 
 // ---------- Aggregation ----------
@@ -168,7 +159,7 @@ function aggregate(values: number[]): Aggregate {
 }
 
 interface SweepReport {
-  args: CliArgs;
+  args: SweepArgs;
   generatedAt: string;
   elapsedMsTotal: number;
   perSeed: SeedResult[];
@@ -194,7 +185,7 @@ interface SweepReport {
   };
 }
 
-function buildReport(args: CliArgs, results: SeedResult[], elapsedMs: number): SweepReport {
+function buildReport(args: SweepArgs, results: SeedResult[], elapsedMs: number): SweepReport {
   const peakTechLevelByField = {} as Record<TechField, Aggregate>;
   const peakCountryTechLevelByField = {} as Record<TechField, Aggregate>;
   const medianCountryTechLevelByField = {} as Record<TechField, Aggregate>;
@@ -258,13 +249,13 @@ function fmtAgg(a: Aggregate): string {
   return `${fmt(a.min).padStart(7)} ${fmt(a.median).padStart(7)} ${fmt(a.max).padStart(7)}`;
 }
 
-function printReport(report: SweepReport): void {
+function printReport(report: SweepReport, concurrency: number): void {
   const { aggregates: agg, args, perSeed } = report;
   console.log('');
   console.log('='.repeat(72));
   console.log(`Phase 4 Sweep — label=${args.label} seeds=${perSeed.length} years=${args.years} cells=${args.cells}`);
   console.log('='.repeat(72));
-  console.log(`Total elapsed: ${(report.elapsedMsTotal / 1000).toFixed(1)}s`);
+  console.log(`Total elapsed: ${(report.elapsedMsTotal / 1000).toFixed(1)}s  (concurrency=${concurrency})`);
   console.log('');
   console.log('Per-seed runtimes:');
   for (const r of perSeed) {
@@ -305,30 +296,35 @@ function printReport(report: SweepReport): void {
 
 // ---------- entry point ----------
 
-function main(): void {
-  const args = parseArgs(process.argv.slice(2));
+async function main(): Promise<void> {
+  const { args, concurrency: requestedConcurrency } = parseArgs(process.argv.slice(2));
   if (args.seeds < 1 || args.seeds > FIXED_SEEDS.length) {
     throw new Error(`--seeds must be 1..${FIXED_SEEDS.length}, got ${args.seeds}`);
   }
   const seeds = FIXED_SEEDS.slice(0, args.seeds);
 
+  // Resolve concurrency: explicit --concurrency wins, else min(seedCount, cores).
+  let concurrency = requestedConcurrency;
+  if (concurrency <= 0) {
+    const cores = (typeof availableParallelism === 'function' ? availableParallelism() : 4) || 4;
+    concurrency = Math.min(seeds.length, cores);
+  }
+  concurrency = Math.max(1, Math.min(concurrency, seeds.length));
+
   console.log(`Phase 4 sweep starting: label=${args.label} seeds=${seeds.join(',')}`);
-  console.log(`  years=${args.years}  cells=${args.cells}  dims=${args.width}x${args.height}  water=${args.waterRatio}`);
+  console.log(`  years=${args.years}  cells=${args.cells}  dims=${args.width}x${args.height}  water=${args.waterRatio}  concurrency=${concurrency}`);
 
   const t0 = Date.now();
-  const perSeed: SeedResult[] = [];
-  for (const seed of seeds) {
-    process.stdout.write(`  [${seed}] running... `);
-    const result = runSeed(seed, args);
-    process.stdout.write(`${(result.elapsedMs / 1000).toFixed(1)}s  `);
-    process.stdout.write(`techs=${result.stats.totalTechs} pop=${fmt(result.stats.peakPopulation)} `);
-    process.stdout.write(`countries=${result.stats.totalCountries} ended=${result.stats.worldEnded}\n`);
-    perSeed.push(result);
-  }
+  const completed = await runSeedsParallel(seeds, args, concurrency);
   const elapsedMs = Date.now() - t0;
 
+  // Sort completed results back into FIXED_SEEDS order so the JSON report's
+  // perSeed[] is byte-identical to the previous sequential harness.
+  const seedOrder = new Map(seeds.map((s, i) => [s, i]));
+  const perSeed = completed.slice().sort((a, b) => (seedOrder.get(a.seed) ?? 0) - (seedOrder.get(b.seed) ?? 0));
+
   const report = buildReport(args, perSeed, elapsedMs);
-  printReport(report);
+  printReport(report, concurrency);
 
   // Write JSON report. Use a stable sort key order so diffs between runs are
   // minimal. The only non-deterministic fields are `generatedAt` and per-seed
@@ -342,4 +338,7 @@ function main(): void {
   console.log(`Wrote report → scripts/results/${args.label}.json`);
 }
 
-main();
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
