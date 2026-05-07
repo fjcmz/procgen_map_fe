@@ -407,13 +407,13 @@ export interface HistoryData {
   /** Expansion flags: 1 = expansion territory, 0 = core/unclaimed. Snapshotted every 20 years + final year. */
   expansionSnapshots?: Record<number, Uint8Array>;
   /**
-   * Per-city sum of all 9 TechField levels at every 20th year + final year.
-   * Outer key: snapshot year offset (matches `snapshots`). Inner key: city
-   * cellIndex; value: sum of effective tech levels (region → country →
-   * empire-founder). Cities with no tech are omitted. Drives the renderer's
+   * Per-city max-field tech level at every 20th year + final year. Outer key:
+   * snapshot year offset (matches `snapshots`). Inner key: city cellIndex;
+   * value: highest level across the 9 effective TechFields (region → country
+   * → empire-founder). Cities with no tech are omitted. Drives the renderer's
    * tech-level tint overlay on cells in `City.ownedCells`.
    */
-  cityTechSumSnapshots?: Record<number, Record<number, number>>;
+  cityMaxTechSnapshots?: Record<number, Record<number, number>>;
 }
 
 export interface MapData {
