@@ -189,8 +189,10 @@ export function galaxySpiralPositions(
   const arms = 2;
   const armOffset = Math.PI;
   const a = 8;
-  const angleStep = 0.42;
   const maxK = Math.max(1, Math.floor(armCount / 2));
+  // Cap each arm at 2 full revolutions regardless of system count: same stars
+  // in a shorter arc → visually denser and less winding than before.
+  const angleStep = Math.min(0.42, (Math.PI * 4) / maxK);
   const b = Math.min(0.18, 2.42 / (maxK * angleStep));
 
   const centralMaxR = (a * Math.exp(b * angleStep * 0.5)) * (spread / 200) * 0.8;
