@@ -26,8 +26,16 @@ import type { CityEntity } from '../physical/CityEntity';
 import type { Cell } from '../../types';
 import { timed } from './timing';
 
+/** Pre-computed region topology — built once before the year loop, reused every year. */
+export interface YearGenCache {
+  /** regionId → Set of cell indices in that region (static after buildPhysicalWorld). */
+  regionCellSets: Map<string, Set<number>>;
+  /** regionId → Map<cellIndex, hopDistance> from resource cells via BFS (static). */
+  regionResourceDists: Map<string, Map<number, number>>;
+}
+
 export class YearGenerator {
-  generate(rng: () => number, timeline: Timeline, world: World, cells?: Cell[], usedCityNames?: Set<string>): Year {
+  generate(rng: () => number, timeline: Timeline, world: World, cells?: Cell[], usedCityNames?: Set<string>, cache?: YearGenCache): Year {
     const year = new Year(rng);
     year.timeline = timeline;
 
@@ -133,7 +141,9 @@ export class YearGenerator {
         const region = world.mapRegions.get(city.regionId);
         if (!region) continue;
 
-        const regionCellSet = new Set(region.cellIndices);
+        const regionCellSet = cache
+          ? (cache.regionCellSets.get(region.id) ?? new Set(region.cellIndices))
+          : new Set(region.cellIndices);
 
         // Build frontier: cells adjacent to owned cells, in the same region, unclaimed
         const frontier: number[] = [];
@@ -151,33 +161,40 @@ export class YearGenerator {
 
         if (frontier.length === 0) continue;
 
-        // Multi-source BFS from resource cells within the region to compute
-        // hop-distance for every region cell.  This lets cities grow *toward*
-        // resources even when no resource cell is immediately adjacent.
-        // Bounded by region size (~30 cells) so very cheap.
-        const resourceDist = new Map<number, number>();
-        const resCells = [...region.cellResources.keys()];
-        if (resCells.length > 0) {
-          const queue: number[] = [];
-          for (const rc of resCells) {
-            if (regionCellSet.has(rc)) {
-              resourceDist.set(rc, 0);
-              queue.push(rc);
+        // Resource-distance map: pre-computed by TimelineGenerator when cache is
+        // available (static per region); falls back to per-city BFS otherwise.
+        const resourceDist: Map<number, number> = cache
+          ? (cache.regionResourceDists.get(region.id) ?? new Map())
+          : new Map<number, number>();
+
+        if (!cache) {
+          // Multi-source BFS from resource cells within the region to compute
+          // hop-distance for every region cell.  This lets cities grow *toward*
+          // resources even when no resource cell is immediately adjacent.
+          // Bounded by region size (~30 cells) so very cheap.
+          const resCells = [...region.cellResources.keys()];
+          if (resCells.length > 0) {
+            const queue: number[] = [];
+            for (const rc of resCells) {
+              if (regionCellSet.has(rc)) {
+                resourceDist.set(rc, 0);
+                queue.push(rc);
+              }
             }
-          }
-          let qi = 0;
-          while (qi < queue.length) {
-            const ci = queue[qi++];
-            const d = resourceDist.get(ci)!;
-            for (const ni of cellsLocal[ci].neighbors) {
-              if (!regionCellSet.has(ni)) continue;
-              if (resourceDist.has(ni)) continue;
-              resourceDist.set(ni, d + 1);
-              queue.push(ni);
+            let qi = 0;
+            while (qi < queue.length) {
+              const ci = queue[qi++];
+              const d = resourceDist.get(ci)!;
+              for (const ni of cellsLocal[ci].neighbors) {
+                if (!regionCellSet.has(ni)) continue;
+                if (resourceDist.has(ni)) continue;
+                resourceDist.set(ni, d + 1);
+                queue.push(ni);
+              }
             }
           }
         }
-        const maxDist = resCells.length > 0
+        const maxDist = resourceDist.size > 0
           ? Math.max(...frontier.map(ci => resourceDist.get(ci) ?? 9999))
           : 0;
 
@@ -254,7 +271,7 @@ export class YearGenerator {
     for (const city of world.mapUsableCities.values()) {
       if (city.religions.size === 0) continue;
       const artBonus = getCityTechLevel(world, city, 'art') > 0 ? 0.02 : 0;
-      const wonderBonus = 0.005 * getStandingWonderTierSum(world, city);
+      const wonderBonus = 0.005 * city.wonderTierSum; // already cached by step 4
       if (city.religions.size === 1) {
         // Single-religion: adherence drifts toward dominance until 0.9
         for (const [relId, adherence] of city.religions) {

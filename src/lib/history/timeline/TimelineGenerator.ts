@@ -1,5 +1,5 @@
 import { Timeline } from './Timeline';
-import { yearGenerator } from './YearGenerator';
+import { yearGenerator, type YearGenCache } from './YearGenerator';
 import type { HistoryRoot } from '../HistoryRoot';
 import type { World } from '../physical/World';
 import type { Cell } from '../../types';
@@ -16,8 +16,42 @@ export class TimelineGenerator {
     // Range: [-3000, -1001]
     timeline.startOfTime = Math.floor(rng() * 2000) - 3000;
 
+    // Pre-compute static region topology once — region cell sets and resource-distance
+    // maps never change after buildPhysicalWorld, so building them per-city per-year
+    // in expansion-cells is pure waste.  Pass as YearGenCache to every year.
+    let cache: YearGenCache | undefined;
+    if (cells) {
+      const regionCellSets = new Map<string, Set<number>>();
+      const regionResourceDists = new Map<string, Map<number, number>>();
+      for (const region of world.mapRegions.values()) {
+        const cellSet = new Set(region.cellIndices);
+        regionCellSets.set(region.id, cellSet);
+
+        const resourceDist = new Map<number, number>();
+        const resCells = [...region.cellResources.keys()];
+        if (resCells.length > 0) {
+          const queue: number[] = [];
+          for (const rc of resCells) {
+            if (cellSet.has(rc)) { resourceDist.set(rc, 0); queue.push(rc); }
+          }
+          let qi = 0;
+          while (qi < queue.length) {
+            const ci = queue[qi++];
+            const d = resourceDist.get(ci)!;
+            for (const ni of cells[ci].neighbors) {
+              if (!cellSet.has(ni) || resourceDist.has(ni)) continue;
+              resourceDist.set(ni, d + 1);
+              queue.push(ni);
+            }
+          }
+        }
+        regionResourceDists.set(region.id, resourceDist);
+      }
+      cache = { regionCellSets, regionResourceDists };
+    }
+
     for (let i = 0; i < NUM_YEARS; i++) {
-      const year = yearGenerator.generate(rng, timeline, world, cells, usedCityNames);
+      const year = yearGenerator.generate(rng, timeline, world, cells, usedCityNames, cache);
       timeline.years.push(year);
     }
 
