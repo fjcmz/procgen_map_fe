@@ -862,7 +862,27 @@ export const MAGICAL_EQUIPMENT_CATALOG: Record<string, Equipment> = {
   staff_woodlands:      { id: 'staff_woodlands',      name: 'Staff of the Woodlands (50)',     slot: 'utility1', price: 101250, bonuses: [{ target: 'ac', value: 2, type: 'natural' }, { target: 'wis', value: 2, type: 'enhancement' }], description: 'Acts as +2 quarterstaff, casts barkskin, animal trance, summon nature\'s ally, wall of thorns.' },
   staff_charming:       { id: 'staff_charming',       name: 'Staff of Charming (50 charges)',  slot: 'utility1', price: 16500, bonuses: [{ target: 'cha', value: 1, type: 'enhancement' }], description: '50 charges; charm person, charm monster on demand.' },
 
+  // Staves (arcane / divine focus)
+  staff_minor_magic:    { id: 'staff_minor_magic',    name: 'Staff of Minor Magic (10)',       slot: 'utility1', price: 2250,  bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 1 }], description: '10 charges; magic missile (1d4+1), ray of frost (1d3), dancing lights, flare on demand.' },
+  staff_abjuration:     { id: 'staff_abjuration',     name: 'Staff of Abjuration (50)',        slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 4 }, { target: 'will', value: 1, type: 'resistance' }], description: '50 charges; resist energy, dispel magic, globe of invulnerability, spell resistance.' },
+  staff_conjuration:    { id: 'staff_conjuration',    name: 'Staff of Conjuration (50)',       slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 5 }], description: '50 charges; unseen servant, stinking cloud, minor creation, cloudkill, summon monster V.' },
+  staff_divination:     { id: 'staff_divination',     name: 'Staff of Divination (50)',        slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 4 }, { target: 'caster_level', value: 1 }], description: '50 charges; detect thoughts, clairvoyance, tongues, locate creature, true seeing.' },
+  staff_enchantment:    { id: 'staff_enchantment',    name: 'Staff of Enchantment (50)',       slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 3 }], description: '50 charges; charm person, sleep, hideous laughter, suggestion, dominate person.' },
+  staff_evocation:      { id: 'staff_evocation',      name: 'Staff of Evocation (50)',         slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 3 }], description: '50 charges; magic missile, shatter, fireball, ice storm, wall of force, chain lightning.' },
+  staff_illusion:       { id: 'staff_illusion',       name: 'Staff of Illusion (50)',          slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 4 }], description: '50 charges; color spray, hypnotic pattern, major image, rainbow pattern, persistent image.' },
+  staff_necromancy:     { id: 'staff_necromancy',     name: 'Staff of Necromancy (50)',        slot: 'utility1', price: 32500, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 2 }], description: '50 charges; cause fear, ghoul touch, halt undead, enervation, waves of fatigue.' },
+  staff_transmutation:  { id: 'staff_transmutation',  name: 'Staff of Transmutation (50)',     slot: 'utility1', price: 65000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 4 }], description: '50 charges; alter self, blink, gaseous form, haste, passwall, polymorph.' },
+  staff_sorcery:        { id: 'staff_sorcery',        name: "Staff of the Sorcerer (50)",      slot: 'utility1', price: 25000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 2 }, { target: 'cha', value: 2, type: 'enhancement' }], description: '50 charges; charm person, invisibility, fireball, suggestion. +2 CHA enhancement.' },
+  staff_magi:           { id: 'staff_magi',           name: 'Staff of the Magi (50)',          slot: 'utility1', price: 235000, bonuses: [{ target: 'spell_slots', value: 2, spellLevel: 5 }, { target: 'caster_level', value: 2 }, { target: 'ac', value: 2, type: 'deflection' }], description: '+2 deflection AC; +2 caster level. 50 charges: magic missile, mage armor, fireball, lightning bolt, dispel magic, ice storm, wall of fire, passwall.' },
+
   // Rods
+  rod_apprentice_arcane:{ id: 'rod_apprentice_arcane',name: "Apprentice's Arcane Rod",         slot: 'utility1', price: 1500,  bonuses: [{ target: 'caster_level', value: 1 }], description: '+1 caster level for arcane spells of 2nd level or lower. A common first purchase for novice wizards and sorcerers.' },
+  rod_metamagic_silent: { id: 'rod_metamagic_silent', name: 'Rod of Silent Spell, Lesser',     slot: 'utility1', price: 3000,  bonuses: [], description: 'Apply Silent Spell metamagic (+0 cost) up to 3 times per day to spells of 3rd level or lower.' },
+  rod_cancellation:     { id: 'rod_cancellation',     name: 'Rod of Cancellation',             slot: 'utility1', price: 11000, bonuses: [{ target: 'will', value: 1, type: 'resistance' }], description: 'Touch attack: drains all magical properties from one item permanently. +1 Will save resistance from residual magical field.' },
+  rod_maximize_lesser:  { id: 'rod_maximize_lesser',  name: 'Rod of Maximize Spell, Lesser',   slot: 'utility1', price: 14000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 2 }], description: 'Apply Maximize Spell metamagic (+0 cost) up to 3 times per day to spells of 3rd level or lower.' },
+  rod_splendor:         { id: 'rod_splendor',         name: 'Rod of Splendor',                 slot: 'utility1', price: 25000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 1 }, { target: 'cha', value: 2, type: 'enhancement' }], description: '+6 CHA for 12 hours once/day; creates illusory regalia. Permanent +2 CHA enhancement.' },
+  rod_thunder_lightning: { id: 'rod_thunder_lightning', name: 'Rod of Thunder and Lightning',  slot: 'utility1', price: 33000, bonuses: [{ target: 'bab', value: 2, type: 'enhancement' }], description: 'Acts as a +3 weapon vs metal-armored foes; electrical charges for lightning bolt (5d6) and sonic blast (stunned 1 round, Fort DC 16).' },
+  rod_quicken_lesser:   { id: 'rod_quicken_lesser',   name: 'Rod of Quicken Spell, Lesser',    slot: 'utility1', price: 35000, bonuses: [{ target: 'spell_slots', value: 1, spellLevel: 3 }], description: 'Apply Quicken Spell metamagic (+0 cost) up to 3 times per day to spells of 3rd level or lower.' },
   rod_lordly_might:     { id: 'rod_lordly_might',     name: 'Rod of Lordly Might',             slot: 'utility1', price: 70000, bonuses: [{ target: 'bab', value: 3, type: 'enhancement' }], description: 'Acts as +3 light mace, +2 longsword, +4 battleaxe, +3 spear, climbing pole, or detect-direction wand.' },
   rod_metamagic_extend: { id: 'rod_metamagic_extend', name: 'Rod of Extend Spell, Lesser',     slot: 'utility1', price: 3000,  bonuses: [], description: 'Lets the wielder apply Extend Spell (+0 cost) up to three times per day to spells of 3rd level or lower.' },
   rod_metamagic_empower:{ id: 'rod_metamagic_empower',name: 'Rod of Empower Spell, Lesser',    slot: 'utility1', price: 9000,  bonuses: [], description: 'Lets the wielder apply Empower Spell (+0 cost) up to three times per day to spells of 3rd level or lower.' },
@@ -984,12 +1004,13 @@ const ALL_ITEMS: Record<string, Equipment> = { ...EQUIPMENT_CATALOG, ...MAGICAL_
  */
 export function assignEquipment(
   pcClass: PcClassType,
-  _level: number,
+  level: number,
   wealth: number,
   abilities: Record<Ability, number>,
   rng?: () => number,
 ): EquipmentSet {
   let budget = wealth;
+  const initialWealth = wealth;
   const result: EquipmentSet = {};
 
   const strMod = abilityMod(abilities.strength  ?? 10);
@@ -1015,6 +1036,42 @@ export function assignEquipment(
   // ── Inner helpers ─────────────────────────────────────────────────────────
   function bonusSum(item: Equipment, target: BonusTarget): number {
     return item.bonuses.reduce((s, b) => b.target === target ? s + b.value : s, 0);
+  }
+
+  /**
+   * Returns true when an item's ability-score bonuses are entirely redundant
+   * with already-equipped items — i.e. every enhancement bonus it provides
+   * to STR/DEX/CON/INT/WIS/CHA is already covered at the same or higher value
+   * by an item already in `result`. Items with non-ability bonuses (spell slots,
+   * AC, saves, caster level) always return false so they're never filtered.
+   * Only enhancement-type ability bonuses are subject to this check because
+   * they're the only type that doesn't stack in SRD rules.
+   */
+  function allAbilityBonusesRedundant(item: Equipment): boolean {
+    const ABILITY_TARGETS = new Set<BonusTarget>(['str', 'dex', 'con', 'int', 'wis', 'cha']);
+    const abilityBonuses = item.bonuses.filter(b => ABILITY_TARGETS.has(b.target) && (b.type ?? 'untyped') === 'enhancement');
+    if (abilityBonuses.length === 0) return false;
+    // If the item has any other significant bonuses beyond ability enhancements, keep it.
+    const hasOtherBonuses = item.bonuses.some(b =>
+      !ABILITY_TARGETS.has(b.target) && b.target !== 'hp' && b.value > 0,
+    );
+    if (hasOtherBonuses) return false;
+    // All ability enhancement bonuses must be covered by an already-equipped item.
+    for (const b of abilityBonuses) {
+      let covered = false;
+      for (const eq of Object.values(result)) {
+        if (!eq) continue;
+        for (const eb of eq.bonuses) {
+          if (eb.target === b.target && (eb.type ?? 'untyped') === 'enhancement' && eb.value >= b.value) {
+            covered = true;
+            break;
+          }
+        }
+        if (covered) break;
+      }
+      if (!covered) return false;
+    }
+    return true;
   }
 
   /**
@@ -1073,6 +1130,8 @@ export function assignEquipment(
     let bestScore = -Infinity;
     for (const item of candidates) {
       if (item.price > budget) continue;
+      if (item.price > initialWealth * 0.4) continue;
+      if (allAbilityBonusesRedundant(item)) continue;
       if (filter && !filter(item)) continue;
       const s = score(item);
       if (s > bestScore) bestScore = s;
@@ -1147,10 +1206,14 @@ export function assignEquipment(
     const dmg = parseDiceAvg(item.damage);
     const atk = bonusSum(item, 'bab');
     const twoH = item.isTwoHanded;
-    if (isPowerMelee) return dmg + atk * 3 + (twoH ? 4 : 0);
-    if (isFinesse)    return dmg + atk * 3 - (twoH ? 8 : 0);
-    if (isArcane)     return dmg * 0.3 + atk - item.price / 5000;
-    return dmg + atk * 2 - (twoH ? 1 : 0);
+    // Level 5+: strong bonus for any magical weapon (enhancement bonus > 0).
+    // Ensures melee characters always upgrade to a magic weapon once wealthy enough.
+    const magicBonus = (level >= 5 && atk > 0) ? 30 : 0;
+    // Melee characters prioritize high enchantment value (atk weight raised from 3→5).
+    if (isPowerMelee) return dmg + atk * 5 + (twoH ? 4 : 0) + magicBonus;
+    if (isFinesse)    return dmg + atk * 4 - (twoH ? 8 : 0) + magicBonus;
+    if (isArcane)     return dmg * 0.3 + atk - item.price / 5000 + magicBonus;
+    return dmg + atk * 2 - (twoH ? 1 : 0) + magicBonus;
   }
 
   function rangedScore(item: Equipment): number {
@@ -1408,7 +1471,10 @@ export function assignEquipment(
     const stat  = castingStat ? bonusSum(item, castingStat) * 6 : 0;
     const saves = bonusSum(item, 'fort') + bonusSum(item, 'ref') + bonusSum(item, 'will');
     const hp    = bonusSum(item, 'hp');
-    if (isArcane) return spellPts * 3 + cl * 2 + stat + saves;
+    // Pure spellcasters strongly prefer rods and staffs over generic utility items.
+    const isStaffOrRod = item.id.startsWith('staff_') || item.id.startsWith('rod_');
+    const rodStaffBonus = isPureArcane && isStaffOrRod ? 20 : 0;
+    if (isArcane) return spellPts * 3 + cl * 2 + stat + saves + rodStaffBonus;
     if (isDivine) return spellPts * 2 + cl + stat + saves + marginalAcGain(item);
     return hp * 2 + saves * 2 + bonusSum(item, 'str') + bonusSum(item, 'con');
   }
