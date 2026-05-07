@@ -11,11 +11,11 @@
  * roster within one generation run.
  *
  * Sizing per spec:
- *   small        → 3 chars, locked race / deity / alignment, narrow class mix
- *   medium       → 6 chars, 70% dominant
- *   large        → 12 chars, 50% dominant
- *   metropolis   → 24 chars, 30% dominant
- *   megalopolis  → 48 chars, 15% dominant
+ *   small        → 6 chars, locked race / deity / alignment, narrow class mix
+ *   medium       → 12 chars, 70% dominant
+ *   large        → 24 chars, 50% dominant
+ *   metropolis   → 48 chars, 30% dominant
+ *   megalopolis  → 96 chars, 15% dominant
  *
  * "Dominant" pulls from the country's `raceBias.primary` and the city's
  * dominant religion's deity. The biased pool fills the rest using
@@ -181,11 +181,11 @@ interface SizeProfile {
 }
 
 const SIZE_PROFILES: Record<City['size'], SizeProfile> = {
-  small:       { count: 3,  minLevel: 1, maxLevel: 3,  dominantBias: 1.0  },
-  medium:      { count: 6,  minLevel: 1, maxLevel: 5,  dominantBias: 0.7  },
-  large:       { count: 12, minLevel: 1, maxLevel: 7,  dominantBias: 0.5  },
-  metropolis:  { count: 24, minLevel: 1, maxLevel: 12, dominantBias: 0.3  },
-  megalopolis: { count: 48, minLevel: 1, maxLevel: 15, dominantBias: 0.15 },
+  small:       { count: 6,  minLevel: 1, maxLevel: 3,  dominantBias: 1.0  },
+  medium:      { count: 12, minLevel: 1, maxLevel: 5,  dominantBias: 0.7  },
+  large:       { count: 24, minLevel: 1, maxLevel: 7,  dominantBias: 0.5  },
+  metropolis:  { count: 48, minLevel: 1, maxLevel: 12, dominantBias: 0.3  },
+  megalopolis: { count: 96, minLevel: 1, maxLevel: 15, dominantBias: 0.15 },
 };
 
 /**
