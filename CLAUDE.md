@@ -38,7 +38,7 @@ There is no test suite. Verify correctness by running `npm run build` (catches t
 
 ## Documentation Map
 
-The simulation is split into five layers, each documented in its own `claude_specs/` file:
+The simulation is split into five layers, each documented in its own `claude_specs/` file. Cross-cutting performance concerns live in their own spec:
 
 | Spec | Scope |
 |------|-------|
@@ -47,8 +47,9 @@ The simulation is split into five layers, each documented in its own `claude_spe
 | **[`claude_specs/world_history.md`](claude_specs/world_history.md)** | Phase 6 HistoryGenerator orchestration, `buildPhysicalWorld`, Timeline + 12 Phase 5 generators, tech / religion / cataclysm / war / conquer / empire mechanics, HistoryStats + sweep harness, render-time concerns (overlay tabs, Timeline panel, ownership reconstruction) |
 | **[`claude_specs/city_map.md`](claude_specs/city_map.md)** | City-map popups: V1 (tile, frozen) + V2 (Voronoi-polygon, in-progress through PR 5). Polygon graph, walls, river, roads, streets, bridges, open spaces, blocks, landmarks, buildings, sprawl |
 | **[`claude_specs/characters.md`](claude_specs/characters.md)** | PC/NPC roster generation — `lib/fantasy/` D&D 3.5e engine, `lib/citychars.ts` lazy roller, `Country.raceBias` + `Religion.deity/alignment` simulation metadata, `World.seed` threading |
+| **[`claude_specs/performance.md`](claude_specs/performance.md)** | Cross-cutting: `DEBUG_HISTORY_TIMING` flag + `timed()` helper in `src/lib/history/timeline/timing.ts`, current hot paths, why per-year parallelization is blocked, performance levers per layer |
 
-When working on a change, identify which layer it touches and read the relevant spec. Most changes also need to respect the framework conventions documented below.
+When working on a change, identify which layer it touches and read the relevant spec. For wall-clock or profiling work, also read `performance.md`. Most changes also need to respect the framework conventions documented below.
 
 ## Architecture
 
