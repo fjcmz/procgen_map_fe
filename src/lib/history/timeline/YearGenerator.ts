@@ -24,6 +24,7 @@ import type { CountryEvent } from './Country';
 import { ruinifyCity } from './Ruin';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Cell } from '../../types';
+import { timed } from './timing';
 
 export class YearGenerator {
   generate(rng: () => number, timeline: Timeline, world: World, cells?: Cell[], usedCityNames?: Set<string>): Year {
@@ -41,6 +42,7 @@ export class YearGenerator {
     year.year = absYear;
 
     // Step 3: Sum world population from usable cities (measured before growth)
+    timed('growth', () => {
     let worldPop = 0;
     for (const city of world.mapUsableCities.values()) {
       worldPop += city.currentPopulation;
@@ -98,16 +100,23 @@ export class YearGenerator {
       const indLevel = getCityTechLevel(world, city, 'industry');
       city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
     }
+    });
 
     // Step 4d: City-growth settlements — large+ cities spawn a child city once
     if (cells && usedCityNames) {
-      const settles = citySettlementGenerator.generate(rng, year, world, cells, usedCityNames);
-      year.citySettlements.push(...settles);
+      const cellsLocal = cells;
+      const namesLocal = usedCityNames;
+      timed('city-settlements', () => {
+        const settles = citySettlementGenerator.generate(rng, year, world, cellsLocal, namesLocal);
+        year.citySettlements.push(...settles);
+      });
     }
 
     // Step 4c: Territory expansion — cities claim adjacent cells from their region
     // when population milestones (+ gov tech bonus) allow more cells.
     if (cells) {
+      const cellsLocal = cells;
+      timed('expansion-cells', () => {
       // Build a global claimed-cells index: cellIndex → cityId (prevents overlaps)
       const claimedCells = new Map<number, string>();
       for (const city of world.mapUsableCities.values()) {
@@ -131,7 +140,7 @@ export class YearGenerator {
         const seen = new Set<number>();
         for (const ownedCi of city.ownedCells.keys()) seen.add(ownedCi);
         for (const ownedCi of city.ownedCells.keys()) {
-          for (const ni of cells[ownedCi].neighbors) {
+          for (const ni of cellsLocal[ownedCi].neighbors) {
             if (seen.has(ni)) continue;
             seen.add(ni);
             if (!regionCellSet.has(ni)) continue;
@@ -160,7 +169,7 @@ export class YearGenerator {
           while (qi < queue.length) {
             const ci = queue[qi++];
             const d = resourceDist.get(ci)!;
-            for (const ni of cells[ci].neighbors) {
+            for (const ni of cellsLocal[ci].neighbors) {
               if (!regionCellSet.has(ni)) continue;
               if (resourceDist.has(ni)) continue;
               resourceDist.set(ni, d + 1);
@@ -177,10 +186,10 @@ export class YearGenerator {
           const aDist = resourceDist.get(a) ?? maxDist + 1;
           const bDist = resourceDist.get(b) ?? maxDist + 1;
           if (aDist !== bDist) return aDist - bDist; // closer to resource wins
-          const aWater = cells[a].isWater ? 1 : 0;
-          const bWater = cells[b].isWater ? 1 : 0;
+          const aWater = cellsLocal[a].isWater ? 1 : 0;
+          const bWater = cellsLocal[b].isWater ? 1 : 0;
           if (aWater !== bWater) return aWater - bWater; // land first
-          return (CELL_BIOME_CAPACITY[cells[b].biome] ?? 0) - (CELL_BIOME_CAPACITY[cells[a].biome] ?? 0);
+          return (CELL_BIOME_CAPACITY[cellsLocal[b].biome] ?? 0) - (CELL_BIOME_CAPACITY[cellsLocal[a].biome] ?? 0);
         });
 
         // Claim cells one at a time up to maxCells
@@ -192,12 +201,14 @@ export class YearGenerator {
           toClaim--;
         }
       }
+      });
     }
 
     // Step 5: Kill/retire illustrates
     // Natural death: birthYear + yearsActive <= currentYear
     // War-related death: 15% chance if active war affects origin country
     // Snapshot the entries to avoid mutating the Map during iteration.
+    timed('illustrate-death', () => {
     const usableIllustrates = Array.from(world.mapUsableIllustrates.entries());
     for (const [id, illustrate] of usableIllustrates) {
       const ill = illustrate as Illustrate;
@@ -221,6 +232,7 @@ export class YearGenerator {
         }
       }
     }
+    });
 
     // Step 6: Propagate religions
     // Phase 1: `art` tech bumps adherence drift +0.05 → +0.07 (soft-power lever).
@@ -231,6 +243,7 @@ export class YearGenerator {
     // is now computed per (city × religion) rather than per city.
     // Wonder bonus (Wonders_bonuses.md §3): +0.005 × standingWonderTierSum,
     // city-scoped like art. Sacred sites attract pilgrims.
+    timed('religion-drift', () => {
     const computeGovBonus = (religion: Religion | undefined): number => {
       if (!religion?.originCountry) return 0;
       const origin = world.mapCountries.get(religion.originCountry) as CountryEvent | undefined;
@@ -277,8 +290,10 @@ export class YearGenerator {
       }
       religion.members = members;
     }
+    });
 
     // Step 7: End expired wars — remove alive wars where started + lasts < year
+    timed('war-flags', () => {
     for (const [warId, war] of world.mapAliveWars) {
       const w = war as War;
       if (w.started + w.lasts < absYear) {
@@ -299,8 +314,10 @@ export class YearGenerator {
       if (aggressor) aggressor.atWar = true;
       if (defender) defender.atWar = true;
     }
+    });
 
     // Step 9: Tech-gated resource discovery, then recompute `hasResources`.
+    timed('resource-discovery', () => {
     //
     // For each claimed region (has a countryId), walk its resources and
     // promote any whose requirement is met by the country's current tech
@@ -351,6 +368,7 @@ export class YearGenerator {
       }
       region.updateHasResources();
     }
+    });
 
     // --- Phase 5: Generate events in order, with per-type size functions ---
 
@@ -358,84 +376,102 @@ export class YearGenerator {
     const rndSize = (n: number, offset: number) => Math.max(0, Math.floor(rng() * n) + offset);
 
     // 1. Foundations: random [0, max(2, toFound/300)-1]
-    const toFound = world.mapCities.size - world.mapUsableCities.size;
-    const foundationCount = Math.floor(rng() * Math.max(2, Math.floor(toFound / 300)));
-    for (let i = 0; i < foundationCount; i++) {
-      const f = foundationGenerator.generate(rng, year, world);
-      if (f) year.foundations.push(f); else break;
-    }
+    timed('foundation', () => {
+      const toFound = world.mapCities.size - world.mapUsableCities.size;
+      const foundationCount = Math.floor(rng() * Math.max(2, Math.floor(toFound / 300)));
+      for (let i = 0; i < foundationCount; i++) {
+        const f = foundationGenerator.generate(rng, year, world);
+        if (f) year.foundations.push(f); else break;
+      }
+    });
 
     // 2. Contacts: rndSize(30, 2)
-    const contactCount = rndSize(30, 2);
-    for (let i = 0; i < contactCount; i++) {
-      const c = contactGenerator.generate(rng, year, world);
-      if (c) year.contacts.push(c); else break;
-    }
+    timed('contact', () => {
+      const contactCount = rndSize(30, 2);
+      for (let i = 0; i < contactCount; i++) {
+        const c = contactGenerator.generate(rng, year, world);
+        if (c) year.contacts.push(c); else break;
+      }
+    });
 
     // 3. Countries: rndSize(10, 0)
-    const countryCount = rndSize(10, 0);
-    for (let i = 0; i < countryCount; i++) {
-      const c = countryGenerator.generate(rng, year, world);
-      if (c) year.countries.push(c); else break;
-    }
+    timed('country', () => {
+      const countryCount = rndSize(10, 0);
+      for (let i = 0; i < countryCount; i++) {
+        const c = countryGenerator.generate(rng, year, world);
+        if (c) year.countries.push(c); else break;
+      }
+    });
 
     // 3b. Territorial expansion: countries expand into unclaimed neighboring regions
     if (cells && usedCityNames) {
-      const { expansions, settlements } = expandGenerator.generate(rng, year, world, cells, usedCityNames);
-      year.expansions.push(...expansions);
-      year.settlements.push(...settlements);
+      const cellsLocal = cells;
+      const namesLocal = usedCityNames;
+      timed('expand', () => {
+        const { expansions, settlements } = expandGenerator.generate(rng, year, world, cellsLocal, namesLocal);
+        year.expansions.push(...expansions);
+        year.settlements.push(...settlements);
+      });
     }
 
     // 4. Illustrates: random [0, max(2, usableCities/500)-1]
-    const illustrateCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
-    for (let i = 0; i < illustrateCount; i++) {
-      const il = illustrateGenerator.generate(rng, year, world);
-      if (il) year.illustrates.push(il); else break;
-    }
+    timed('illustrate', () => {
+      const illustrateCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
+      for (let i = 0; i < illustrateCount; i++) {
+        const il = illustrateGenerator.generate(rng, year, world);
+        if (il) year.illustrates.push(il); else break;
+      }
+    });
 
     // 5. Wonders: random [0, max(2, usableCities/500)-1]
-    const wonderCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
-    for (let i = 0; i < wonderCount; i++) {
-      const w = wonderGenerator.generate(rng, year, world);
-      if (w) year.wonders.push(w); else break;
-    }
+    timed('wonder', () => {
+      const wonderCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
+      for (let i = 0; i < wonderCount; i++) {
+        const w = wonderGenerator.generate(rng, year, world);
+        if (w) year.wonders.push(w); else break;
+      }
+    });
 
     // 6. Religions: often zero (two consecutive boolean checks), else up to scaled count
-    if (rng() < 0.5 && rng() < 0.5) {
-      let withoutReligion = 0;
-      for (const city of world.mapUsableCities.values()) {
-        if (city.religions.size === 0) withoutReligion++;
+    timed('religion', () => {
+      if (rng() < 0.5 && rng() < 0.5) {
+        let withoutReligion = 0;
+        for (const city of world.mapUsableCities.values()) {
+          if (city.religions.size === 0) withoutReligion++;
+        }
+        const religionMax = Math.max(2, Math.floor(withoutReligion / 1000));
+        const religionCount = Math.floor(rng() * religionMax);
+        for (let i = 0; i < religionCount; i++) {
+          const r = religionGenerator.generate(rng, year, world);
+          if (r) year.religions.push(r); else break;
+        }
       }
-      const religionMax = Math.max(2, Math.floor(withoutReligion / 1000));
-      const religionCount = Math.floor(rng() * religionMax);
-      for (let i = 0; i < religionCount; i++) {
-        const r = religionGenerator.generate(rng, year, world);
-        if (r) year.religions.push(r); else break;
-      }
-    }
+    });
 
     // 7. Trades: roll(6, 10)
-    {
+    timed('trade', () => {
       let tradesRoll = 0;
       for (let i = 0; i < 6; i++) tradesRoll += Math.floor(rng() * 10) + 1;
       for (let i = 0; i < tradesRoll; i++) {
         const t = tradeGenerator.generate(rng, year, world);
         if (t) year.trades.push(t); else break;
       }
-    }
+    });
 
     // 8. Cataclysms: rndSize(6, -3) clamped to 1 per 20 usable cities.
     // The base roll (0–2) is unchanged for large worlds; the cap protects
     // small-city-count worlds (ocean, ice) from disproportionate disasters.
-    const cataclysmCap = Math.floor(world.mapUsableCities.size / 20);
-    const cataclysmCount = Math.min(rndSize(6, -3), cataclysmCap);
-    for (let i = 0; i < cataclysmCount; i++) {
-      const c = cataclysmGenerator.generate(rng, year, world);
-      if (c) year.cataclysms.push(c); else break;
-    }
+    timed('cataclysm', () => {
+      const cataclysmCap = Math.floor(world.mapUsableCities.size / 20);
+      const cataclysmCount = Math.min(rndSize(6, -3), cataclysmCap);
+      for (let i = 0; i < cataclysmCount; i++) {
+        const c = cataclysmGenerator.generate(rng, year, world);
+        if (c) year.cataclysms.push(c); else break;
+      }
+    });
 
     // 8b. Post-cataclysm ruin check: cities with pop < 100 become ruins
-    {
+    timed('ruin', () => {
       const citiesToRuin: CityEntity[] = [];
       for (const city of world.mapUsableCities.values()) {
         if (city.currentPopulation < 100) citiesToRuin.push(city);
@@ -444,43 +480,53 @@ export class YearGenerator {
         const ruin = ruinifyCity(city, world, year, 'depopulation', rng);
         year.ruins.push(ruin);
       }
-    }
+    });
 
     // 9. Wars: random [0, max(2, countries/50)-1]
-    const warCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapCountries.size / 50)));
-    for (let i = 0; i < warCount; i++) {
-      const w = warGenerator.generate(rng, year, world);
-      if (w) year.wars.push(w); else break;
-    }
+    timed('war', () => {
+      const warCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapCountries.size / 50)));
+      for (let i = 0; i < warCount; i++) {
+        const w = warGenerator.generate(rng, year, world);
+        if (w) year.wars.push(w); else break;
+      }
+    });
 
     // 10. Techs (Phase 2): per-year throughput is N=clamp(0..5, log10(worldPop/10k)),
     // rolled per-country (chance min(1, illustrates/5)) plus a single legacy
     // stateless fallback. The whole flow lives in techGenerator.generateForYear.
-    year.techs.push(...techGenerator.generateForYear(rng, year, world));
+    timed('tech', () => {
+      year.techs.push(...techGenerator.generateForYear(rng, year, world));
+    });
 
     // 11. Conquers: rndSize(4, 1)
-    const conquerCount = rndSize(4, 1);
-    for (let i = 0; i < conquerCount; i++) {
-      const c = conquerGenerator.generate(rng, year, world);
-      if (c) year.conquers.push(c); else break;
-    }
+    timed('conquer', () => {
+      const conquerCount = rndSize(4, 1);
+      for (let i = 0; i < conquerCount; i++) {
+        const c = conquerGenerator.generate(rng, year, world);
+        if (c) year.conquers.push(c); else break;
+      }
+    });
 
     // 12. Empires: exactly conquers.size() attempts (one per conquer this year)
-    for (const conquer of year.conquers) {
-      const empire = empireGenerator.generate(rng, year, conquer);
-      if (empire) year.empires.push(empire);
-    }
+    timed('empire', () => {
+      for (const conquer of year.conquers) {
+        const empire = empireGenerator.generate(rng, year, conquer);
+        if (empire) year.empires.push(empire);
+      }
+    });
 
     // Capture per-city population, size, and owned cells at end of year for snapshot serialization
-    for (const city of world.mapCities.values()) {
-      if (city.founded) {
-        year.cityPopulations[city.cellIndex] = city.currentPopulation;
-        year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
-        if (city.ownedCells.size > 0) {
-          year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
+    timed('snapshot', () => {
+      for (const city of world.mapCities.values()) {
+        if (city.founded) {
+          year.cityPopulations[city.cellIndex] = city.currentPopulation;
+          year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
+          if (city.ownedCells.size > 0) {
+            year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
+          }
         }
       }
-    }
+    });
 
     return year;
   }
