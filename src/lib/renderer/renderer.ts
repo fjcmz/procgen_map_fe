@@ -8,6 +8,124 @@ import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
 import { unwrapX, drawWrappedPath, findSharedWrapAwareVerts } from './wrap';
 
+// Tech-level tint thresholds (sum of all 9 TechField levels per city).
+// Applied to cells in `City.ownedCells` filtered by `yearAdded <= selectedYear`.
+//   < 30   : no tint (still primitive)
+//   30–59  : brown overlay (early industry / earthworks)
+//   60–89  : black overlay (smoke / coal age)
+//   90–119 : grey overlay (concrete / steel)
+//   120–149: cool metallic grey (advanced infrastructure)
+//   150+   : metallic grey + repeating buildings-from-above pattern
+const TECH_TINT_BROWN    = 'rgba(101, 67, 33, 0.35)';
+const TECH_TINT_BLACK    = 'rgba(0, 0, 0, 0.40)';
+const TECH_TINT_GREY     = 'rgba(120, 120, 120, 0.40)';
+const TECH_TINT_METALLIC = 'rgba(180, 185, 195, 0.55)';
+
+function tintForTechSum(sum: number): string | null {
+  if (sum < 30) return null;
+  if (sum < 60) return TECH_TINT_BROWN;
+  if (sum < 90) return TECH_TINT_BLACK;
+  if (sum < 120) return TECH_TINT_GREY;
+  return TECH_TINT_METALLIC;
+}
+
+// Lazy-initialised offscreen pattern: a metallic-grey base with darker
+// rectangle "building footprints" suggesting buildings viewed from above.
+// Built once on first use and cached at module scope.
+let buildingsPattern: CanvasPattern | null = null;
+function getBuildingsPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (buildingsPattern) return buildingsPattern;
+  const TILE = 24;
+  const off = typeof OffscreenCanvas !== 'undefined'
+    ? new OffscreenCanvas(TILE, TILE)
+    : (() => {
+        const c = document.createElement('canvas');
+        c.width = TILE; c.height = TILE;
+        return c;
+      })();
+  const octx = off.getContext('2d') as CanvasRenderingContext2D | null;
+  if (!octx) return null;
+  // Metallic-grey base
+  octx.fillStyle = '#b4b9c3';
+  octx.fillRect(0, 0, TILE, TILE);
+  // Faint diagonal sheen
+  const grad = octx.createLinearGradient(0, 0, TILE, TILE);
+  grad.addColorStop(0, 'rgba(255,255,255,0.18)');
+  grad.addColorStop(0.5, 'rgba(255,255,255,0)');
+  grad.addColorStop(1, 'rgba(0,0,0,0.10)');
+  octx.fillStyle = grad;
+  octx.fillRect(0, 0, TILE, TILE);
+  // Darker building footprints (deterministic layout — no rng)
+  octx.fillStyle = 'rgba(60, 65, 75, 0.85)';
+  octx.fillRect(2, 2, 7, 9);
+  octx.fillRect(11, 3, 5, 5);
+  octx.fillRect(17, 2, 5, 8);
+  octx.fillRect(3, 13, 4, 8);
+  octx.fillRect(9, 11, 6, 4);
+  octx.fillRect(9, 17, 8, 5);
+  octx.fillRect(18, 13, 4, 9);
+  // Thin grid lines for streets
+  octx.strokeStyle = 'rgba(40, 45, 55, 0.45)';
+  octx.lineWidth = 1;
+  octx.strokeRect(0.5, 0.5, TILE - 1, TILE - 1);
+  buildingsPattern = ctx.createPattern(off as unknown as CanvasImageSource, 'repeat');
+  return buildingsPattern;
+}
+
+function findNearestSnapshotKeyAtMost(snapshots: Record<number, unknown>, year: number): number {
+  let best = -1;
+  for (const k in snapshots) {
+    const key = Number(k);
+    if (key <= year && key > best) best = key;
+  }
+  return best;
+}
+
+function drawCityTechTint(
+  ctx: CanvasRenderingContext2D,
+  data: MapData,
+  selectedYear: number,
+): void {
+  const history = data.history;
+  if (!history || !history.cityTechSumSnapshots) return;
+  const snapKey = findNearestSnapshotKeyAtMost(history.cityTechSumSnapshots, selectedYear);
+  if (snapKey < 0) return;
+  const sumByCity = history.cityTechSumSnapshots[snapKey];
+  if (!sumByCity) return;
+
+  const cells = data.cells;
+  const pattern = getBuildingsPattern(ctx);
+
+  for (const city of data.cities) {
+    if (!city.ownedCells || city.ownedCells.length === 0) continue;
+    if (city.isRuin && city.ruinYear > 0 && selectedYear >= city.ruinYear) continue;
+    const sum = sumByCity[city.cellIndex] ?? 0;
+    const tint = tintForTechSum(sum);
+    if (!tint) continue;
+    const drawPattern = sum >= 150 && pattern !== null;
+
+    ctx.fillStyle = tint;
+    for (const owned of city.ownedCells) {
+      if (owned.yearAdded > selectedYear) continue;
+      const cell = cells[owned.cellIndex];
+      if (!cell || cell.vertices.length < 2) continue;
+      cellPath(ctx, cell);
+      ctx.fill();
+      if (drawPattern && pattern) {
+        // Pattern fill on top — pattern is metallic + building shapes.
+        // Apply globalAlpha so the underlying biome remains slightly visible.
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = 0.65;
+        ctx.fillStyle = pattern;
+        cellPath(ctx, cell);
+        ctx.fill();
+        ctx.globalAlpha = prevAlpha;
+        ctx.fillStyle = tint;
+      }
+    }
+  }
+}
+
 // Kingdom colors for terrain view (subtle fills)
 const KINGDOM_COLORS_TERRAIN = [
   { fill: 'rgba(220,80,80,0.12)',  stroke: '#c04040' },
@@ -1356,6 +1474,14 @@ export function render(
 
     // Layer 4c: Resource icons
     if (layers.resources) drawResources(ctx, data.cells, data.regions ?? [], scale);
+
+    // Layer 4d: City tech-level tint over polygons in `City.ownedCells`.
+    // Sits below kingdom borders so political outlines stay legible. Driven
+    // by the per-snapshot `cityTechSumSnapshots`; no-op when history is off
+    // or no snapshot key precedes `selectedYear`.
+    if (data.history && selectedYear !== undefined) {
+      drawCityTechTint(ctx, data, selectedYear);
+    }
 
     // Layer 5: Kingdom borders
     if (layers.borders) {

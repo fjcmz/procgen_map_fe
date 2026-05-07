@@ -406,6 +406,14 @@ export interface HistoryData {
   citySizeSnapshots?: Record<number, Uint8Array>;
   /** Expansion flags: 1 = expansion territory, 0 = core/unclaimed. Snapshotted every 20 years + final year. */
   expansionSnapshots?: Record<number, Uint8Array>;
+  /**
+   * Per-city sum of all 9 TechField levels at every 20th year + final year.
+   * Outer key: snapshot year offset (matches `snapshots`). Inner key: city
+   * cellIndex; value: sum of effective tech levels (region → country →
+   * empire-founder). Cities with no tech are omitted. Drives the renderer's
+   * tech-level tint overlay on cells in `City.ownedCells`.
+   */
+  cityTechSumSnapshots?: Record<number, Record<number, number>>;
 }
 
 export interface MapData {
