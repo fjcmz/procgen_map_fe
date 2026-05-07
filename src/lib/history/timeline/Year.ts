@@ -40,7 +40,7 @@ export class Year {
   cityPopulations: Record<number, number> = {};  // cellIndex → population
   citySizeByCell: Record<number, number> = {};   // cellIndex → size index (0-4)
   cityOwnedCellsByCell: Record<number, number[]> = {};  // city cellIndex → array of owned cell indices
-  cityTechSumByCell: Record<number, number> = {};  // cellIndex → sum of all 9 TechField levels (effective via region→country→empire)
+  cityMaxTechByCell: Record<number, number> = {};  // cellIndex → max level across the 9 TechFields (effective via region→country→empire)
 
   // Transient
   timeline!: Timeline;

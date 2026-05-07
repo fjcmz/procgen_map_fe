@@ -524,14 +524,16 @@ export class YearGenerator {
           if (city.ownedCells.size > 0) {
             year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
           }
-          // Effective tech sum (region → country → empire-founder). Pure read,
-          // no RNG: sweep-baseline-safe. Used by the renderer to apply a
-          // per-cell tint over polygons in City.ownedCells.
+          // Effective max-field tech level (region → country → empire-founder).
+          // Pure read, no RNG: sweep-baseline-safe. Used by the renderer to
+          // apply a per-cell tint over polygons in City.ownedCells.
           const techMap = getCityEffectiveTechs(world, city);
           if (techMap && techMap.size > 0) {
-            let sum = 0;
-            for (const tech of techMap.values()) sum += tech.level;
-            if (sum > 0) year.cityTechSumByCell[city.cellIndex] = sum;
+            let max = 0;
+            for (const tech of techMap.values()) {
+              if (tech.level > max) max = tech.level;
+            }
+            if (max > 0) year.cityMaxTechByCell[city.cellIndex] = max;
           }
         }
       }

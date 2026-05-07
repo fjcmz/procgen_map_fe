@@ -8,7 +8,7 @@ import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
 import { unwrapX, drawWrappedPath, findSharedWrapAwareVerts } from './wrap';
 
-// Tech-level tint thresholds (sum of all 9 TechField levels per city).
+// Tech-level tint thresholds (max level across the 9 TechFields per city).
 // Applied to cells in `City.ownedCells` filtered by `yearAdded <= selectedYear`.
 //   < 30   : no tint (still primitive)
 //   30–59  : brown overlay (early industry / earthworks)
@@ -21,11 +21,11 @@ const TECH_TINT_BLACK    = 'rgba(0, 0, 0, 0.40)';
 const TECH_TINT_GREY     = 'rgba(120, 120, 120, 0.40)';
 const TECH_TINT_METALLIC = 'rgba(180, 185, 195, 0.55)';
 
-function tintForTechSum(sum: number): string | null {
-  if (sum < 30) return null;
-  if (sum < 60) return TECH_TINT_BROWN;
-  if (sum < 90) return TECH_TINT_BLACK;
-  if (sum < 120) return TECH_TINT_GREY;
+function tintForMaxTech(level: number): string | null {
+  if (level < 30) return null;
+  if (level < 60) return TECH_TINT_BROWN;
+  if (level < 90) return TECH_TINT_BLACK;
+  if (level < 120) return TECH_TINT_GREY;
   return TECH_TINT_METALLIC;
 }
 
@@ -87,11 +87,11 @@ function drawCityTechTint(
   selectedYear: number,
 ): void {
   const history = data.history;
-  if (!history || !history.cityTechSumSnapshots) return;
-  const snapKey = findNearestSnapshotKeyAtMost(history.cityTechSumSnapshots, selectedYear);
+  if (!history || !history.cityMaxTechSnapshots) return;
+  const snapKey = findNearestSnapshotKeyAtMost(history.cityMaxTechSnapshots, selectedYear);
   if (snapKey < 0) return;
-  const sumByCity = history.cityTechSumSnapshots[snapKey];
-  if (!sumByCity) return;
+  const maxByCity = history.cityMaxTechSnapshots[snapKey];
+  if (!maxByCity) return;
 
   const cells = data.cells;
   const pattern = getBuildingsPattern(ctx);
@@ -99,10 +99,10 @@ function drawCityTechTint(
   for (const city of data.cities) {
     if (!city.ownedCells || city.ownedCells.length === 0) continue;
     if (city.isRuin && city.ruinYear > 0 && selectedYear >= city.ruinYear) continue;
-    const sum = sumByCity[city.cellIndex] ?? 0;
-    const tint = tintForTechSum(sum);
+    const maxLevel = maxByCity[city.cellIndex] ?? 0;
+    const tint = tintForMaxTech(maxLevel);
     if (!tint) continue;
-    const drawPattern = sum >= 150 && pattern !== null;
+    const drawPattern = maxLevel >= 150 && pattern !== null;
 
     ctx.fillStyle = tint;
     for (const owned of city.ownedCells) {

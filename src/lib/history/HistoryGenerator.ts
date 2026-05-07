@@ -1079,7 +1079,7 @@ export class HistoryGenerator {
     const empireSnapshots: Record<number, EmpireSnapshotEntry[]> = {};
     const populationSnapshots: Record<number, Record<number, number>> = {};
     const expansionSnapshots: Record<number, Uint8Array> = {};
-    const cityTechSumSnapshots: Record<number, Record<number, number>> = {};
+    const cityMaxTechSnapshots: Record<number, Record<number, number>> = {};
 
     const buildPopulationSnapshot = (yearObj: Year): Record<number, number> => {
       return { ...yearObj.cityPopulations };
@@ -1327,7 +1327,7 @@ export class HistoryGenerator {
         }
         rawCitySizeSnapshots[i] = sizeArr;
         populationSnapshots[i] = buildPopulationSnapshot(yearObj);
-        cityTechSumSnapshots[i] = { ...yearObj.cityTechSumByCell };
+        cityMaxTechSnapshots[i] = { ...yearObj.cityMaxTechByCell };
       }
 
       prevOwnership = ownership;
@@ -1354,7 +1354,7 @@ export class HistoryGenerator {
       }
       rawCitySizeSnapshots[yearsToSerialize] = finalSizeArr;
       populationSnapshots[yearsToSerialize] = buildPopulationSnapshot(finalYear);
-      cityTechSumSnapshots[yearsToSerialize] = finalYear ? { ...finalYear.cityTechSumByCell } : {};
+      cityMaxTechSnapshots[yearsToSerialize] = finalYear ? { ...finalYear.cityMaxTechByCell } : {};
     } else {
       snapshots[0] = new Int16Array(cells.length).fill(-1);
       tradeSnapshots[0] = [];
@@ -1364,7 +1364,7 @@ export class HistoryGenerator {
       empireSnapshots[0] = [];
       populationSnapshots[0] = {};
       expansionSnapshots[0] = new Uint8Array(cells.length);
-      cityTechSumSnapshots[0] = {};
+      cityMaxTechSnapshots[0] = {};
     }
 
     // Phase 5: Build Country[] for UI
@@ -1651,7 +1651,7 @@ export class HistoryGenerator {
       techTimeline,
       citySizeSnapshots,
       expansionSnapshots,
-      cityTechSumSnapshots,
+      cityMaxTechSnapshots,
     };
 
     return {
