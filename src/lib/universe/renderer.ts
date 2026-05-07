@@ -213,11 +213,16 @@ export function galaxySpiralPositions(
   for (let i = 0; i < armCount; i++) {
     const arm = i % arms;
     const k = Math.floor(i / arms);
-    const baseAngle = armOffset * arm + k * angleStep;
-    const radius = (a * Math.exp(b * baseAngle)) * (spread / 200);
+    // kAngle drives radius for both arms — arm 1 must start at the same inner
+    // radius as arm 0, just offset by π in angle. Using baseAngle (which
+    // includes armOffset) for radius made arm 1's inner radius ~1.6× larger
+    // than arm 0's, hiding arm 1 near the core and overshooting at the edge.
+    const kAngle = k * angleStep;
+    const armAngle = armOffset * arm + kAngle;
+    const radius = (a * Math.exp(b * kAngle)) * (spread / 200);
     // Tiny along-arm angle wobble to break perfect regularity.
     const jitterAngle = ((i * 12.9898) % Math.PI) * 0.012;
-    const finalAngle = baseAngle + jitterAngle;
+    const finalAngle = armAngle + jitterAngle;
     // Perpendicular direction to the spiral arm at this point.
     const perpAngle = finalAngle + Math.PI / 2;
     const armWidth = Math.max(Math.abs(radius) * 0.025, (spread / 200) * 0.5);
