@@ -220,7 +220,7 @@ export function galaxySpiralPositions(
     const finalAngle = baseAngle + jitterAngle;
     // Perpendicular direction to the spiral arm at this point.
     const perpAngle = finalAngle + Math.PI / 2;
-    const armWidth = Math.max(Math.abs(radius) * 0.06, (spread / 200) * 2);
+    const armWidth = Math.max(Math.abs(radius) * 0.025, (spread / 200) * 0.5);
     const perpScatter = (((i * 78.233) % 2) - 1) * armWidth;
     positions.push({
       x: cx + Math.cos(finalAngle) * radius + Math.cos(perpAngle) * perpScatter,
@@ -413,6 +413,32 @@ function getOrBuildGlowCanvas(palette: StarPalette): HTMLCanvasElement {
 
   glowCanvasCache.set(palette.glowInner, canvas);
   return canvas;
+}
+
+// ── Galaxy shape glow ─────────────────────────────────────────────────────
+// Soft radial halo behind an entire galaxy representing overall luminosity
+// and shape. Oval galaxies stretch the gradient to match their aspect ratio.
+function drawGalaxyGlow(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, glowR: number,
+  shape: 'spiral' | 'oval', galaxyId: string,
+  colorRgb: string, peakAlpha: number,
+): void {
+  ctx.save();
+  if (shape === 'oval') {
+    const h = hashId(galaxyId);
+    const aspectX = 1.4 + (h & 0xfff) / 0xfff * 0.8;
+    ctx.translate(cx, cy);
+    ctx.scale(aspectX, 1.0);
+    ctx.translate(-cx, -cy);
+  }
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+  grd.addColorStop(0,    `rgba(${colorRgb},${peakAlpha.toFixed(3)})`);
+  grd.addColorStop(0.45, `rgba(${colorRgb},${(peakAlpha * 0.45).toFixed(3)})`);
+  grd.addColorStop(1,    `rgba(${colorRgb},0)`);
+  ctx.fillStyle = grd;
+  ctx.fillRect(cx - glowR * 1.25, cy - glowR * 1.25, glowR * 2.5, glowR * 2.5);
+  ctx.restore();
 }
 
 // ── Composition-driven palettes (planets / satellites) ───────────────────
@@ -824,6 +850,11 @@ function drawGalaxySpiral(
 ): HitCircle[] {
   const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread, shape, galaxyId);
 
+  // Ambient galaxy glow — drawn before any star dots so it sits behind them.
+  const sampleStar = systems[0]?.stars[0] ?? null;
+  const glowRgb = sampleStar?.composition === 'ANTIMATTER' ? '180,110,240' : '125,145,205';
+  drawGalaxyGlow(ctx, cx, cy, spread * 0.52, shape, galaxyId, glowRgb, 0.13);
+
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
@@ -890,7 +921,7 @@ function drawGalaxySpiral(
  * Tint hash is deterministic from `galaxy.id` so the same galaxy always
  * picks the same accent shade.
  */
-const GLYPH_DOT_COUNT = 20;
+const GLYPH_DOT_COUNT = 30;
 
 function drawGalaxyGlyph(
   ctx: CanvasRenderingContext2D,
@@ -909,6 +940,10 @@ function drawGalaxyGlyph(
     : null;
   const dominantStar = sampleSystem?.stars[0] ?? null;
   const dotColor = dominantStar ? starFill(dominantStar).core : '#dde0ff';
+
+  // Galaxy shape glow — drawn before dots so it sits behind them.
+  const glowRgb = dominantStar?.composition === 'ANTIMATTER' ? '200,130,255' : '140,160,220';
+  drawGalaxyGlow(ctx, cx, cy, radius * 1.3, galaxy.shape, galaxy.id, glowRgb, 0.55);
 
   // Low-res dots — same shape as the full layout but with a fixed dot count
   // so the glyph reads as a "compressed" galaxy.
