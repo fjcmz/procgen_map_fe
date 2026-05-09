@@ -60,6 +60,7 @@ const MARKET_COUNT: Record<CitySize, number> = {
   large: 5,
   metropolis: 8,
   megalopolis: 16,
+  ecumenopolis: 28,
 };
 const PARK_COUNT: Record<CitySize, number> = {
   small: 1,
@@ -67,6 +68,7 @@ const PARK_COUNT: Record<CitySize, number> = {
   large: 5,
   metropolis: 7,
   megalopolis: 10,
+  ecumenopolis: 16,
 };
 const PARK_MAX_POLYGONS: Record<CitySize, number> = {
   small: 1,
@@ -74,6 +76,7 @@ const PARK_MAX_POLYGONS: Record<CitySize, number> = {
   large: 2,
   metropolis: 3,
   megalopolis: 3,
+  ecumenopolis: 4,
 };
 
 // ─── Castle / palace tables (mirror cityMapLandmarks.ts:72-94) ──────────────
@@ -82,27 +85,31 @@ const CAPITAL_LARGE_SIZES: ReadonlySet<CitySize> = new Set<CitySize>([
   'large',
   'metropolis',
   'megalopolis',
+  'ecumenopolis',
 ]);
 
 const PALACE_NON_CAPITAL_PROB: Partial<Record<CitySize, number>> = {
-  medium:      0.40,
-  large:       0.60,
-  metropolis:  0.80,
-  megalopolis: 0.95,
+  medium:       0.40,
+  large:        0.60,
+  metropolis:   0.80,
+  megalopolis:  0.95,
+  ecumenopolis: 1.00,
 };
 
 // Cumulative castle rolls for NON-CAPITAL cities. Stops at first failure.
 const CASTLE_ROLLS_NON_CAPITAL: Partial<Record<CitySize, number[]>> = {
-  large:       [0.50],
-  metropolis:  [0.80, 0.30],
-  megalopolis: [1.00, 0.60, 0.30],
+  large:        [0.50],
+  metropolis:   [0.80, 0.30],
+  megalopolis:  [1.00, 0.60, 0.30],
+  ecumenopolis: [1.00, 0.85, 0.50, 0.25],
 };
 
 // Extra cumulative castle rolls for CAPITAL cities (capital pass already
 // places 1; these add beyond it).
 const CASTLE_ROLLS_CAPITAL: Partial<Record<CitySize, number[]>> = {
-  metropolis:  [0.30],
-  megalopolis: [0.60, 0.30],
+  metropolis:   [0.30],
+  megalopolis:  [0.60, 0.30],
+  ecumenopolis: [0.80, 0.50, 0.25],
 };
 
 const PALACE_MIN_HOPS = 10;

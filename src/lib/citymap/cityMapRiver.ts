@@ -55,7 +55,7 @@ const OPPOSITE: Record<CardinalSide, CardinalSide> = {
 const SIDE_EPSILON_PX = 0.5;
 
 // Only cities of `large` or above attempt bifurcation (spec: "large+").
-const BIFURCATION_SIZES: ReadonlySet<CitySize> = new Set(['large', 'metropolis', 'megalopolis']);
+const BIFURCATION_SIZES: ReadonlySet<CitySize> = new Set(['large', 'metropolis', 'megalopolis', 'ecumenopolis']);
 const BIFURCATION_ATTEMPTS = 6;
 const BIFURCATION_CHANCE = 0.35;
 // Main-stretch length range, in main-path vertex count (3–6 edges = 4–7 vertices).

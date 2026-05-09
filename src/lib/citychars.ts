@@ -181,11 +181,13 @@ interface SizeProfile {
 }
 
 const SIZE_PROFILES: Record<City['size'], SizeProfile> = {
-  small:       { count: 6,  minLevel: 1, maxLevel: 3,  dominantBias: 1.0  },
-  medium:      { count: 12, minLevel: 1, maxLevel: 5,  dominantBias: 0.7  },
-  large:       { count: 24, minLevel: 1, maxLevel: 7,  dominantBias: 0.5  },
-  metropolis:  { count: 48, minLevel: 1, maxLevel: 12, dominantBias: 0.3  },
-  megalopolis: { count: 96, minLevel: 1, maxLevel: 15, dominantBias: 0.15 },
+  small:        { count: 6,   minLevel: 1, maxLevel: 3,  dominantBias: 1.0  },
+  medium:       { count: 12,  minLevel: 1, maxLevel: 5,  dominantBias: 0.7  },
+  large:        { count: 24,  minLevel: 1, maxLevel: 7,  dominantBias: 0.5  },
+  metropolis:   { count: 48,  minLevel: 1, maxLevel: 12, dominantBias: 0.3  },
+  megalopolis:  { count: 96,  minLevel: 1, maxLevel: 15, dominantBias: 0.15 },
+  // Ecumenopolis: planet-spanning city, max race diversity, max levels.
+  ecumenopolis: { count: 200, minLevel: 1, maxLevel: 20, dominantBias: 0.05 },
 };
 
 /**

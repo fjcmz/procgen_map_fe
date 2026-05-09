@@ -57,10 +57,10 @@ const WALL_SMOOTH_ITERATIONS = 1;
 // Gate counts per city size tier.
 // metropolis: 5-6, megalopolis: 6-8
 const GATE_COUNT_MIN: Record<CitySize, number> = {
-  small: 2, medium: 3, large: 4, metropolis: 5, megalopolis: 6,
+  small: 2, medium: 3, large: 4, metropolis: 5, megalopolis: 6, ecumenopolis: 8,
 };
 const GATE_COUNT_MAX: Record<CitySize, number> = {
-  small: 4, medium: 4, large: 4, metropolis: 6, megalopolis: 8,
+  small: 4, medium: 4, large: 4, metropolis: 6, megalopolis: 8, ecumenopolis: 12,
 };
 
 // Minimum gates on any inner/middle wall ring.

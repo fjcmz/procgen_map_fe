@@ -75,6 +75,7 @@ const SPRAWL_TIER_SCALE: Record<CitySize, number> = {
   large: 1.0,
   metropolis: 1.15,
   megalopolis: 1.3,
+  ecumenopolis: 1.6,
 };
 
 // How far toward the polygon centroid each vertex is moved (fraction of the
@@ -98,7 +99,7 @@ const SPRAWL_SOLID_PROBABILITY = 0.45;
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 // Sizes where sprawl density increases near the outer wall.
-const WALL_PROXIMITY_SIZES: ReadonlySet<CitySize> = new Set<CitySize>(['metropolis', 'megalopolis']);
+const WALL_PROXIMITY_SIZES: ReadonlySet<CitySize> = new Set<CitySize>(['metropolis', 'megalopolis', 'ecumenopolis']);
 // Near the wall the probability bonus peaks at this multiplier above the base.
 const WALL_PROXIMITY_BONUS = 0.8;
 

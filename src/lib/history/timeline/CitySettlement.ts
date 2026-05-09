@@ -101,7 +101,7 @@ export class CitySettlementGenerator {
     for (const city of world.mapUsableCities.values()) {
       if (!city.founded || city.isRuin) continue;
       if (city.hasHadSettlement) continue;
-      if (city.size !== 'large' && city.size !== 'metropolis' && city.size !== 'megalopolis') continue;
+      if (city.size !== 'large' && city.size !== 'metropolis' && city.size !== 'megalopolis' && city.size !== 'ecumenopolis') continue;
 
       // 1% annual chance to attempt a settlement
       if (rng() >= SETTLEMENT_CHANCE) continue;

@@ -26,6 +26,9 @@ export const WONDER_TIER_NAMES: readonly string[] = [
   'Nexus',
   'Ascendancy',
   'Apotheosis',
+  // Tiers 11–12: ecumenopolis-only "megaprojects" (planet-spanning works).
+  'Megastructure',
+  'Cosmoarch',
 ];
 
 /**
@@ -235,6 +238,32 @@ export const WONDER_NAMES: readonly string[][] = [
     'The Kratophany Forge', 'The Mysterium Tremendum', 'The Coincidentia Oppositorum',
     'The Ungrund Throne', 'The Absolute Sanctum',
   ],
+  // ── Tier 11: Megastructure (ecumenopolis only — planet-spanning works) ──
+  [
+    'The Orbital Ring', 'The Skyhook', 'The World Spire',
+    'The Stellar Forge', 'The Dyson Collector', 'The Equatorial Highway',
+    'The Atmospheric Lattice', 'The Worldspine Reactor', 'The Crustline Tunnel',
+    'The Geosynchronous Tether', 'The Continental Arcology', 'The Magneto-Cradle',
+    'The Aerostat Cathedral', 'The Stratospheric Ringway', 'The Planetary Lens',
+    'The Beanstalk Citadel', 'The Sun Mirror Array', 'The Polar Caplinks',
+    'The Tectonic Anchor', 'The Megalith of Tides', 'The Continental Forge',
+    'The Singularity Core', 'The Quantum Vault', 'The Cradle of Suns',
+    'The Worldspring Aqueduct', 'The Skyhall Concord', 'The Auroral Engine',
+    'The Equator Beacon', 'The Continent-Spanning Bridge', 'The Megalithic Loom',
+  ],
+  // ── Tier 12: Cosmoarch (ecumenopolis only — beyond-planet works) ──
+  [
+    'The Universal Constructor', 'The Stellar Engine', 'The Worldship Cradle',
+    'The Wormhole Anchorage', 'The Galactic Beacon', 'The Migration Spire',
+    'The Eschaton Forge', 'The Reality Loom', 'The Generation Ark',
+    'The Dyson Sphere Frame', 'The Cosmic Lighthouse', 'The Singularity Engine',
+    'The Multiverse Gate', 'The Voidspanner', 'The Eternal Cradle',
+    'The Antimatter Foundry', 'The Tachyon Beacon', 'The Cosmic Loom',
+    'The Stellar Reservoir', 'The Hypergate of Suns', 'The Quasar Shrine',
+    'The Causal Anchor', 'The Boltzmann Cradle', 'The Final Codex',
+    'The Empyrean Gate of Ages', 'The Planck Wellspring', 'The Apotheosis Engine',
+    'The Nexus of Ages', 'The Final Wonder', 'The Cosmoarch Itself',
+  ],
 ];
 
 /**
@@ -253,11 +282,16 @@ export const WONDER_TIER_RESOURCES: readonly { types: readonly ResourceType[]; c
   { types: ['platinum', 'diamonds', 'obsidian', 'uranium', 'oil'],               costPerResource: 8 },
   { types: ['platinum', 'uranium', 'diamonds', 'rubies', 'sapphires', 'oil'],    costPerResource: 9 },
   { types: ['platinum', 'uranium', 'granite', 'diamonds', 'gold', 'obsidian', 'rubies', 'silk'], costPerResource: 10 },
+  // Tier 11–12: megaprojects. Costs ramp ~1.5× / ~2.25× tier 10. Resource
+  // basket is the same as tier 10 (any extension would need new ResourceType
+  // entries, which would shift the sweep).
+  { types: ['platinum', 'uranium', 'granite', 'diamonds', 'gold', 'obsidian', 'rubies', 'silk'], costPerResource: 15 },
+  { types: ['platinum', 'uranium', 'granite', 'diamonds', 'gold', 'obsidian', 'rubies', 'silk'], costPerResource: 22 },
 ];
 
 /** Total tech levels required for each tier (index 0 = tier 1). */
 export const WONDER_TIER_TECH_REQUIREMENT: readonly number[] = [
-  10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
+  10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120,
 ];
 
 /**

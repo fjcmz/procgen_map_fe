@@ -23,7 +23,7 @@ interface HierarchyTabProps {
   seed?: string;
 }
 
-const ALL_CITY_SIZES: City['size'][] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
+const ALL_CITY_SIZES: City['size'][] = ['small', 'medium', 'large', 'metropolis', 'megalopolis', 'ecumenopolis'];
 
 /** Per-city feature flags surfaced as small icons next to the city name. */
 interface CityFeatureFlags {
@@ -58,18 +58,20 @@ const FEATURE_LABELS = {
 
 /** Unicode icon and tooltip label per city size, conveying scale progression. */
 const SIZE_ICONS: Record<City['size'], string> = {
-  small:       '·',  // ·  middle dot
-  medium:      '•',  // •  bullet
-  large:       '●',  // ●  black circle
-  metropolis:  '⬤',  // ⬤  black large circle
-  megalopolis: '★',  // ★  star
+  small:        '·',  // ·  middle dot
+  medium:       '•',  // •  bullet
+  large:        '●',  // ●  black circle
+  metropolis:   '⬤',  // ⬤  black large circle
+  megalopolis:  '★',  // ★  star
+  ecumenopolis: '✦',  // ✦  four-pointed black star — planet-spanning city
 };
 const SIZE_LABELS: Record<City['size'], string> = {
-  small: 'Small',
-  medium: 'Medium',
-  large: 'Large',
-  metropolis: 'Metropolis',
-  megalopolis: 'Megalopolis',
+  small:        'Small',
+  medium:       'Medium',
+  large:        'Large',
+  metropolis:   'Metropolis',
+  megalopolis:  'Megalopolis',
+  ecumenopolis: 'Ecumenopolis',
 };
 
 interface CountryNode {

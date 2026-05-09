@@ -204,6 +204,7 @@ export const CANVAS_POLYGON_COUNTS: Record<CitySize, number> = {
   large: 3000,
   metropolis: 4000,
   megalopolis: 5000,
+  ecumenopolis: 7000,
 };
 
 // Single source of truth for the V2 CITY polygon counts per size tier.
@@ -221,6 +222,7 @@ export const POLYGON_COUNTS: Record<CitySize, number> = {
   large: 350,
   metropolis: 500,
   megalopolis: 1000,
+  ecumenopolis: 2000,
 };
 
 const CANVAS_SIZE = 1000;
@@ -609,6 +611,11 @@ export function generateCityMapV2(
       break;
     case 'megalopolis':
       wallConfig = { hasOuterWall: true, hasInnerWall: true, innerFraction: 0.22, hasMiddleWall: wallRng() < 0.5, middleFraction: 0.52 };
+      break;
+    case 'ecumenopolis':
+      // Always-on three-ring fortification: outer + middle + small inner core.
+      // The arcology spire is implied by the tighter inner-fraction (0.18).
+      wallConfig = { hasOuterWall: true, hasInnerWall: true, innerFraction: 0.18, hasMiddleWall: true, middleFraction: 0.55 };
       break;
   }
 

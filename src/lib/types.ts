@@ -143,7 +143,7 @@ export interface City {
   isCapital: boolean;
   kingdomId: number;
   foundedYear: number;
-  size: 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
+  size: 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis' | 'ecumenopolis';
   isRuin: boolean;
   ruinYear: number;
   /** Cells owned by this city, with the year each was claimed. */

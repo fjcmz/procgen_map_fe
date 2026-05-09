@@ -525,14 +525,11 @@ export function placeDistinctiveFeature(
   used: Set<number>,
 ): LandmarkV2[] {
   const { seed, cityName, env, polygons, candidatePool, wall } = ctx;
-  if (env.size !== 'megalopolis') return [];
+  // Megalopolis: exactly 1 distinctive feature.
+  // Ecumenopolis: 3–5 distinctive features (catalog has 30 entries — well
+  // within the available budget) to convey planet-spanning scale.
+  if (env.size !== 'megalopolis' && env.size !== 'ecumenopolis') return [];
   if (candidatePool.size === 0) return [];
-
-  const selectRng = seededPRNG(`${seed}_city_${cityName}_distinctive_select`);
-  const placeRng = seededPRNG(`${seed}_city_${cityName}_distinctive_place`);
-
-  const spec = pickFeature(env, selectRng);
-  if (spec === null) return [];
 
   // Interior-only candidate pool (the cluster itself stays inside the city
   // footprint; water/mountain absorption is opt-in via seed preference).
@@ -542,38 +539,68 @@ export function placeDistinctiveFeature(
   }
   const insidePool = interiorPool.size > 0 ? interiorPool : candidatePool;
 
-  const seedId = pickSeedPolygon(spec, ctx, insidePool, used, placeRng);
-  if (seedId === -1) return [];
-
-  const [minSize, maxSize] = spec.polygonRange;
-  const clampedMin = Math.max(MIN_FEATURE_POLYGONS, Math.min(minSize, MAX_FEATURE_POLYGONS));
-  const clampedMax = Math.max(clampedMin, Math.min(maxSize, MAX_FEATURE_POLYGONS));
-  const targetSize = clampedMin + Math.floor(placeRng() * (clampedMax - clampedMin + 1));
-
-  const cluster = growCluster(seedId, targetSize, ctx, insidePool, used, spec);
-
-  // Reject undersized clusters — happens when the city footprint is narrow or
-  // the seed sits in a pinched corner. No retry: the tier gate gives megalopolis
-  // 1000 polygons, plenty for any 20-poly cluster, so a failure here is rare
-  // and gracefully degrades to "no feature this city".
-  if (cluster.length < MIN_FEATURE_POLYGONS) {
-    // Restore: nothing was added to `used` yet.
-    return [];
+  // Determine how many distinctive features to place.
+  let featureCount = 1;
+  if (env.size === 'ecumenopolis') {
+    const countRng = seededPRNG(`${seed}_city_${cityName}_distinctive_count`);
+    featureCount = 3 + Math.floor(countRng() * 3); // 3..5 inclusive
   }
 
-  for (const pid of cluster) used.add(pid);
-  void polygons; // referenced through ctx for parity with other placers
+  const placedNames = new Set<string>();
+  const placedKinds = new Set<string>();
+  const out: LandmarkV2[] = [];
 
-  return [
-    {
+  for (let i = 0; i < featureCount; i++) {
+    // Each feature gets isolated sub-streams so adding/removing features in
+    // one slot doesn't shift the others.
+    const slotSuffix = featureCount === 1 ? '' : `_${i}`;
+    const selectRng = seededPRNG(`${seed}_city_${cityName}_distinctive_select${slotSuffix}`);
+    const placeRng = seededPRNG(`${seed}_city_${cityName}_distinctive_place${slotSuffix}`);
+
+    // Pick a feature spec; for ecumenopolis avoid duplicates.
+    let spec = pickFeature(env, selectRng);
+    if (spec === null) continue;
+    if (env.size === 'ecumenopolis') {
+      let attempts = 0;
+      while (placedKinds.has(spec.id) && attempts < 12) {
+        spec = pickFeature(env, selectRng);
+        if (spec === null) break;
+        attempts++;
+      }
+      if (spec === null || placedKinds.has(spec.id)) continue;
+    }
+
+    const seedId = pickSeedPolygon(spec, ctx, insidePool, used, placeRng);
+    if (seedId === -1) continue;
+
+    const [minSize, maxSize] = spec.polygonRange;
+    const clampedMin = Math.max(MIN_FEATURE_POLYGONS, Math.min(minSize, MAX_FEATURE_POLYGONS));
+    const clampedMax = Math.max(clampedMin, Math.min(maxSize, MAX_FEATURE_POLYGONS));
+    const targetSize = clampedMin + Math.floor(placeRng() * (clampedMax - clampedMin + 1));
+
+    const cluster = growCluster(seedId, targetSize, ctx, insidePool, used, spec);
+    if (cluster.length < MIN_FEATURE_POLYGONS) continue;
+
+    for (const pid of cluster) used.add(pid);
+
+    // Avoid display-name duplicates across the same city.
+    let displayName = spec.displayName;
+    if (placedNames.has(displayName)) displayName = `${displayName} (${i + 1})`;
+    placedNames.add(displayName);
+    placedKinds.add(spec.id);
+
+    out.push({
       polygonId: seedId,
       kind: spec.id,
-      name: spec.displayName,
+      name: displayName,
       polygonIds: cluster,
       distinctive: {
         category: spec.category,
         visual: spec.visual,
       },
-    },
-  ];
+    });
+  }
+
+  void polygons; // referenced through ctx for parity with other placers
+  return out;
 }

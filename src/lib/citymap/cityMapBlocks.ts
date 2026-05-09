@@ -40,6 +40,7 @@ const NON_RES_BLOCK_SIZE_LIMIT: Record<CitySize, number> = {
   large: 6,
   metropolis: 8,
   megalopolis: 10,
+  ecumenopolis: 14,
 };
 
 function isResidentialDistrict(role: DistrictType): boolean {

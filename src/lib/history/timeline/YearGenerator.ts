@@ -102,11 +102,29 @@ export class YearGenerator {
       }
     }
 
-    // Step 4b: Recompute dynamic city sizes from population + tech
+    // Step 4b: Recompute dynamic city sizes from population + tech.
+    //
+    // Exploration tech is passed in so the new top tier ('ecumenopolis') can
+    // gate on the Space-Stations band — see ECUMENOPOLIS_EXPLORATION_GATE.
+    // Per-continent cap: at most one ecumenopolis per continent. If a second
+    // city would qualify, it is downgraded back to megalopolis. This keeps
+    // the new tier rare without disturbing the rest of the size ladder.
+    const ecumenoContinents = new Set<string>();
     for (const city of world.mapUsableCities.values()) {
       const govLevel = getCityTechLevel(world, city, 'government');
       const indLevel = getCityTechLevel(world, city, 'industry');
-      city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
+      const expLevel = getCityTechLevel(world, city, 'exploration');
+      let nextSize = computeCitySize(city.currentPopulation, govLevel, indLevel, expLevel);
+      if (nextSize === 'ecumenopolis') {
+        const region = world.mapRegions.get(city.regionId);
+        const contId = region?.continentId ?? '';
+        if (ecumenoContinents.has(contId)) {
+          nextSize = 'megalopolis';
+        } else {
+          ecumenoContinents.add(contId);
+        }
+      }
+      city.size = nextSize;
     }
     });
 

@@ -1,30 +1,38 @@
 import { IdUtil } from '../IdUtil';
 
-export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
+export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis' | 'ecumenopolis';
 
 export const CITY_SIZE_WEIGHTS: Record<CitySize, number> = {
-  small: 100, medium: 40, large: 15, metropolis: 5, megalopolis: 1,
+  small: 100, medium: 40, large: 15, metropolis: 5, megalopolis: 1, ecumenopolis: 0,
 };
 
 const CITY_SIZE_TOTAL = (Object.values(CITY_SIZE_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
 
 export const CITY_SIZE_TRADE_CAP: Record<CitySize, number> = {
-  small: 10, medium: 15, large: 20, metropolis: 30, megalopolis: 50,
+  small: 10, medium: 15, large: 20, metropolis: 30, megalopolis: 50, ecumenopolis: 100,
 };
+
+/**
+ * Minimum exploration tech level required to promote into ecumenopolis.
+ * Ties the new tier to the "Space Stations" tech (level 49+ in techNames.ts).
+ * Below this threshold a 100M+ city stays megalopolis.
+ */
+export const ECUMENOPOLIS_EXPLORATION_GATE = 49;
 
 /** Population thresholds for dynamic city size. Ordered descending by minPop. */
 export const CITY_SIZE_THRESHOLDS: { size: CitySize; minPop: number }[] = [
-  { size: 'megalopolis', minPop: 10_000_000 },
-  { size: 'metropolis',  minPop: 1_000_000 },
-  { size: 'large',       minPop: 100_000 },
-  { size: 'medium',      minPop: 10_000 },
+  { size: 'ecumenopolis', minPop: 100_000_000 },
+  { size: 'megalopolis',  minPop: 10_000_000 },
+  { size: 'metropolis',   minPop: 1_000_000 },
+  { size: 'large',        minPop: 100_000 },
+  { size: 'medium',       minPop: 10_000 },
 ];
 
 export const CITY_SIZE_TO_INDEX: Record<CitySize, number> = {
-  small: 0, medium: 1, large: 2, metropolis: 3, megalopolis: 4,
+  small: 0, medium: 1, large: 2, metropolis: 3, megalopolis: 4, ecumenopolis: 5,
 };
 
-export const INDEX_TO_CITY_SIZE: CitySize[] = ['small', 'medium', 'large', 'metropolis', 'megalopolis'];
+export const INDEX_TO_CITY_SIZE: CitySize[] = ['small', 'medium', 'large', 'metropolis', 'megalopolis', 'ecumenopolis'];
 
 /**
  * Population milestones that each grant +1 cell of territory.
@@ -84,11 +92,24 @@ export function maxCellsForCity(pop: number, govLevel: number): number {
  * Derive city size from population and tech levels.
  * `government` and `industry` tech reduce thresholds (~0.5% per combined level),
  * so advanced civilizations reach higher tiers at smaller populations.
+ *
+ * `explorationLevel` gates the top tier: a city only promotes to
+ * 'ecumenopolis' when it has reached the Space-Stations band of exploration
+ * (`>= ECUMENOPOLIS_EXPLORATION_GATE`). Below that, a 100M+ city stays
+ * megalopolis. Defaults to 0 so legacy 3-arg callers stay byte-identical.
  */
-export function computeCitySize(population: number, govLevel: number = 0, industryLevel: number = 0): CitySize {
+export function computeCitySize(
+  population: number,
+  govLevel: number = 0,
+  industryLevel: number = 0,
+  explorationLevel: number = 0,
+): CitySize {
   const techFactor = 1 / (1 + 0.005 * (govLevel + industryLevel));
   for (const { size, minPop } of CITY_SIZE_THRESHOLDS) {
-    if (population >= minPop * techFactor) return size;
+    if (population >= minPop * techFactor) {
+      if (size === 'ecumenopolis' && explorationLevel < ECUMENOPOLIS_EXPLORATION_GATE) continue;
+      return size;
+    }
   }
   return 'small';
 }

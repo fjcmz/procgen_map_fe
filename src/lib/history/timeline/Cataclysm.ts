@@ -217,10 +217,13 @@ function applyCasualties(city: CityEntity, killRatio: number, world: World, miti
   }
 
   city.currentPopulation -= casualties;
-  // Shrink city tier if population dropped below thresholds
+  // Shrink city tier if population dropped below thresholds. Pass exploration
+  // so an ecumenopolis can demote correctly when its population drops below
+  // 100M but tech remains in the Space-Stations band.
   const govLevel = getCityTechLevel(world, city, 'government');
   const indLevel = getCityTechLevel(world, city, 'industry');
-  city.size = computeCitySize(city.currentPopulation, govLevel, indLevel);
+  const expLevel = getCityTechLevel(world, city, 'exploration');
+  city.size = computeCitySize(city.currentPopulation, govLevel, indLevel, expLevel);
   return { killed: casualties, shouldRuin: false };
 }
 

@@ -687,6 +687,7 @@ const CITY_SIZE_SCALE: Record<string, number> = {
   large: 0.75,
   metropolis: 0.85,
   megalopolis: 0.95,
+  ecumenopolis: 1.15,
 };
 
 function drawHouseIcon(
@@ -697,12 +698,28 @@ function drawHouseIcon(
   isCapital: boolean,
   sizeScale: number = 1.0,
   scale: number = 1,
+  isEcumenopolis: boolean = false,
 ): void {
   const ss = s * sizeScale;
   const wallW = ss * 1.4;
   const wallH = ss * 1.0;
   const wallX = x - wallW / 2;
   const wallY = y - wallH * 0.3;
+
+  // Ecumenopolis halo: concentric rings drawn UNDER the house icon, so the
+  // marker reads as a planet-spanning city without losing the familiar glyph.
+  if (isEcumenopolis) {
+    const r0 = ss * 1.0;
+    const r1 = ss * 1.5;
+    const r2 = ss * 2.1;
+    ctx.strokeStyle = '#7a5018';
+    ctx.lineWidth = 0.6 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r2, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 0.8 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r1, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1.0 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r0, 0, Math.PI * 2); ctx.stroke();
+  }
 
   if (isCapital) {
     ctx.fillStyle = '#e8c87a';
@@ -871,7 +888,7 @@ function drawCityIcons(
       const idx = cityIdxMap.get(city.cellIndex);
       if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
     }
-    drawHouseIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale);
+    drawHouseIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale, sizeKey === 'ecumenopolis');
   }
 
   for (const city of ruinCities) {

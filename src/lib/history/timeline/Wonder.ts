@@ -220,8 +220,8 @@ export class WonderGenerator {
     const absYear = year.year;
 
     for (const c of world.mapUsableCities.values()) {
-      // City size gate: must be large, metropolis, or megalopolis
-      if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis') continue;
+      // City size gate: must be large, metropolis, megalopolis, or ecumenopolis
+      if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis' && c.size !== 'ecumenopolis') continue;
 
       // Compute total tech level across all 9 fields
       let totalTech = 0;
@@ -239,13 +239,16 @@ export class WonderGenerator {
       const maxStanding = Math.max(1, Math.floor(govLevel / 5));
       if (getStandingWonderCount(world, c) >= maxStanding) continue;
 
-      // Max tier from tech: tier N requires N*10 total tech levels
-      let maxTier = Math.min(10, Math.floor(totalTech / 10));
+      // Max tier from tech: tier N requires N*10 total tech levels.
+      // Cap is 12 (tiers 11–12 are ecumenopolis-only "megaprojects").
+      let maxTier = Math.min(12, Math.floor(totalTech / 10));
       if (maxTier < 1) continue; // need at least 10 total tech
 
-      // Tier-based size gate: tier 7+ requires metropolis+, tier 9+ requires megalopolis
+      // Tier-based size gate: tier 7+ requires metropolis+, tier 9+ requires
+      // megalopolis+, tier 11+ requires ecumenopolis.
       if (c.size === 'large' && maxTier > 6) maxTier = 6;
       if (c.size === 'metropolis' && maxTier > 8) maxTier = 8;
+      if (c.size === 'megalopolis' && maxTier > 10) maxTier = 10;
 
       // Collect pooled resources for this city's entity hierarchy
       const pool = collectPooledResources(world, c, countryPooledRegions);
