@@ -56,6 +56,56 @@ function bfsTerritory(
 }
 
 
+/**
+ * Score a water cell as a candidate for a SEA-city founding site. Mirror of
+ * `scoreCellForCity` for the sea-colonisation path in `CitySettlement.ts`.
+ *
+ * Returns `-Infinity` for any non-water cell (so callers can use the same
+ * candidate-filtering pattern as the land path). For water cells:
+ *   - Adjacent land neighbours are preferred (harbours / sheltered bays).
+ *   - Cells already attached to a region (`regionId` set) score above
+ *     deep ocean — coastal water is the natural-tier-1 expansion target.
+ *   - COAST biome scores above OCEAN, mirroring the `isCoast` bonus on land.
+ *
+ * Used by the sea-attempt branch in `CitySettlement.ts` to rank candidate
+ * water cells. Importantly, the function never consumes randomness — its
+ * caller routes any tiebreak rolls through an isolated `seaRng` sub-stream so
+ * the timeline RNG remains untouched on the sea path.
+ */
+export function scoreCellForSeaCity(cell: Cell, cells: Cell[]): number {
+  if (!cell.isWater) return -Infinity;
+
+  let score = 0;
+
+  // Harbour bonus — water with adjacent land
+  let landNeighborCount = 0;
+  for (const ni of cell.neighbors) {
+    if (!cells[ni].isWater) landNeighborCount++;
+  }
+  if (landNeighborCount >= 1) score += 1.5;
+  if (landNeighborCount >= 3) score += 1.0; // sheltered bay
+  if (landNeighborCount >= 5) score += 1.0; // very sheltered (river mouth-like)
+
+  // Region attachment — already-claimable coastal water is preferred
+  if (cell.regionId) score += 2;
+
+  // Coastal biome bonus (mirror of land `isCoast` bonus)
+  if (cell.biome === 'COAST') score += 1;
+
+  // River-mouth bonus — sea water adjacent to a river-flow land cell
+  for (const ni of cell.neighbors) {
+    if (!cells[ni].isWater && cells[ni].riverFlow > 4) {
+      score += 1.5;
+      break;
+    }
+  }
+
+  // Polar / freezing penalty
+  if (cell.biome === 'ICE') score -= 4;
+
+  return score;
+}
+
 export function scoreCellForCity(cell: Cell, cells: Cell[]): number {
   if (cell.isWater || cell.elevation > 0.75) return -Infinity;
 

@@ -151,6 +151,14 @@ export interface CityEnvironment {
    * Derived deterministically from `biome` in `deriveCityEnvironment`.
    */
   baseCulture: BaseCulture;
+  /**
+   * True iff the world-map city was founded on a water cell via the sea-
+   * colonisation path (`CityEntity.isSeaCity`). Set by `deriveCityEnvironment`
+   * from `City.isSeaCity`. Drives the V2 stilted-city variant: walls skipped,
+   * river skipped, the canvas surrounding the city footprint is rendered as
+   * open sea so buildings read as platforms on stilts.
+   */
+  isSeaCity: boolean;
 }
 
 /**

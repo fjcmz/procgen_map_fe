@@ -106,7 +106,9 @@ Lost and absorbed entries surface as per-country `TECH_LOSS` `HistoryEvent`s in 
 `warGenerator`: conflict between neighbouring countries not in the same empire; weighted reason enum; disrupts cross-region trades. Both belligerents must be at peace — checks `!c.atWar` on aggressor (line 56) AND `candidate.atWar` on defender in the selection loop. This prevents simultaneous multi-front wars.
 
 ### Tech
-`techGenerator`: technology discovered by an illustrate; 9 tech fields; `mergeAllTechs` (union by max level) and `getNewTechs` (delta).
+`techGenerator`: technology discovered by an illustrate; 10 tech fields (`science`, `military`, `industry`, `energy`, `growth`, `exploration`, `biology`, `art`, `government`, `maritime`); `mergeAllTechs` (union by max level) and `getNewTechs` (delta).
+
+The `maritime` field gates sea-city colonisation in `CitySettlement.ts` (see "Sea Cities" below). Adjacency edges: `maritime ↔ industry` and `maritime ↔ exploration` (symmetric). Spirit bonus: `industrious`. Illustrate eligibility: `industry`. Trade-capacity multiplier: yes (member of `TRADE_TECHS`).
 
 Exports tech-scope helpers `getCityTechLevel` / `getCountryTechLevel` (and underlying `getCityEffectiveTechs` / `getCountryEffectiveTechs`) that mirror the `_createTech` scope ladder: **empire founder → country → city**.
 
@@ -123,7 +125,7 @@ A one-shot symmetry assertion on `TECH_ADJACENCY` runs at module load (mirrors t
 
 **Spec stretch §2** also exports `recordDiffusedTech` and `TRADE_DIFFUSION_DISCOVERER` so trade-driven tech-diffusion writes go through the same empire-founder scope ladder as `_createTech` (the helper writes through `getCountryEffectiveTechs`).
 
-**Spec stretch §3** (named techs): static `TECH_NAMES` table lives in `timeline/techNames.ts` (9 fields × ~7 level names each) + `nameForLevel(field, level)` helper + internal `roman()` overflow helper. Imported **only** by `HistoryGenerator.ts` at serialization time — flavor metadata, not simulation state. Levels beyond the table reuse the last entry with a Roman-numeral suffix (e.g. `Vertical Farming II` for `growth` level 8). **Never** import from `Tech.ts` / `Cataclysm.ts` / `Trade.ts` or any mutation site.
+**Spec stretch §3** (named techs): static `TECH_NAMES` table lives in `timeline/techNames.ts` (10 fields × 30 level names each — 9 historical + the `maritime` addition) + `nameForLevel(field, level)` helper + internal `roman()` overflow helper. Imported **only** by `HistoryGenerator.ts` at serialization time — flavor metadata, not simulation state. Levels beyond the table reuse the last entry with a Roman-numeral suffix (e.g. `Vertical Farming II` for `growth` level 8). **Never** import from `Tech.ts` / `Cataclysm.ts` / `Trade.ts` or any mutation site.
 
 `TRADE_TECHS` controls trade capacity multiplier `(1 + level/10)`. The field list is hardcoded in two places — `TRADE_TECH_FIELDS` in `physical/CityEntity.ts` (consumed by `effectiveTradeCap()`) and `TRADE_TECHS` in `timeline/Tech.ts` — to avoid a `physical → timeline` circular import. **If you change one, change the other.** A dev-only monotonicity assertion in `mapgen.worker.ts` guards against regressions.
 
@@ -263,6 +265,37 @@ The right-side event log + tech sub-panel that used to live here moved to `overl
 ### Entity Navigation
 
 `App.tsx → UnifiedOverlay → HierarchyTab/EventsTab`: clicking a locate button (◎) in the Realm tab or a locatable event row in the Events tab calls `handleEntityNavigate(cellIndices, centerCellIndex)` in `App.tsx`, which centers the viewport via `mapCanvasRef.current.navigateTo()` and sets `highlightCells` state. Highlight rendered as gold overlay (layer 9 in `renderer.ts`, `drawHighlight()`). Clicking the map canvas clears the highlight via `onInteraction` callback. The `ownershipAtYear: Int16Array` is computed once in `App.tsx` via `useMemo` and shared by both renderer and HierarchyTab.
+
+## Sea Cities
+
+Sea / ocean colonisation is a tech-gated extension of the city-settlement path that lets large+ coastal cities spawn a child city on a water cell once their effective country reaches the `maritime` tech field. Implemented entirely in `src/lib/history/timeline/CitySettlement.ts`; no new generator, no new entity type, no new MapData field beyond a `City.isSeaCity` boolean.
+
+**Tech gates** (constants in `CitySettlement.ts`):
+- `SEA_SETTLEMENT_MARITIME_GATE = 1` — coastal water (cells already in the 2-hop COAST band assigned by `buildPhysicalWorld` Step 2b, so they carry a `regionId` and belong to the parent country's claim).
+- `SEA_SETTLEMENT_DEEP_OCEAN_GATE = 4` — deep-ocean cells (no `regionId`). Such cells are absorbed into the parent city's region by `region.cellIndices.push(ci)` + stamping `cells[ci].regionId`. The water cell is appended after existing land cells so the "land cells first" invariant is preserved.
+
+**Annual chance**: `SEA_SETTLEMENT_CHANCE = 0.005` per eligible (large+, coastal, maritime ≥ 1, not yet `hasHadSettlement`) city. Sea attempts and land attempts are mutually exclusive **per city per year**: if the sea attempt rolls in and finds a candidate, the land roll is skipped (the parent's `hasHadSettlement` flag also blocks future settlement of either kind).
+
+**Scoring**: a sibling helper `scoreCellForSeaCity(cell, cells)` in `history.ts` ranks water-cell candidates. It returns `-Infinity` for non-water cells; positive scores for adjacent land (harbour bonus), `regionId`-set (coastal preferred over deep), `COAST` biome, and river-mouth proximity; penalty for `ICE`.
+
+**Sub-stream isolation (load-bearing)**: every random draw inside the sea-attempt branch routes through `seededPRNG(\`${seed}_seasettle_${parentCityId}_${year}\`)` — never the timeline `rng`. Pre-first-`maritime`-tech years skip the entire branch via a pure tech-level read, leaving the timeline RNG byte-identical to a run without this feature. Once `maritime >= 1` reaches a country, the new branch starts running and the sweep baseline shifts (intentional rebaseline at landing time). The "pre-tech years are unchanged" property holds because:
+1. The branch's gate is a synchronous `getCityTechLevel` lookup — no rng draw.
+2. All sea-branch rolls (chance, candidate tiebreak, `cityGenerator.generate`, `generateCityName`, ID hex) consume `seaRng`, NEVER `rng`.
+3. Falling through to the existing land path (when sea fails to find a candidate) leaves the timeline `rng` untouched — the land path's first draw at `if (rng() >= SETTLEMENT_CHANCE) continue;` runs as before.
+
+**Render-side outputs**:
+- `City.isSeaCity` is serialized from `CityEntity.isSeaCity`. The world-map renderer (`renderer.ts`) draws an anchor glyph instead of `drawHouseIcon` for sea cities; capital crown still applies.
+- `drawKingdomBorders` and `drawPatternedBorders` already handle owned water cells; this feature reduces alpha to 0.35 / 0.5 over water polygons so the sea palette stays legible under the political fill.
+- `CityEnvironment.isSeaCity` is set in `deriveCityEnvironment`; it forces the V2 city map into a stilted variant — see `city_map.md`.
+
+**Year-0 invariant unchanged**: `Cell.kingdom` is still set only on land cells via `borders.assignKingdoms`. Sea-city ownership lives entirely in the per-year Int16Array snapshot via the cell's (possibly-newly-stamped) `regionId`. Don't mutate `Cell.kingdom` from sea-related code paths.
+
+**Pitfalls specific to sea cities**:
+- Don't extend the parent region with a deep-ocean cell that already has a `regionId` (defensive check in `_tryFoundSeaCity` skips such cells before falling through).
+- Don't route any random draw through the timeline `rng` inside `_tryFoundSeaCity` — even one would shift the sweep on the first sea-tech year. Use `seaRng`.
+- Sea cities still consume an entry in the parent country's region; conquest / empire transfers operate at region granularity and naturally cover sea-city water cells.
+- `Expand.ts` is **not** sea-aware. A planned future extension would let a country expand into water-only neighbouring regions, but today expansion stays land-only.
+- When a sea city is destroyed, its `absorbedWaterCells` remain in the parent region (no cleanup pass today). The cells stay claimable; if the parent country later loses the region, the water cells flip with the region — same as any other cell.
 
 ## Pitfalls
 

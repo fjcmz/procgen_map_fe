@@ -152,6 +152,12 @@ export interface City {
   childCellIndex?: number;
   /** Cell index of the parent city that spawned this city as a settlement (if any). */
   parentCellIndex?: number;
+  /**
+   * True iff this city was founded on a water cell via the sea-colonisation
+   * path. Drives the anchor icon on the world map and the V2 stilted-city
+   * variant in the popup. Mirrors `CityEntity.isSeaCity` at serialization.
+   */
+  isSeaCity?: boolean;
 }
 
 export interface Road {

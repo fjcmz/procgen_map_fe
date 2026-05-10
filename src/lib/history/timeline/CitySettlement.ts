@@ -5,7 +5,9 @@ import type { Year } from './Year';
 import type { CountryEvent } from './Country';
 import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
-import { scoreCellForCity } from '../history';
+import { scoreCellForCity, scoreCellForSeaCity } from '../history';
+import { getCityTechLevel } from './Tech';
+import { seededPRNG } from '../../terrain/noise';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -64,6 +66,29 @@ const SETTLEMENT_SEARCH_RADIUS = 20;
 /** Minimum city-placement score to settle. */
 const SETTLEMENT_SCORE_THRESHOLD = -2;
 
+/**
+ * Sea colonisation tech gates. A parent city's effective country must hold
+ * at least this much `maritime` tech to attempt the sea-settlement branch.
+ * Tier 1 unlocks coastal water (water cells already attached to a region via
+ * the 2-hop COAST band in `buildPhysicalWorld` Step 2b). Tier 4 unlocks
+ * deep-ocean cells (no `regionId`); when claimed, those cells are absorbed
+ * into the parent city's region so `computeOwnership` keeps working without
+ * a new entity type.
+ */
+const SEA_SETTLEMENT_MARITIME_GATE = 1;
+const SEA_SETTLEMENT_DEEP_OCEAN_GATE = 4;
+
+/**
+ * Per-year probability that a sea-eligible parent city attempts a sea
+ * settlement. Drawn from an isolated `seaRng` sub-stream so the timeline
+ * RNG is never consumed pre-tech (sweep stays byte-identical until the
+ * first country reaches `maritime >= 1`).
+ */
+const SEA_SETTLEMENT_CHANCE = 0.005;
+
+/** Minimum sea-cell score (per `scoreCellForSeaCity`) required to settle. */
+const SEA_SETTLEMENT_SCORE_THRESHOLD = -2;
+
 export class CitySettlementGenerator {
   /**
    * For each large+ city that has not yet had a settlement, roll a 1% chance
@@ -102,6 +127,31 @@ export class CitySettlementGenerator {
       if (!city.founded || city.isRuin) continue;
       if (city.hasHadSettlement) continue;
       if (city.size !== 'large' && city.size !== 'metropolis' && city.size !== 'megalopolis' && city.size !== 'ecumenopolis') continue;
+
+      // --- Sea-colonisation branch -----------------------------------------
+      // Gated by the parent country's effective `maritime` tech level. Reads
+      // are pure (no rng draws): pre-first-maritime-tech years skip this
+      // entirely, leaving the timeline RNG byte-identical to the legacy run.
+      // All randomness inside this branch comes from an isolated `seaRng`
+      // sub-stream so even post-tech years don't perturb the timeline RNG
+      // for cities/years that don't actually settle a sea city.
+      const maritimeLevel = getCityTechLevel(world, city, 'maritime');
+      if (maritimeLevel >= SEA_SETTLEMENT_MARITIME_GATE) {
+        const parentCell = cells[city.cellIndex];
+        const parentCoastal = parentCell.isCoast
+          || parentCell.neighbors.some(n => cells[n].isWater);
+        if (parentCoastal) {
+          const seaResult = this._tryFoundSeaCity(
+            city, cells, world, year,
+            cityCellSet, claimedCells, usedCityNames,
+            maritimeLevel,
+          );
+          if (seaResult) {
+            results.push(seaResult);
+            continue; // sea attempt succeeded — skip the land roll for this city
+          }
+        }
+      }
 
       // 1% annual chance to attempt a settlement
       if (rng() >= SETTLEMENT_CHANCE) continue;
@@ -193,6 +243,158 @@ export class CitySettlementGenerator {
     }
 
     return results;
+  }
+
+  /**
+   * Sea-colonisation path. Attempts to found a child city on a water cell
+   * within `SETTLEMENT_SEARCH_RADIUS` hops of the parent city. Returns a
+   * `CitySettlement` record on success, or `null` if no candidate is found.
+   *
+   * **All randomness inside this method routes through `seaRng`** — an
+   * isolated sub-stream keyed on world seed + parent city id + absolute
+   * year. The timeline RNG is never consumed, so:
+   *   - Years where no city has `maritime >= 1` are byte-identical to a run
+   *     without this feature (the caller never invokes this method).
+   *   - Years where this method runs but fails do not perturb the timeline
+   *     RNG either; the caller falls through to the existing land path.
+   *
+   * Coastal water cells (those carrying a `regionId` from the
+   * `buildPhysicalWorld` Step 2b coastal band) settle via the parent
+   * country's existing region claim. Deep-ocean cells (`regionId` undefined)
+   * are absorbed into the parent city's region by appending to
+   * `region.cellIndices` and stamping `cells[ci].regionId`. Appending after
+   * the existing land cells preserves the "land cells first" invariant
+   * relied on by other consumers.
+   */
+  private _tryFoundSeaCity(
+    parentCity: import('../physical/CityEntity').CityEntity,
+    cells: Cell[],
+    world: World,
+    year: Year,
+    cityCellSet: Set<number>,
+    claimedCells: Map<number, string>,
+    usedCityNames: Set<string>,
+    maritimeLevel: number,
+  ): CitySettlement | null {
+    const absYear = year.year;
+
+    // Resolve country & region of the parent city
+    const parentRegion = world.mapRegions.get(parentCity.regionId);
+    if (!parentRegion?.countryId) return null;
+    const countryId = parentRegion.countryId;
+    const country = world.mapCountries.get(countryId) as CountryEvent | undefined;
+    if (!country) return null;
+
+    // Isolated sub-stream keeps the timeline RNG untouched on this path.
+    const seaRng = seededPRNG(`${world.seed}_seasettle_${parentCity.id}_${absYear}`);
+
+    // Roll attempt chance on seaRng (not the timeline rng)
+    if (seaRng() >= SEA_SETTLEMENT_CHANCE) return null;
+
+    // Build the country's owned-cell set (core + expansion)
+    const countryCells = new Set<number>();
+    for (const [, r] of world.mapRegions) {
+      if (r.countryId === countryId || r.expansionOwnerId === countryId) {
+        for (const ci of r.cellIndices) countryCells.add(ci);
+      }
+    }
+
+    const canSettleDeep = maritimeLevel >= SEA_SETTLEMENT_DEEP_OCEAN_GATE;
+
+    // BFS from parent city's cell; collect water-cell candidates
+    const visited = new Set<number>([parentCity.cellIndex]);
+    let frontier = [parentCity.cellIndex];
+    const candidates: { cellIndex: number; score: number; isDeep: boolean }[] = [];
+
+    for (let hop = 0; hop < SETTLEMENT_SEARCH_RADIUS && frontier.length > 0; hop++) {
+      const next: number[] = [];
+      for (const ci of frontier) {
+        for (const ni of cells[ci].neighbors) {
+          if (visited.has(ni)) continue;
+          visited.add(ni);
+          next.push(ni);
+
+          const nCell = cells[ni];
+          if (!nCell.isWater) continue;
+          if (cityCellSet.has(ni)) continue;
+          if (claimedCells.has(ni)) continue;
+
+          const isDeep = nCell.regionId === undefined;
+          if (isDeep) {
+            // Deep-ocean cells are claimable only at the deeper tech tier.
+            if (!canSettleDeep) continue;
+          } else {
+            // Coastal water (regionId set) must already belong to this country.
+            if (!countryCells.has(ni)) continue;
+          }
+
+          if (isTooCloseToOtherCity(ni, parentCity.id, cells, claimedCells)) continue;
+
+          const score = scoreCellForSeaCity(nCell, cells);
+          if (score < SEA_SETTLEMENT_SCORE_THRESHOLD) continue;
+          candidates.push({ cellIndex: ni, score, isDeep });
+        }
+      }
+      frontier = next;
+    }
+
+    if (candidates.length === 0) return null;
+
+    // Pick the best-scoring candidate; tiebreak on seaRng to keep determinism.
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      // Stable on cellIndex as last-resort tiebreak so we don't depend on
+      // map iteration order for byte-identical replays.
+      return a.cellIndex - b.cellIndex;
+    });
+    const best = candidates[0];
+    const bestCell = best.cellIndex;
+
+    // Resolve the region the new city will live in. Deep-ocean cells get
+    // absorbed into the parent's region.
+    let targetRegion = cells[bestCell].regionId
+      ? world.mapRegions.get(cells[bestCell].regionId!)
+      : undefined;
+    if (!targetRegion) {
+      if (!best.isDeep) return null; // coastal water with no region — defensive
+      // Absorb deep-ocean cell into parent region (append, preserving the
+      // "land cells first" ordering invariant).
+      parentRegion.cellIndices.push(bestCell);
+      cells[bestCell].regionId = parentRegion.id;
+      targetRegion = parentRegion;
+    }
+
+    // Mint the child city. Use seaRng so all draws stay isolated.
+    const childName = generateCityName(seaRng, usedCityNames);
+    const childEntity = cityGenerator.generate(bestCell, childName, seaRng, targetRegion, world);
+    targetRegion.cities.push(childEntity);
+
+    childEntity.founded = true;
+    childEntity.foundedOn = absYear;
+    childEntity.currentPopulation = 500;
+    childEntity.ownedCells.set(bestCell, absYear);
+    childEntity.isSeaCity = true;
+    childEntity.foundedOnDeepOcean = best.isDeep;
+    if (best.isDeep) {
+      childEntity.absorbedWaterCells.add(bestCell);
+    }
+
+    world.mapUsableCities.set(childEntity.id, childEntity);
+    world.mapUncontactedCities.set(childEntity.id, childEntity);
+    cityCellSet.add(bestCell);
+    claimedCells.set(bestCell, childEntity.id);
+
+    parentCity.hasHadSettlement = true;
+    parentCity.childCityId = childEntity.id;
+    childEntity.parentCityId = parentCity.id;
+
+    return {
+      id: IdUtil.id('citysettlement', absYear, rngHex(seaRng)) ?? 'citysettlement_unknown',
+      parentCityId: parentCity.id,
+      childCityId: childEntity.id,
+      countryId,
+      year: absYear,
+    };
   }
 }
 

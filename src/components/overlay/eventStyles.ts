@@ -81,6 +81,7 @@ export const TECH_FIELD_COLORS: Record<TechField, string> = {
   biology: '#60c0a0',     // mint
   art: '#b060a0',         // magenta
   government: '#8060c0',  // purple
+  maritime: '#1d6f9e',    // deep ocean blue
 };
 
 export const TECH_FIELD_LABELS: Record<TechField, string> = {
@@ -93,4 +94,5 @@ export const TECH_FIELD_LABELS: Record<TechField, string> = {
   biology: 'Bio',
   art: 'Art',
   government: 'Gov',
+  maritime: 'Mar',
 };

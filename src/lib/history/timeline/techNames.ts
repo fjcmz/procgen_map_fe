@@ -128,6 +128,18 @@ export const TECH_NAMES: Record<TechField, string[]> = {
     'Collective Intelligence', 'Quantum Consensus', 'Temporal Governance', 'Galactic Federation',
     'Universal Law', 'Omega Governance',
   ],
+  maritime: [
+    // Historical (20)
+    'Reed Rafts', 'Dugout Hulls', 'Outriggers', 'Square Sails',
+    'Coastal Piloting', 'Lighthouses', 'Stone Harbours', 'Lateen Rigs',
+    'Stern Rudder', 'Caravels', 'Sea Charts', 'Galleons',
+    'Drydocks', 'Sextant Navigation', 'Steamships', 'Iron Hulls',
+    'Marine Boilers', 'Diesel Marine', 'Container Shipping', 'Offshore Platforms',
+    // Future (10)
+    'Floating Cities', 'Hydroformed Hulls', 'Submarine Habitats', 'Pelagic Aquaculture',
+    'Tidal Fortresses', 'Abyssal Mining', 'Atmospheric Sails', 'Self-Healing Hulls',
+    'Sea-Surface Megacities', 'Oceanic Civilisation',
+  ],
 };
 
 /** Number of simulation levels each named technology spans. */

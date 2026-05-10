@@ -380,15 +380,27 @@ function drawKingdomBorders(
     return cell.kingdom;
   };
 
-  // Fill kingdom regions (land + owned coastal water)
+  // Fill kingdom regions (land + owned coastal water + sea-city absorbed water).
+  // Water cells get a translucent overlay so the sea palette stays visible
+  // underneath — political claim is signalled without obliterating the
+  // ocean colour.
   for (const cell of cells) {
     if (cell.vertices.length < 2) continue;
     const owner = getOwner(cell);
     if (owner === null) continue;
     const kc = colors[owner % colors.length];
-    ctx.fillStyle = kc.fill;
-    cellPath(ctx, cell);
-    ctx.fill();
+    if (cell.isWater) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = kc.fill;
+      cellPath(ctx, cell);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = kc.fill;
+      cellPath(ctx, cell);
+      ctx.fill();
+    }
     // Darken expansion territory
     if (expansionFlags && expansionFlags[cell.index] === 1) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
@@ -474,7 +486,9 @@ function drawPatternedBorders(
     });
   }
 
-  // Fill cells with patterns (land + owned coastal water)
+  // Fill cells with patterns (land + owned coastal water + sea-city absorbed water).
+  // Water cells get reduced alpha so the sea palette remains legible under the
+  // political pattern.
   for (const cell of cells) {
     if (cell.vertices.length < 2) continue;
     const owner = getOwner(cell);
@@ -495,9 +509,18 @@ function drawPatternedBorders(
       pattern = patternCache.getStripe(ctx, owner, ALPHA);
     }
 
-    ctx.fillStyle = pattern;
-    cellPath(ctx, cell);
-    ctx.fill();
+    if (cell.isWater) {
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = pattern;
+      cellPath(ctx, cell);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = pattern;
+      cellPath(ctx, cell);
+      ctx.fill();
+    }
     // Darken expansion territory
     if (expansionFlags && expansionFlags[cell.index] === 1) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
@@ -767,6 +790,103 @@ function drawHouseIcon(
   }
 }
 
+/**
+ * Anchor glyph for sea cities — replaces `drawHouseIcon` when `City.isSeaCity`
+ * is true. Drawn at the same base scale so size tiers stay consistent with
+ * land cities. Capitals get a small crown above the anchor.
+ */
+function drawAnchorIcon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  s: number,
+  isCapital: boolean,
+  sizeScale: number = 1.0,
+  scale: number = 1,
+  isEcumenopolis: boolean = false,
+): void {
+  const ss = s * sizeScale;
+
+  // Ecumenopolis halo (mirror of drawHouseIcon — kept consistent for tier reads).
+  if (isEcumenopolis) {
+    const r0 = ss * 1.0;
+    const r1 = ss * 1.5;
+    const r2 = ss * 2.1;
+    ctx.strokeStyle = '#1a3050';
+    ctx.lineWidth = 0.6 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r2, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 0.8 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r1, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1.0 / scale;
+    ctx.beginPath(); ctx.arc(x, y, r0, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  ctx.strokeStyle = isCapital ? '#0c1a30' : '#1a3050';
+  ctx.fillStyle   = isCapital ? '#3a6090' : '#5078a8';
+  ctx.lineWidth = (isCapital ? 1.2 : 1.0) / scale;
+
+  const top = y - ss * 0.95;
+  const stockMidY = y - ss * 0.55;
+  const stockHalf = ss * 0.5;
+  const shankBottom = y + ss * 0.55;
+  const armHalf = ss * 0.7;
+  const armY = y + ss * 0.30;
+
+  // Ring at top
+  const ringR = ss * 0.22;
+  ctx.beginPath();
+  ctx.arc(x, top, ringR, 0, Math.PI * 2);
+  ctx.fillStyle = isCapital ? '#3a6090' : '#5078a8';
+  ctx.fill();
+  ctx.stroke();
+
+  // Vertical shank
+  ctx.beginPath();
+  ctx.moveTo(x, top + ringR);
+  ctx.lineTo(x, shankBottom);
+  ctx.stroke();
+
+  // Stock (horizontal crossbar near the top)
+  ctx.beginPath();
+  ctx.moveTo(x - stockHalf, stockMidY);
+  ctx.lineTo(x + stockHalf, stockMidY);
+  ctx.stroke();
+
+  // Curved arms — single arc beneath the shank, ends curling up
+  ctx.beginPath();
+  ctx.moveTo(x - armHalf, armY);
+  ctx.quadraticCurveTo(x, shankBottom + ss * 0.25, x + armHalf, armY);
+  ctx.stroke();
+
+  // Arm tips (small vertical ticks)
+  ctx.beginPath();
+  ctx.moveTo(x - armHalf, armY);
+  ctx.lineTo(x - armHalf + ss * 0.05, armY - ss * 0.18);
+  ctx.moveTo(x + armHalf, armY);
+  ctx.lineTo(x + armHalf - ss * 0.05, armY - ss * 0.18);
+  ctx.stroke();
+
+  // Capital crown — three-tipped diadem above the ring
+  if (isCapital) {
+    const crownY = top - ringR - ss * 0.05;
+    const cw = ss * 0.7;
+    ctx.fillStyle = '#e8c87a';
+    ctx.strokeStyle = '#5a3a10';
+    ctx.lineWidth = 0.6 / scale;
+    ctx.beginPath();
+    ctx.moveTo(x - cw / 2, crownY);
+    ctx.lineTo(x - cw / 2, crownY - ss * 0.18);
+    ctx.lineTo(x - cw / 4, crownY - ss * 0.05);
+    ctx.lineTo(x,           crownY - ss * 0.22);
+    ctx.lineTo(x + cw / 4, crownY - ss * 0.05);
+    ctx.lineTo(x + cw / 2, crownY - ss * 0.18);
+    ctx.lineTo(x + cw / 2, crownY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+  }
+}
+
 function drawRuinIcon(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -888,7 +1008,11 @@ function drawCityIcons(
       const idx = cityIdxMap.get(city.cellIndex);
       if (idx !== undefined) sizeKey = INDEX_TO_CITY_SIZE[citySizesAtYear[idx]] ?? city.size;
     }
-    drawHouseIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale, sizeKey === 'ecumenopolis');
+    if (city.isSeaCity) {
+      drawAnchorIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale, sizeKey === 'ecumenopolis');
+    } else {
+      drawHouseIcon(ctx, cell.x, cell.y, iconSize, city.isCapital, CITY_SIZE_SCALE[sizeKey] ?? 0.65, scale, sizeKey === 'ecumenopolis');
+    }
   }
 
   for (const city of ruinCities) {

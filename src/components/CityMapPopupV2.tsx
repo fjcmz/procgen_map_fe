@@ -1003,7 +1003,7 @@ export function CityMapPopupV2({ isOpen, onClose, cityName, environment, seed, p
             <span style={styles.footerText}>
               {environment.size.charAt(0).toUpperCase() + environment.size.slice(1)}
               {environment.isCapital ? ' • Capital' : ''}
-              {environment.isCoastal ? ' • Coastal' : ''}
+              {environment.isSeaCity ? ' • Sea City' : (environment.isCoastal ? ' • Coastal' : '')}
               {environment.hasRiver ? ' • River' : ''}
               {environment.isRuin ? ' • Ruins' : ''}
             </span>

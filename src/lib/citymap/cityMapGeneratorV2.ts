@@ -118,10 +118,22 @@ export function deriveCityEnvironment(
 
   const isRuin = city.isRuin && (selectedYear == null || city.ruinYear <= selectedYear);
 
+  // Sea cities live on a water cell, so the world cell's biome is OCEAN /
+  // COAST / LAKE. For the city-map renderer's culture pick, fall back to a
+  // neighbouring land biome when available so the stilted city's architectural
+  // styling still resolves to a sensible (non-marine) palette.
+  let cultureBiome = cell.biome;
+  if (city.isSeaCity) {
+    const landNeighbour = neighborCells.find(n => !n.isWater);
+    if (landNeighbour) cultureBiome = landNeighbour.biome;
+  }
+
   return {
     biome: cell.biome,
     isCoastal: cell.isCoast || neighborCells.some(n => n.isWater),
-    hasRiver: cell.riverFlow > 0,
+    // Sea cities never carry a river — the canvas is open water; rivers
+    // wouldn't terminate sensibly. Land cities use the world-cell's flow.
+    hasRiver: !city.isSeaCity && cell.riverFlow > 0,
     waterSide,
     elevation: cell.elevation,
     moisture: cell.moisture,
@@ -133,8 +145,9 @@ export function deriveCityEnvironment(
     religionCount: religionCellIndices?.filter(i => i === city.cellIndex).length ?? 0,
     isRuin,
     neighborBiomes: neighborCells.map(n => n.biome),
-    mountainDirection: findNearestMountainDirection(cell, cells),
-    baseCulture: deriveBaseCulture(cell.biome),
+    mountainDirection: city.isSeaCity ? null : findNearestMountainDirection(cell, cells),
+    baseCulture: deriveBaseCulture(cultureBiome),
+    isSeaCity: !!city.isSeaCity,
   };
 }
 
@@ -523,13 +536,13 @@ export function generateCityMapV2(
   // walls, network, blocks, open spaces) all consume this set to keep land
   // and sea cleanly separated. Inland cities get an empty set — no
   // behavior change relative to pre-coastal builds.
-  const waterPolygonIds = generateWaterPolygons(
-    seed,
-    cityName,
-    env,
-    polygons,
-    CANVAS_SIZE,
-  );
+  //
+  // Sea cities skip this step entirely — their water set is computed below
+  // as the inverse of the city footprint (whole canvas is open ocean except
+  // the small stilted-platform footprint).
+  let waterPolygonIds = env.isSeaCity
+    ? new Set<number>()
+    : generateWaterPolygons(seed, cityName, env, polygons, CANVAS_SIZE);
 
   // ── Mountain polygons ──
   // When the city sits within 5 world-cell hops of a mountain cell
@@ -540,14 +553,10 @@ export function generateCityMapV2(
   // treated like water for infrastructure purposes (no walls, roads, or
   // plazas on a mountain face); blocks may optionally absorb mountain-
   // adjacent polygons up to 10% of the city's polygons.
-  const mountainPolygonIds = generateMountainPolygons(
-    seed,
-    cityName,
-    env,
-    polygons,
-    CANVAS_SIZE,
-    waterPolygonIds,
-  );
+  // Sea cities skip mountains — there's no land to host them.
+  const mountainPolygonIds = env.isSeaCity
+    ? new Set<number>()
+    : generateMountainPolygons(seed, cityName, env, polygons, CANVAS_SIZE, waterPolygonIds);
 
   // Combined obstacle set — used by shape / walls / network / openSpaces /
   // river. These modules treat water and mountain identically: "not
@@ -576,6 +585,22 @@ export function generateCityMapV2(
     obstaclePolygonIds,
   );
 
+  // For sea cities, derive the water set as the inverse of the footprint.
+  // Every polygon NOT in the city interior becomes open ocean — the city
+  // is a small platform of stilted polygons surrounded by water on all
+  // sides. We append these ids to obstaclePolygonIds so the rest of the
+  // pipeline (walls/river/network) treats them as impassable.
+  if (env.isSeaCity) {
+    waterPolygonIds = new Set<number>();
+    const interior = footprint.interior;
+    for (const p of polygons) {
+      if (!interior.has(p.id)) {
+        waterPolygonIds.add(p.id);
+        obstaclePolygonIds.add(p.id);
+      }
+    }
+  }
+
   // PR 2 — walls + gates.
   // Wall configuration is decided here by size + probabilistic rolls so that
   // `generateWallsAndGates` remains a pure geometry generator.
@@ -589,7 +614,12 @@ export function generateCityMapV2(
   const wallRng = seededPRNG(`${seed}_city_${cityName}_wallconfig`);
 
   let wallConfig: WallConfig;
-  switch (env.size) {
+  if (env.isSeaCity) {
+    // Stilted cities have no walls — buildings sit on platform polygons
+    // ringed by open water, which serves as a natural perimeter.
+    wallConfig = { hasOuterWall: false, hasInnerWall: false, innerFraction: 0, hasMiddleWall: false, middleFraction: 0 };
+  } else {
+    switch (env.size) {
     case 'small':
       wallConfig = { hasOuterWall: false, hasInnerWall: false, innerFraction: 0, hasMiddleWall: false, middleFraction: 0 };
       break;
@@ -617,6 +647,7 @@ export function generateCityMapV2(
       // The arcology spire is implied by the tighter inner-fraction (0.18).
       wallConfig = { hasOuterWall: true, hasInnerWall: true, innerFraction: 0.18, hasMiddleWall: true, middleFraction: 0.55 };
       break;
+    }
   }
 
   const wall = generateWallsAndGates(
@@ -754,16 +785,21 @@ export function generateCityMapV2(
   // Outside-walls sparse fringe buildings. Driven by `blocksNew` +
   // `landmarksNew`. SPRAWL_ROLES stays {slum, agricultural} so only exterior
   // blocks produce sprawl. RNG stream `_sprawl`.
-  const sprawlBuildings = generateSprawl(
-    seed,
-    cityName,
-    env,
-    polygons,
-    blocksNew,
-    landmarksNew,
-    CANVAS_SIZE,
-    wallPath,
-  );
+  // Sea cities have no land to sprawl onto — every polygon outside the
+  // footprint is open ocean. Skip the slice entirely so the renderer never
+  // draws stilted huts floating on the sea.
+  const sprawlBuildings = env.isSeaCity
+    ? []
+    : generateSprawl(
+        seed,
+        cityName,
+        env,
+        polygons,
+        blocksNew,
+        landmarksNew,
+        CANVAS_SIZE,
+        wallPath,
+      );
 
   return {
     canvasSize: CANVAS_SIZE,
