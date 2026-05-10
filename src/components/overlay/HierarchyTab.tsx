@@ -102,6 +102,8 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
   const [searchQuery, setSearchQuery] = useState('');
   const [enabledSizes, setEnabledSizes] = useState<Set<City['size']>>(() => new Set(ALL_CITY_SIZES));
   const [alignmentFilter, setAlignmentFilter] = useState<'all' | AlignmentType>('all');
+  const [showLandCities, setShowLandCities] = useState(true);
+  const [showSeaCities, setShowSeaCities] = useState(true);
   const [cityMapState, setCityMapState] = useState<CityMapState | null>(null);
 
   /** Maps city cellIndex → dominant religion's alignment (final-year snapshot). */
@@ -141,6 +143,14 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       }
       return next;
     });
+  };
+
+  const toggleCityType = (type: 'land' | 'sea') => {
+    if (type === 'land') {
+      setShowLandCities(prev => (prev && !showSeaCities ? prev : !prev));
+    } else {
+      setShowSeaCities(prev => (prev && !showLandCities ? prev : !prev));
+    }
   };
 
   /** Collect all cell indices owned by a given country id. */
@@ -466,10 +476,54 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     };
   }, [sizeFilteredTree, alignmentFilter, cityAlignmentMap]);
 
-  // Search filter applied on top of size + alignment filters
+  // City-type filter (land / sea) applied on top of size + alignment filters.
+  const cityTypeFilteredTree = useMemo<Tree>(() => {
+    if (showLandCities && showSeaCities) return alignmentFilteredTree;
+
+    const cityPasses = (city: City): boolean =>
+      city.isSeaCity ? showSeaCities : showLandCities;
+
+    const filterCountry = (node: CountryNode): CountryNode | null => {
+      if (node.cities.length === 0) return node;
+      const filtered = node.cities.filter(cityPasses);
+      if (filtered.length === 0) return null;
+      return { ...node, cities: filtered };
+    };
+
+    const filteredEmpires: EmpireNode[] = [];
+    for (const emp of alignmentFilteredTree.empires) {
+      const filteredCountries: CountryNode[] = [];
+      let totalCities = 0;
+      for (const c of emp.countries) {
+        const fc = filterCountry(c);
+        if (fc) { filteredCountries.push(fc); totalCities += fc.cities.length; }
+      }
+      if (filteredCountries.length > 0) {
+        filteredEmpires.push({ ...emp, countries: filteredCountries, totalCities });
+      }
+    }
+
+    const filteredStateless: CountryNode[] = [];
+    let filteredStatelessCityCount = 0;
+    for (const c of alignmentFilteredTree.stateless) {
+      const fc = filterCountry(c);
+      if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
+    }
+
+    const filteredUnassigned = alignmentFilteredTree.unassignedCities.filter(cityPasses);
+
+    return {
+      empires: filteredEmpires,
+      stateless: filteredStateless,
+      statelessCityCount: filteredStatelessCityCount,
+      unassignedCities: filteredUnassigned,
+    };
+  }, [alignmentFilteredTree, showLandCities, showSeaCities]);
+
+  // Search filter applied on top of size + alignment + city-type filters
   const filteredTree = useMemo<Tree>(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return alignmentFilteredTree;
+    if (!q) return cityTypeFilteredTree;
 
     const matchesQuery = (name: string) => name.toLowerCase().includes(q);
 
@@ -482,7 +536,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
     };
 
     const filteredEmpires: EmpireNode[] = [];
-    for (const emp of alignmentFilteredTree.empires) {
+    for (const emp of cityTypeFilteredTree.empires) {
       const empireMatches = matchesQuery(emp.entry.name);
       if (empireMatches) { filteredEmpires.push(emp); continue; }
       const filteredCountries: CountryNode[] = [];
@@ -498,12 +552,12 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
 
     const filteredStateless: CountryNode[] = [];
     let filteredStatelessCityCount = 0;
-    for (const c of alignmentFilteredTree.stateless) {
+    for (const c of cityTypeFilteredTree.stateless) {
       const fc = filterCountryNode(c, false);
       if (fc) { filteredStateless.push(fc); filteredStatelessCityCount += fc.cities.length; }
     }
 
-    const filteredUnassigned = alignmentFilteredTree.unassignedCities.filter(c => matchesQuery(c.name));
+    const filteredUnassigned = cityTypeFilteredTree.unassignedCities.filter(c => matchesQuery(c.name));
 
     return {
       empires: filteredEmpires,
@@ -511,7 +565,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
       statelessCityCount: filteredStatelessCityCount,
       unassignedCities: filteredUnassigned,
     };
-  }, [alignmentFilteredTree, searchQuery]);
+  }, [cityTypeFilteredTree, searchQuery]);
 
   const isSearching = searchQuery.trim().length > 0;
   const isExpanded = (key: string) => isSearching || expanded.has(key);
@@ -721,6 +775,35 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
               </button>
             );
           })}
+          <span style={styles.cityTypeFilterDivider} />
+          <button
+            style={{
+              ...styles.sizeFilterBtn,
+              opacity: showLandCities ? 1 : 0.3,
+              background: showLandCities ? '#e8d4a8' : 'transparent',
+              border: showLandCities ? '1px solid #b89050' : '1px solid #c8b07a',
+            }}
+            onClick={() => toggleCityType('land')}
+            title={`${showLandCities ? 'Hide' : 'Show'} land cities`}
+            aria-pressed={showLandCities}
+          >
+            <span style={styles.sizeIcon}>⌂</span>
+            <span style={styles.sizeFilterLabel}>Land</span>
+          </button>
+          <button
+            style={{
+              ...styles.sizeFilterBtn,
+              opacity: showSeaCities ? 1 : 0.3,
+              background: showSeaCities ? '#e8d4a8' : 'transparent',
+              border: showSeaCities ? '1px solid #b89050' : '1px solid #c8b07a',
+            }}
+            onClick={() => toggleCityType('sea')}
+            title={`${showSeaCities ? 'Hide' : 'Show'} sea cities`}
+            aria-pressed={showSeaCities}
+          >
+            <span style={styles.sizeIcon}>⚓</span>
+            <span style={styles.sizeFilterLabel}>Sea</span>
+          </button>
           <select
             value={alignmentFilter}
             onChange={e => setAlignmentFilter(e.target.value as 'all' | AlignmentType)}
@@ -740,7 +823,7 @@ export function HierarchyTab({ historyData, cities, selectedYear, convertYears, 
           && filteredTree.stateless.length === 0
           && filteredTree.unassignedCities.length === 0 && (
           <div style={styles.emptyNote}>
-            {isSearching ? 'No matches.' : alignmentFilter !== 'all' ? `No ${alignmentBadge(alignmentFilter)} cities.` : enabledSizes.size < ALL_CITY_SIZES.length ? 'No cities match the selected sizes.' : 'No realms yet.'}
+            {isSearching ? 'No matches.' : alignmentFilter !== 'all' ? `No ${alignmentBadge(alignmentFilter)} cities.` : enabledSizes.size < ALL_CITY_SIZES.length ? 'No cities match the selected sizes.' : (!showLandCities || !showSeaCities) ? `No ${!showLandCities ? 'land' : 'sea'} cities.` : 'No realms yet.'}
           </div>
         )}
 
@@ -1067,6 +1150,14 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: 0.2,
     color: '#5a3a00',
     textTransform: 'uppercase',
+  },
+  cityTypeFilterDivider: {
+    display: 'inline-block',
+    width: 1,
+    alignSelf: 'stretch',
+    background: '#d4b896',
+    flexShrink: 0,
+    margin: '1px 2px',
   },
   alignmentSelect: {
     marginLeft: 'auto',
