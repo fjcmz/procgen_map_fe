@@ -359,4 +359,18 @@ export interface CityMapDataV2 {
   middleGates: { edge: [[number, number], [number, number]]; dir: 'N' | 'S' | 'E' | 'W' | 'NE' | 'NW' | 'SE' | 'SW' }[];
   /** Roads extending outward from each outer gate to the canvas boundary (one per gate). */
   exitRoads: [number, number][][];
+
+  /**
+   * Sea cities only: polygon IDs grouped by island index.
+   * `seaIslands[i]` is the list of polygon IDs on island i.
+   * Null for land cities.
+   */
+  seaIslands: number[][] | null;
+
+  /**
+   * Sea cities only: bridge segments connecting pairs of islands.
+   * Each bridge runs from one island's boundary edge-midpoint to another's.
+   * Null for land cities.
+   */
+  seaBridges: { from: [number, number]; to: [number, number] }[] | null;
 }

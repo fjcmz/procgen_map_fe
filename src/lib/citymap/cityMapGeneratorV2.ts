@@ -50,6 +50,7 @@ import { generateMountainPolygons } from './cityMapMountains';
 import { buildCandidatePool } from './cityMapCandidatePool';
 import { placeUnifiedLandmarks } from './cityMapLandmarksUnified';
 import { assignDistricts } from './cityMapDistricts';
+import { generateSeaIslandLayout, type SeaIslandLayout } from './cityMapSeaIslands';
 
 // ── Environment derivation ──
 
@@ -566,39 +567,49 @@ export function generateCityMapV2(
   const obstaclePolygonIds = new Set<number>(waterPolygonIds);
   for (const id of mountainPolygonIds) obstaclePolygonIds.add(id);
 
-  // City footprint allocation. Picks an organic shape (50% spheroid /
-  // 30% rectangle / 15% half-sphere / 5% triangle) and allocates exactly
-  // `POLYGON_COUNTS[env.size]` polygons from the canvas, growing outward
-  // from the canvas center (shifted toward the coast for coastal cities).
-  // The wall traces this set; downstream features query
-  // `wall.interiorPolygonIds` for "inside the city?" tests. See
-  // `cityMapShape.ts` for the score-and-pick algorithm and the rationale
-  // for dropping the old percentage-based coverage roll.
+  // City footprint allocation.
+  //
+  // Sea cities: `generateSeaIslandLayout` carves the polygon budget into
+  // multiple small islands (50–100 polygons each, two layout patterns —
+  // hubSpokes or mesh) and returns the union as the footprint interior.
+  // Every polygon outside the islands becomes open ocean.
+  //
+  // Land cities: `selectCityFootprint` picks an organic single-footprint
+  // shape (50% spheroid / 30% rectangle / 15% half-sphere / 5% triangle)
+  // growing outward from the canvas center.
   const cityPolygonCount = POLYGON_COUNTS[env.size];
-  const footprint = selectCityFootprint(
-    seed,
-    cityName,
-    env,
-    polygons,
-    CANVAS_SIZE,
-    cityPolygonCount,
-    obstaclePolygonIds,
-  );
 
-  // For sea cities, derive the water set as the inverse of the footprint.
-  // Every polygon NOT in the city interior becomes open ocean — the city
-  // is a small platform of stilted polygons surrounded by water on all
-  // sides. We append these ids to obstaclePolygonIds so the rest of the
-  // pipeline (walls/river/network) treats them as impassable.
+  let seaIslandLayout: SeaIslandLayout | null = null;
+  let footprint: ReturnType<typeof selectCityFootprint>;
+
   if (env.isSeaCity) {
+    seaIslandLayout = generateSeaIslandLayout(
+      seed,
+      cityName,
+      polygons,
+      cityPolygonCount,
+      CANVAS_SIZE,
+    );
+    footprint = { interior: seaIslandLayout.footprintIds, shapeType: 'spheroid' };
+
+    // Water = everything outside the island footprints.
     waterPolygonIds = new Set<number>();
-    const interior = footprint.interior;
     for (const p of polygons) {
-      if (!interior.has(p.id)) {
+      if (!seaIslandLayout.footprintIds.has(p.id)) {
         waterPolygonIds.add(p.id);
         obstaclePolygonIds.add(p.id);
       }
     }
+  } else {
+    footprint = selectCityFootprint(
+      seed,
+      cityName,
+      env,
+      polygons,
+      CANVAS_SIZE,
+      cityPolygonCount,
+      obstaclePolygonIds,
+    );
   }
 
   // PR 2 — walls + gates.
@@ -827,5 +838,9 @@ export function generateCityMapV2(
     middleGates,
     exitRoads,
     districtLabels: computeDistrictLabels(blocksNew, landmarksNew, polygons),
+    seaIslands: seaIslandLayout
+      ? seaIslandLayout.islands.map(s => [...s].sort((a, b) => a - b))
+      : null,
+    seaBridges: seaIslandLayout ? seaIslandLayout.bridges.map(b => ({ from: b.from, to: b.to })) : null,
   };
 }
