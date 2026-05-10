@@ -31,13 +31,16 @@ The four generator/renderer signatures are **frozen** — only the V2 data shape
 
 V2 replaces the V1 tile grid with a Voronoi polygon graph sized by city tier:
 
-| Tier | Polygons |
-|------|----------|
-| small | 150 |
-| medium | 250 |
-| large | 350 |
-| metropolis | 500 |
-| megalopolis | 1000 |
+| Tier | Interior polygons | Canvas polygons |
+|------|-------------------|-----------------|
+| small | 150 | 3000 |
+| medium | 250 | 3000 |
+| large | 350 | 3000 |
+| metropolis | 500 | 4000 |
+| megalopolis | 1000 | 5000 |
+| ecumenopolis | 2000 | 7000 |
+
+The interior count (`POLYGON_COUNTS[size]`) is the in-wall city footprint allocated by `cityMapShape.ts::selectCityFootprint`. The canvas count (`CANVAS_POLYGON_COUNTS[size]`) is the total Voronoi cell budget for the 1000×1000 city canvas — the rest hosts outside-walls sprawl, agricultural/slum blocks, and gate-exiting roads. Larger tiers get a larger canvas so metropolis / megalopolis / ecumenopolis have proportionally more extramural acreage.
 
 The polygon graph (`CityPolygon[]` in `CityMapDataV2.polygons`) is the **single data contract** PR 2-5 build on. Each polygon carries:
 - `id` — index
@@ -121,8 +124,8 @@ Also BFS-prunes to one connected component and hole-fills from the `isEdge` fron
 `generateOpenSpaces(seed, cityName, env, polygons, wall, river, roads, canvasSize)` in `cityMapOpenSpaces.ts` populates `CityMapDataV2.openSpaces` with three kinds of polygon-keyed entries:
 
 1. **Civic square** — single polygon whose `site` is closest to canvas center (deterministic, no RNG)
-2. **Markets** — per-tier count `MARKET_COUNT[size]` (`small:2, medium:4, large:5, metropolis:8, megalopolis:16`), gate-anchored first via "polygon nearest each gate midpoint", then a Lloyd-style spread pass (`farthestPolygonBySite`) for the remainder
-3. **Parks** — per-tier count `PARK_COUNT[size]` (`small:1, medium:1, large:2, metropolis:2, megalopolis:3`), each grown by BFS over `polygon.neighbors` from a seed polygon up to `PARK_MAX_POLYGONS[size]` (1–3 polygons). Seeds prefer eligibility candidates that are not Delaunay neighbors of any already-used polygon, falling back to any unused eligible polygon when the strict pool runs dry
+2. **Markets** — per-tier count `MARKET_COUNT[size]` (`small:2, medium:4, large:5, metropolis:8, megalopolis:16, ecumenopolis:28`), gate-anchored first via "polygon nearest each gate midpoint", then a Lloyd-style spread pass (`farthestPolygonBySite`) for the remainder
+3. **Parks** — per-tier count `PARK_COUNT[size]` (`small:1, medium:3, large:5, metropolis:7, megalopolis:10, ecumenopolis:16`), each grown by BFS over `polygon.neighbors` from a seed polygon up to `PARK_MAX_POLYGONS[size]` (1–4 polygons; ecumenopolis caps at 4). Seeds prefer eligibility candidates that are not Delaunay neighbors of any already-used polygon, falling back to any unused eligible polygon when the strict pool runs dry
 
 **Eligibility filter**: exclude `polygon.isEdge` (PR 5 sprawl territory) and any polygon whose vertex ring shares a canonical edge key with the wall path / river edges / road paths. **Streets are NOT in the exclusion set** — plazas should front streets.
 
@@ -137,7 +140,7 @@ Algorithm:
 2. BFS over `polygon.neighbors` in polygon-id order, refusing to cross any neighbor whose shared Voronoi edge (resolved via `buildEdgeOwnership`) is in that set AND refusing to cross the footprint boundary (O(1) `wall.interiorPolygonIds` membership compare — decouples interior/exterior from the wall path so unwalled small/medium cities still get a clean partition)
 3. Each connected component is one raw block; every polygon ends up in exactly one
 4. Classify each block:
-   - OUTSIDE `wall.interiorPolygonIds` → `slum` when `polygonIds.length <= SLUM_SIZE_THRESHOLD[size]` (`small:2, medium:3, large:4, metropolis:5, megalopolis:6`) else `agricultural`
+   - OUTSIDE `wall.interiorPolygonIds` → `slum` when `polygonIds.length <= SLUM_SIZE_THRESHOLD[size]` (`small:2, medium:3, large:4, metropolis:5, megalopolis:6, ecumenopolis:7`) else `agricultural`
    - else if any polygon matches an `openSpaces` civic square → `civic`
    - else if any matches a market → `market`
    - else if `env.isCoastal && env.waterSide` and block centroid (mean of `polygon.site`) within `canvasSize * 0.30` of the matching canvas edge → `harbor`
@@ -157,7 +160,7 @@ Role assignment precedence: `slum/agricultural > civic > market > harbor > resid
 
 Three ordered passes share one `used: Set<number>` for de-duplication:
 
-1. **Capitals** — only when `env.isCapital`. Small/medium capitals get ONE of `{castle, palace}` via RNG coin-flip; large/metropolis/megalopolis get BOTH. Anchored to civic-block polygons sorted by squared distance from canvas center with stable id tie-break (mirrors V1 `byDistanceToCenter` at `cityMapGenerator.ts:1085-1090`)
+1. **Capitals** — only when `env.isCapital`. Small/medium capitals get ONE of `{castle, palace}` via RNG coin-flip; large/metropolis/megalopolis/ecumenopolis get BOTH. Anchored to civic-block polygons sorted by squared distance from canvas center with stable id tie-break (mirrors V1 `byDistanceToCenter` at `cityMapGenerator.ts:1085-1090`). Castle counts ramp per size: `CASTLE_ROLLS_NON_CAPITAL[ecumenopolis] = [1.00, 0.85, 0.50, 0.25]` (up to 4 castles in non-capital ecumenopolis cities); `CASTLE_ROLLS_CAPITAL[ecumenopolis] = [0.80, 0.50, 0.25]` (up to 3 *additional* castles on top of the capital pass).
 2. **Temples** — `env.religionCount` of them, random pick from full civic+market block polygon pool minus `used`
 3. **Monuments** — `env.wonderCount` of them, hybrid pool concatenating openSpaces civic+market polygons FIRST with civicAndMarket block polygons SECOND (V1 `cityMapGenerator.ts:1126-1138` parity — plaza polygons appear twice in the concat and get ~2× random-pick weight so monuments cluster near plaza centers)
 
@@ -203,7 +206,7 @@ Algorithm:
 Constants:
 - `SPRAWL_BASE_COUNT` `{slum:2, agricultural:1}`
 - `SPRAWL_DENSITY_DIVISOR` `{slum:600, agricultural:1000}` px²
-- `SPRAWL_TIER_SCALE` `{small:0.5, medium:0.75, large:1.0, metropolis:1.25, megalopolis:1.5}` (addresses spec line 23: "the bigger the city the more such sparse buildings")
+- `SPRAWL_TIER_SCALE` `{small:0.5, medium:0.75, large:1.0, metropolis:1.15, megalopolis:1.3, ecumenopolis:1.6}` (addresses spec line 23: "the bigger the city the more such sparse buildings"). Wall-proximity sprawl bonus is active for `metropolis | megalopolis | ecumenopolis`.
 
 Role-driven size bands: `slum 4–8 px (aspect 1.0–1.3)`, `agricultural 6–11 px (aspect 1.0–1.6)` — smaller than interior buildings (huts / farmhouses, not administrative blocks).
 
@@ -252,8 +255,42 @@ All routed through `seededPRNG` from `terrain/noise.ts`. The shared prefix is `$
 | `_landmarks_monuments` | Monument polygon pick | PR 4 |
 | `_buildings` | Slot rolls (interior buildings) | PR 5 |
 | `_sprawl` | Slot rolls (outside-walls huts) | PR 5 |
+| `_distinctive_select[_<i>]` | Distinctive feature spec pick (megalopolis: no suffix; ecumenopolis: 3–5 slots, suffix `_0`..`_4`) | Distinctive landmarks |
+| `_distinctive_place[_<i>]` | Seed-polygon pick + cluster grow for the corresponding distinctive feature | Distinctive landmarks |
+| `_distinctive_count` | Ecumenopolis-only: how many distinctive features to roll (3–5) | Distinctive landmarks |
 
 Bridge detection and the civic-square pick are **fully deterministic** and use no RNG.
+
+## Ecumenopolis Tier (above megalopolis)
+
+The new top tier extends every existing per-size table along the same trends. The simulation-layer gate is in `claude_specs/world_history.md`; the citymap-layer parameters all live under `src/lib/citymap/` and are summarized here for cross-reference.
+
+**Polygon footprint**: `CANVAS_POLYGON_COUNTS[ecumenopolis] = 7000`, `POLYGON_COUNTS[ecumenopolis] = 2000` (vs megalopolis 5000 / 1000).
+
+**Walls + gates** (`cityMapGeneratorV2.ts` switch + `cityMapWalls.ts`):
+- Always-on three-ring fortification: outer wall + middle ring (fraction 0.55) + small inner core (fraction 0.18). The tighter inner-fraction is the implied "arcology spire" cluster.
+- `GATE_COUNT_MIN[ecumenopolis] = 8`, `GATE_COUNT_MAX[ecumenopolis] = 12` on the outer wall (megalopolis is 6/8). Inner + middle rings still respect `INNER_WALL_MIN_GATES = 3`.
+
+**Distinctive features** (`cityMapLandmarksDistinctive.ts`):
+- Megalopolis places exactly 1 distinctive feature; ecumenopolis places **3–5** (count rolled from sub-stream `${seed}_city_${cityName}_distinctive_count`).
+- Each ecumenopolis slot uses isolated `_select_<i>` / `_place_<i>` sub-streams so adding/removing a slot doesn't shift the others.
+- Per-slot duplicate avoidance: an ecumenopolis re-rolls up to 12 times to avoid placing the same `spec.id` twice; if the same display name lands twice the second copy is suffixed with `(2)`.
+
+**Quarter / landmark counts** (`cityMapLandmarksQuarters.ts` + `cityMapLandmarksNamed.ts`):
+- Industrial 16–28, Military 6–10, Faith-Aux 8–14, Entertainment 5–9, Trade-Finance 7–12, Excluded 4–8.
+- Markets 28, parks 16 (max 4 polygons each), `NON_RES_BLOCK_SIZE_LIMIT = 14`, `SLUM_SIZE_THRESHOLD = 7`.
+- Castle ramps: non-capital `[1.00, 0.85, 0.50, 0.25]` (up to 4); capital extras `[0.80, 0.50, 0.25]` (up to 3 on top of the capital pass).
+- Palace non-capital probability rises to 1.00.
+
+**Districts** (`cityMapDistricts.ts`):
+- Slums: ecumenopolis rolls a second cluster at 55% (`ECUMENOPOLIS_SECOND_SLUM_PROB`) and a third at 30% (`ECUMENOPOLIS_THIRD_SLUM_PROB`), vs megalopolis 25% second / no third.
+- Docks: shares megalopolis's `DOCK_SECOND_CLUSTER_PROB = 0.30` second-cluster roll.
+
+**Sprawl** (`cityMapSprawl.ts`): `SPRAWL_TIER_SCALE[ecumenopolis] = 1.6`; wall-proximity bonus active.
+
+**River** (`cityMapRiver.ts`): bifurcation eligible (set extended from `large/metropolis/megalopolis`).
+
+**Continent cap**: at most one ecumenopolis per continent. Cap is enforced in `YearGenerator` step 4b — see `world_history.md` for details. The citymap layer itself is unaware of this cap (it just renders whatever `env.size` it's handed).
 
 ## Pitfalls
 

@@ -72,7 +72,7 @@ Each Phase 5 file in `src/lib/history/timeline/` exports an entity interface + a
 `countryGenerator`: forms when all cities in a region are founded + contacted. `Spirit` enum (military / religious / industrious / neutral); merges city techs. Picks `raceBias: { primary, secondary? }` at founding from a sub-stream `${seed}_racebias_${countryId}` weighted by founding region's biome (via `BIOME_RACE_WEIGHTS`). 60% chance of meaningful secondary race; otherwise mono-cultural. See `characters.md` for details.
 
 ### Illustrate
-`illustrateGenerator`: illustrious figure born in large+ cities; 6 types (religion / science / philosophy / industry / military / art) with weighted selection and variable active lifespan.
+`illustrateGenerator`: illustrious figure born in large/metropolis/megalopolis/ecumenopolis cities; 6 types (religion / science / philosophy / industry / military / art) with weighted selection and variable active lifespan. Ecumenopolis cities get a flat **1.5× candidate-weight boost** on top of the existing wonder-attraction bonus (`1 + 0.25 × wonderTierSum`) so the planet-spanning tier reads as an illustrate magnet.
 
 ### Religion
 `religionGenerator`: two paths.
@@ -83,7 +83,7 @@ Each Phase 5 file in `src/lib/history/timeline/` exports an entity interface + a
 `tradeGenerator`: trade route between contacted cities in different regions with available resources; consumes `TRADE_USE` from each resource. **Spec stretch §2** (trade-driven tech diffusion): after the trade is built, calls `_tryTechDiffusion` — resolves both source/target countries, skips when same empire (`memberOf.foundedBy` matches), iterates the union of known fields for any with `gap >= 2`, picks one uniformly, rolls `min(0.6, 0.15 + 0.05 × receiverExploration + 0.05 × receiverGovernment)`, and on success calls `recordDiffusedTech` from `Tech.ts` with `newLevel = min(receiverLvl + 1, donorLvl - 1)` then stamps `trade.techDiffusion = {field, donorCountryId, receiverCountryId, newLevel}` for the serializer. Diffused techs are **NOT** pushed into `year.techs` — they enrich the existing TRADE event instead of emitting a duplicate TECH event.
 
 ### Wonder
-`wonderGenerator`: wonder built in large/metropolis/megalopolis cities; eligible cities are weighted by `industry` tech (`1 + 0.1 × level`, capped at level 10) so industrious civilizations build more wonders; can be destroyed by cataclysms.
+`wonderGenerator`: wonder built in large/metropolis/megalopolis/ecumenopolis cities; eligible cities are weighted by `industry` tech (`1 + 0.1 × level`, capped at level 10) so industrious civilizations build more wonders; can be destroyed by cataclysms. Tiered size gates: large caps at tier 6, metropolis at tier 8, megalopolis at tier 10. Tiers 11–12 ("Megastructure", "Cosmoarch") are ecumenopolis-only "megaprojects" — names drawn from the speculative band (Orbital Ring, Stellar Engine, Universal Constructor, …) with ramped resource costs (~1.5× / ~2.25× tier 10).
 
 **Per-city production limits**:
 - Cooldown of `max(10, 100 − floor(growthLevel / 2))` years after a city's most recent wonder (any wonder, standing or destroyed).
@@ -162,8 +162,14 @@ Dynamic city size thresholds (`CITY_SIZE_THRESHOLDS`):
 - large ≥ 100,000
 - metropolis ≥ 1,000,000
 - megalopolis ≥ 10,000,000
+- ecumenopolis ≥ 100,000,000 — **AND requires `exploration ≥ 49`** (the "Space Stations" tech band in `techNames.ts`). Below the gate, a 100M+ city stays megalopolis. Capped at **one ecumenopolis per continent**: when a second city would qualify, `YearGenerator` step 4b downgrades it back to megalopolis. The gate is wired through `computeCitySize`'s optional 4th argument (`explorationLevel`, defaults to 0 so legacy 3-arg callers stay byte-identical) and through `Cataclysm.applyCataclysmDamage` so a cataclysm can correctly demote an ecumenopolis whose population drops below 100M.
 
 Reduced by ~0.5% per combined `government` + `industry` tech level — high-tech civilizations cluster into bigger cities sooner.
+
+Per-size CityEntity records (all in `physical/CityEntity.ts`):
+- `CITY_SIZE_WEIGHTS`: small 100, medium 40, large 15, metropolis 5, megalopolis 1, **ecumenopolis 0** (cities never *spawn* as ecumenopolis — they only promote into it via population growth + tech gate; the 0 weight keeps `pickCitySize` consuming exactly 1 rng() call so the sweep stays byte-stable).
+- `CITY_SIZE_TRADE_CAP`: small 10, medium 15, large 20, metropolis 30, megalopolis 50, **ecumenopolis 100**.
+- `CITY_SIZE_TO_INDEX` / `INDEX_TO_CITY_SIZE`: ecumenopolis is index 5. The `Uint8Array` `citySizeSnapshots` path in `HistoryGenerator` and `YearGenerator` handles the new index automatically.
 
 Distinct from render-type `City` in `types.ts`.
 
