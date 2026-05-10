@@ -9,6 +9,7 @@ export { computeOceanCurrents } from './oceanCurrents';
 export type { OceanCurrentData } from './oceanCurrents';
 export { assignBiomes, BIOME_INFO } from './biomes';
 export { remapBiomesForSubtype } from './biomeRemap';
+export { applyVolcanism } from './volcanism';
 export { generateRivers } from './rivers';
 export { hydraulicErosion } from './hydraulicErosion';
 export { fillDepressions } from './depressionFill';
