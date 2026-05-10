@@ -60,6 +60,23 @@ const PROFILE_OPTIONS: { value: string; label: string }[] = [
   { value: 'swamp', label: 'Swamp World' },
   { value: 'mountains', label: 'Mountain World' },
   { value: 'ocean', label: 'Ocean World' },
+  // Lifeless rocky bodies — no biomes, no history. Reachable from the
+  // universe via the blue "Generate World" button on a non-life planet
+  // or satellite. Manual selection here lets you preview them too.
+  { value: 'volcanic', label: 'Volcanic World' },
+  { value: 'lava', label: 'Lava World' },
+  { value: 'iron', label: 'Iron World' },
+  { value: 'carbon', label: 'Carbon World' },
+  { value: 'cratered', label: 'Cratered World' },
+  { value: 'ice_rock', label: 'Frozen Rock' },
+  { value: 'desert_moon', label: 'Lifeless Desert' },
+  // Ice satellites
+  { value: 'methane_ice', label: 'Methane Ice' },
+  { value: 'sulfur_ice', label: 'Sulfur Ice' },
+  { value: 'nitrogen_ice', label: 'Nitrogen Ice' },
+  { value: 'dirty_ice', label: 'Dirty Ice' },
+  // Gas giants — uses the cloud-band branch instead of the terrain pipeline.
+  { value: 'gas_giant', label: 'Gas Giant' },
 ];
 
 const SHAPE_OPTIONS: { value: string; label: string }[] = [
@@ -77,6 +94,18 @@ const PROFILE_BADGE_COLORS: Record<string, string> = {
   swamp: '#5a7a4a',
   mountains: '#6a5a4a',
   ocean: '#2a6a9a',
+  volcanic: '#8a3018',
+  lava: '#cc3a14',
+  iron: '#8a4a30',
+  carbon: '#3a3a3a',
+  cratered: '#7a7470',
+  ice_rock: '#a8c0d0',
+  desert_moon: '#c89868',
+  methane_ice: '#c08080',
+  sulfur_ice: '#c8b048',
+  nitrogen_ice: '#a0b8c8',
+  dirty_ice: '#9a907a',
+  gas_giant: '#c89a64',
 };
 
 const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
@@ -96,7 +125,12 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   hillshading: 'Relief',
   seasonalIce: 'Seasons',
   cityIcons: 'City Icons',
+  windOverlay: 'Wind',
 };
+
+/** Layer keys that only make sense on gas-giant maps; hidden from the
+ *  Layers list when the loaded body isn't a gas giant. */
+const GAS_ONLY_LAYERS: Set<keyof LayerVisibility> = new Set(['windOverlay']);
 
 export function GenerationTab({
   seed,
@@ -139,19 +173,26 @@ export function GenerationTab({
   // When the planet flow was entered from the universe, the predefined
   // params are read-only — the universe planet is the source of truth.
   const locked = !!worldOrigin;
+  // When the source body has no life, history simulation makes no sense:
+  // hide the Generate History checkbox + Sim Years slider entirely, and
+  // collapse the split "Generate Map / Generate History" button row to a
+  // single "Generate Map" button.
+  const noLifeOrigin = !!worldOrigin && worldOrigin.disableHistory;
   return (
     <div style={styles.body}>
       {worldOrigin && (
-        <div style={styles.originBanner}>
-          <div style={styles.originText}>
-            World derived from planet{' '}
+        <div style={noLifeOrigin ? styles.originBannerNoLife : styles.originBanner}>
+          <div style={noLifeOrigin ? styles.originTextNoLife : styles.originText}>
+            World derived from {worldOrigin.bodyKind === 'gas-giant' ? 'gas giant' :
+              worldOrigin.bodyKind === 'ice-shell' ? 'ice satellite' :
+              worldOrigin.bodyKind === 'rocky-barren' ? 'lifeless body' : 'planet'}{' '}
             <strong>{worldOrigin.planetName}</strong>{' '}
             in system <strong>{worldOrigin.systemName}</strong>.
             Generation params are locked.
           </div>
           {onBackToSystem && (
             <button
-              style={styles.backBtn}
+              style={noLifeOrigin ? styles.backBtnNoLife : styles.backBtn}
               onClick={onBackToSystem}
               title={`Return to ${worldOrigin.systemName}`}
             >
@@ -288,30 +329,32 @@ export function GenerationTab({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-          <input
-            type="checkbox"
-            checked={generateHistory}
-            onChange={onGenerateHistoryToggle}
-            disabled={generating || locked}
-          />
-          Generate History
-        </label>
-
-        {generateHistory && (
-          <label style={styles.toggle}>
+      {!noLifeOrigin && (
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ ...styles.toggle, fontWeight: 'bold', fontSize: 11, color: '#5a3a10', textTransform: 'uppercase', letterSpacing: 0.5 }}>
             <input
               type="checkbox"
-              checked={convertYears}
-              onChange={onConvertYearsToggle}
+              checked={generateHistory}
+              onChange={onGenerateHistoryToggle}
+              disabled={generating || locked}
             />
-            Convert years (BC/AD)
+            Generate History
           </label>
-        )}
-      </div>
 
-      {generateHistory && (
+          {generateHistory && (
+            <label style={styles.toggle}>
+              <input
+                type="checkbox"
+                checked={convertYears}
+                onChange={onConvertYearsToggle}
+              />
+              Convert years (BC/AD)
+            </label>
+          )}
+        </div>
+      )}
+
+      {!noLifeOrigin && generateHistory && (
         <label style={styles.label}>
           Sim Years ({numSimYears})
           <input
@@ -327,6 +370,12 @@ export function GenerationTab({
             disabled={generating}
           />
         </label>
+      )}
+
+      {noLifeOrigin && (
+        <div style={styles.noLifeBanner}>
+          <strong>Physical map only.</strong> No civilizational history is generated for lifeless bodies.
+        </div>
       )}
 
       <div style={styles.label}>
@@ -396,20 +445,30 @@ export function GenerationTab({
       <details style={styles.details}>
         <summary style={styles.detailsSummary}>Layers</summary>
         <div style={{ ...styles.toggleRow, marginTop: 6 }}>
-          {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[]).map(key => (
-            <label key={key} style={styles.toggle}>
-              <input
-                type="checkbox"
-                checked={layers[key]}
-                onChange={() => onLayerToggle(key)}
-              />
-              {LAYER_LABELS[key]}
-            </label>
+          {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[])
+            .filter(key => !GAS_ONLY_LAYERS.has(key) || (mapData?.bodyKind === 'gas-giant'))
+            .map(key => (
+              <label key={key} style={styles.toggle}>
+                <input
+                  type="checkbox"
+                  checked={layers[key]}
+                  onChange={() => onLayerToggle(key)}
+                />
+                {LAYER_LABELS[key]}
+              </label>
           ))}
         </div>
       </details>
 
-      {generateHistory ? (
+      {noLifeOrigin ? (
+        <button
+          style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
+          onClick={onGenerate}
+          disabled={generating}
+        >
+          {generating ? 'Generating…' : 'Generate Map'}
+        </button>
+      ) : generateHistory ? (
         <button
           style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
           onClick={onGenerate}
@@ -672,6 +731,42 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#3a6a3a',
     color: '#e8ffe8',
     border: '1px solid #5fa86a',
+    borderRadius: 4,
+    fontFamily: 'Georgia, serif',
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
+    cursor: 'pointer',
+  },
+  noLifeBanner: {
+    padding: '8px 10px',
+    background: 'rgba(42,74,122,0.12)',
+    border: '1px solid #5f8aa8',
+    borderRadius: 4,
+    fontSize: 11,
+    color: '#1a3050',
+    lineHeight: 1.4,
+  },
+  originBannerNoLife: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    padding: '8px 10px',
+    background: 'rgba(42,74,122,0.10)',
+    border: '1px solid #5f8aa8',
+    borderRadius: 4,
+  },
+  originTextNoLife: {
+    fontSize: 11,
+    color: '#1a3050',
+    lineHeight: 1.4,
+  },
+  backBtnNoLife: {
+    alignSelf: 'flex-start',
+    padding: '4px 10px',
+    background: '#2a4a7a',
+    color: '#e8f0ff',
+    border: '1px solid #5f8aa8',
     borderRadius: 4,
     fontFamily: 'Georgia, serif',
     fontSize: 11,

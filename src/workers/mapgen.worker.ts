@@ -1,5 +1,6 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, TerrainProfile } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE, SHAPE_PROFILES } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE, SHAPE_PROFILES, remapBiomesForSubtype } from '../lib/terrain';
+import { assignGasBands } from '../lib/terrain/gasBands';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
 import { RARITY_WEIGHTS_BY_MODE } from '../lib/history/physical/ResourceCatalog';
@@ -64,52 +65,87 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
   const rarityWeights = RARITY_WEIGHTS_BY_MODE[rarityMode];
 
   try {
-    post({ type: 'PROGRESS', step: 'Building Voronoi diagram\u2026', pct: 5 });
+    post({ type: 'PROGRESS', step: 'Building Voronoi diagram…', pct: 5 });
     const { cells } = buildCellGraph(seed, numCells, width, height);
 
-    post({ type: 'PROGRESS', step: 'Shaping terrain\u2026', pct: 20 });
+    // Gas-giant branch: skip the entire terrain pipeline and assign cloud
+    // bands directly from latitude + an isolated noise stream. History is
+    // impossible on a gas giant, so we also short-circuit the post-pipeline
+    // branches and emit empty regions.
+    if (profile.gasGiantMode) {
+      post({ type: 'PROGRESS', step: 'Forming cloud bands…', pct: 30 });
+      assignGasBands(cells, width, height, seed, profile);
+      post({ type: 'TERRAIN_READY', data: { cells, rivers: [], width, height } });
+      post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
+      post({
+        type: 'DONE',
+        data: {
+          cells, rivers: [], cities: [], roads: [], width, height,
+          regions: [], continents: [],
+          bodyKind: req.bodyKind,
+          paletteOverride: req.paletteOverride,
+          coastlinesSuppressed: profile.suppressCoastlineRender,
+          hillshadeSuppressed: profile.suppressHillshade,
+        },
+      });
+      return;
+    }
+
+    post({ type: 'PROGRESS', step: 'Shaping terrain…', pct: 20 });
     const noise = createNoiseSamplers3D(seed);
     assignElevation(cells, width, height, noise, waterRatio, seed, profile);
 
-    post({ type: 'PROGRESS', step: 'Computing ocean currents\u2026', pct: 25 });
-    const { sstAnomaly } = computeOceanCurrents(cells, width, height, profile);
+    // Ocean currents are skipped on bodies with no real oceans (lava /
+    // volcanic / cratered / ice rocks). Substitute a zero-anomaly array so
+    // assignMoisture / assignTemperature signatures stay stable.
+    let sstAnomaly: Float32Array;
+    if (profile.suppressOceanCurrents) {
+      sstAnomaly = new Float32Array(cells.length);
+    } else {
+      post({ type: 'PROGRESS', step: 'Computing ocean currents…', pct: 25 });
+      sstAnomaly = computeOceanCurrents(cells, width, height, profile).sstAnomaly;
+    }
 
-    post({ type: 'PROGRESS', step: 'Calculating moisture\u2026', pct: 32 });
+    post({ type: 'PROGRESS', step: 'Calculating moisture…', pct: 32 });
     const distFromOcean = assignMoisture(cells, width, height, noise, sstAnomaly, profile);
 
-    post({ type: 'PROGRESS', step: 'Computing temperature\u2026', pct: 42 });
+    post({ type: 'PROGRESS', step: 'Computing temperature…', pct: 42 });
     assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
 
-    post({ type: 'PROGRESS', step: 'Classifying biomes\u2026', pct: 48 });
+    post({ type: 'PROGRESS', step: 'Classifying biomes…', pct: 48 });
     assignBiomes(cells, width, height, noise, profile);
+    if (profile.biomeRemap) remapBiomesForSubtype(cells, profile);
 
     let rivers: ReturnType<typeof generateRivers> = [];
     if (!profile.suppressRivers) {
       // Priority-flood pass 1: materialize small closed basins as lakes
       // and produce a virtual drainage surface so the initial river pass
       // always has a path to water.
-      post({ type: 'PROGRESS', step: 'Filling depressions\u2026', pct: 50 });
+      post({ type: 'PROGRESS', step: 'Filling depressions…', pct: 50 });
       const { drainageElevation: drainageElev1 } = fillDepressions(cells, profile);
 
-      post({ type: 'PROGRESS', step: 'Carving rivers\u2026', pct: 52 });
+      post({ type: 'PROGRESS', step: 'Carving rivers…', pct: 52 });
       generateRivers(cells, profile, drainageElev1); // initial pass — computes riverFlow for erosion
 
-      post({ type: 'PROGRESS', step: 'Eroding river valleys\u2026', pct: 55 });
-      hydraulicErosion(cells, profile); // deliberately uses raw cell.elevation — deposition breaks monotonicity
+      if (!profile.suppressErosion) {
+        post({ type: 'PROGRESS', step: 'Eroding river valleys…', pct: 55 });
+        hydraulicErosion(cells, profile); // deliberately uses raw cell.elevation — deposition breaks monotonicity
+      }
 
       // Priority-flood pass 2: erosion's deposition step can create new
       // sinks and shift existing ones, so re-run fillDepressions on the
       // eroded terrain before the final river trace.
-      post({ type: 'PROGRESS', step: 'Filling depressions\u2026', pct: 57 });
+      post({ type: 'PROGRESS', step: 'Filling depressions…', pct: 57 });
       const { drainageElevation: drainageElev2 } = fillDepressions(cells, profile);
 
-      post({ type: 'PROGRESS', step: 'Retracing rivers\u2026', pct: 58 });
+      post({ type: 'PROGRESS', step: 'Retracing rivers…', pct: 58 });
       rivers = generateRivers(cells, profile, drainageElev2); // final pass — follows carved terrain
     }
 
     // Refresh elevation-dependent properties after erosion (or for profile-based overrides)
     assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
     assignBiomes(cells, width, height, noise, profile);
+    if (profile.biomeRemap) remapBiomesForSubtype(cells, profile);
 
     // Terrain pipeline done — let the UI paint the map immediately while
     // buildPhysicalWorld / HistoryGenerator continue running in this worker.
@@ -122,11 +158,14 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
     let regions: RegionData[] = [];
     let continents: ContinentData[] = [];
 
-    if (doHistory) {
-      post({ type: 'PROGRESS', step: 'Building physical world\u2026', pct: 65 });
+    // Defense-in-depth: even if the UI passes generateHistory: true, the
+    // worker refuses to run history when disableHistory is set. The flag
+    // is set whenever the request originated from a non-life body.
+    if (doHistory && !req.disableHistory) {
+      post({ type: 'PROGRESS', step: 'Building physical world…', pct: 65 });
       const rng = seededPRNG(seed + '_history');
 
-      post({ type: 'PROGRESS', step: 'Simulating history\u2026', pct: 72 });
+      post({ type: 'PROGRESS', step: 'Simulating history…', pct: 72 });
       const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed);
       cities = result.cities;
       roads = result.roads;
@@ -135,18 +174,24 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
       regions = result.regions;
       continents = result.continents;
     } else {
-      post({ type: 'PROGRESS', step: 'Building world\u2026', pct: 65 });
+      post({ type: 'PROGRESS', step: 'Building world…', pct: 65 });
       const rng = seededPRNG(seed + '_world');
       const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed);
       regions = result.regionData;
       continents = result.continentData;
     }
 
-    post({ type: 'PROGRESS', step: 'Finishing\u2026', pct: 95 });
+    post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
 
     post({
       type: 'DONE',
-      data: { cells, rivers, cities, roads, width, height, history, regions, continents, historyStats },
+      data: {
+        cells, rivers, cities, roads, width, height, history, regions, continents, historyStats,
+        bodyKind: req.bodyKind,
+        paletteOverride: req.paletteOverride,
+        coastlinesSuppressed: profile.suppressCoastlineRender,
+        hillshadeSuppressed: profile.suppressHillshade,
+      },
     });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });

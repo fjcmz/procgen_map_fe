@@ -89,19 +89,28 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'planet' ? '↓ Enter Planet' :
     null;
 
+  // Every planet and satellite gets a "Generate World" button. Life-bearing
+  // bodies render the button in green (existing visual); non-life bodies use
+  // a blue variant and produce a physical-only map (no civilizational history).
   const canGenerateWorld =
     !!onGenerateWorld &&
     entity.kind === 'planet' &&
-    !!planet &&
-    planet.composition === 'ROCK' &&
-    planet.life;
+    !!planet;
 
   const canGenerateSatelliteWorld =
     !!onGenerateSatelliteWorld &&
     entity.kind === 'satellite' &&
     !!satellite &&
-    !!planet &&
-    satellite.life;
+    !!planet;
+
+  const planetGenerateStyle = planet?.life ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const satelliteGenerateStyle = satellite?.life ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const planetGenerateTitle = planet?.life
+    ? 'Open the world generator with parameters derived from this planet'
+    : 'Open the world generator (physical map only — no civilizational history)';
+  const satelliteGenerateTitle = satellite?.life
+    ? 'Open the world generator with parameters derived from this moon'
+    : 'Open the world generator (physical map only — no civilizational history)';
 
   const headerTitle =
     entity.kind === 'galaxy' && galaxy ? galaxy.humanName :
@@ -158,18 +167,18 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
           <button style={s.navBtn} onClick={onNavigateUp}>{upLabel}</button>
           {canGenerateWorld && planet && (
             <button
-              style={{ ...s.navBtn, ...s.navBtnGenerate }}
+              style={{ ...s.navBtn, ...planetGenerateStyle }}
               onClick={() => onGenerateWorld!(planet, entity.systemId)}
-              title="Open the world generator with parameters derived from this planet"
+              title={planetGenerateTitle}
             >
               ★ Generate World
             </button>
           )}
           {canGenerateSatelliteWorld && satellite && planet && (
             <button
-              style={{ ...s.navBtn, ...s.navBtnGenerate }}
+              style={{ ...s.navBtn, ...satelliteGenerateStyle }}
               onClick={() => onGenerateSatelliteWorld!(satellite, planet, entity.systemId)}
-              title="Open the world generator with parameters derived from this moon"
+              title={satelliteGenerateTitle}
             >
               ★ Generate World
             </button>
@@ -651,6 +660,12 @@ const s: Record<string, React.CSSProperties> = {
     background: '#3a6a3a',
     border: '1px solid #5fa86a',
     color: '#e8ffe8',
+    fontWeight: 'bold',
+  },
+  navBtnGenerateNoLife: {
+    background: '#2a4a7a',
+    border: '1px solid #5f8aa8',
+    color: '#e8f0ff',
     fontWeight: 'bold',
   },
 };

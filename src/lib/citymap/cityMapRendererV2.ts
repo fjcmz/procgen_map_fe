@@ -322,6 +322,24 @@ const BIOME_OUTSIDE_FILL: Record<BiomeType, string> = {
   OCEAN:                      '#b4d0e4',
   COAST:                      '#b4daf0',
   BEACH:                      '#e8dcb8',
+  // Non-life biomes: cities never spawn on these (history is disabled),
+  // but the map needs entries to satisfy the exhaustive Record type.
+  // Pastel-tinted fallbacks of each biome's BIOME_INFO color.
+  LAVA:                       '#f4a890',
+  BASALT:                     '#9a9088',
+  VOLCANIC_ASH:               '#c0b8b0',
+  SULFUR_FLAT:                '#f4ecb0',
+  METALLIC_PLAIN:             '#d4a890',
+  CARBON_PLAIN:               '#888080',
+  CRATER_FIELD:               '#c8c4c0',
+  ICE_SHELF:                  '#e8f0f4',
+  DIRTY_ICE_FIELD:            '#d4ccc0',
+  REGOLITH:                   '#d0c8bc',
+  GAS_BAND_LIGHT:             '#f0e4c8',
+  GAS_BAND_DARK:              '#c8a888',
+  GAS_STORM:                  '#d88880',
+  GAS_HAZE:                   '#e8f0f4',
+  GAS_BAND_HOT:               '#b88078',
 };
 
 export function renderCityMapV2(

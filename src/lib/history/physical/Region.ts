@@ -54,6 +54,25 @@ export const CELL_BIOME_CAPACITY: Record<BiomeType, number> = {
   BEACH:                          8_750,
   OCEAN:                          2_000,
   LAKE:                          11_250,
+  // Non-life biomes: cities never spawn on these (history is gated off
+  // for any body whose subtype produces them), but the Record requires
+  // entries. All zero — defensive: if a city ever did land here, it would
+  // have zero carrying capacity.
+  LAVA:                                0,
+  BASALT:                              0,
+  VOLCANIC_ASH:                        0,
+  SULFUR_FLAT:                         0,
+  METALLIC_PLAIN:                      0,
+  CARBON_PLAIN:                        0,
+  CRATER_FIELD:                        0,
+  ICE_SHELF:                           0,
+  DIRTY_ICE_FIELD:                     0,
+  REGOLITH:                            0,
+  GAS_BAND_LIGHT:                      0,
+  GAS_BAND_DARK:                       0,
+  GAS_STORM:                           0,
+  GAS_HAZE:                            0,
+  GAS_BAND_HOT:                        0,
 };
 
 export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
@@ -66,6 +85,16 @@ export const BIOME_TO_REGION_BIOME: Record<BiomeType, RegionBiome> = {
   MARSH: 'swamp',
   ALPINE_MEADOW: 'temperate',
   OCEAN: 'temperate', COAST: 'temperate', BEACH: 'temperate', LAKE: 'temperate',
+  // Non-life biomes: never reached by the region pipeline (history is off
+  // for any body that produces them), but the Record requires entries.
+  // Map everything plausibly cold/dry to 'tundra' / 'arid' so any defensive
+  // lookup at least returns a sane RegionBiome.
+  LAVA: 'arid',           BASALT: 'arid',          VOLCANIC_ASH: 'arid',
+  SULFUR_FLAT: 'arid',    METALLIC_PLAIN: 'arid',  CARBON_PLAIN: 'arid',
+  CRATER_FIELD: 'arid',   ICE_SHELF: 'tundra',     DIRTY_ICE_FIELD: 'tundra',
+  REGOLITH: 'arid',
+  GAS_BAND_LIGHT: 'arid', GAS_BAND_DARK: 'arid',   GAS_STORM: 'arid',
+  GAS_HAZE: 'tundra',     GAS_BAND_HOT: 'arid',
 };
 
 function rngHex(rng: () => number): string {

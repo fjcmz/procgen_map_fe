@@ -7,6 +7,7 @@ import { INDEX_TO_CITY_SIZE } from '../history/physical/CityEntity';
 import type { ResourceType } from '../history/physical/Resource';
 import { PatternCache, strokeColorForIndex } from './patterns';
 import { unwrapX, drawWrappedPath, findSharedWrapAwareVerts } from './wrap';
+import { drawWindOverlay } from './windOverlay';
 
 // Tech-level tint thresholds (max level across the 9 TechFields per city).
 // Applied to cells in `City.ownedCells` filtered by `yearAdded <= selectedYear`.
@@ -160,21 +161,25 @@ function cellPath(ctx: CanvasRenderingContext2D, cell: Cell): void {
   }
 }
 
-function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season = 0): void {
+function biomeFillColor(biome: import('../types').BiomeType, paletteOverride?: Record<string, string>): string {
+  return paletteOverride?.[biome] ?? BIOME_INFO[biome].fillColor;
+}
+
+function drawBiomeFill(ctx: CanvasRenderingContext2D, cells: Cell[], season: Season = 0, paletteOverride?: Record<string, string>): void {
   // Draw land first, water last — ensures water always wins at shared polygon edges
   // regardless of cell index order (which has no spatial meaning in Voronoi).
   for (const cell of cells) {
     if (cell.isWater || cell.vertices.length < 2) continue;
     const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
     const density = getVegetationDensity(cell);
-    ctx.fillStyle = modulateBiomeColor(BIOME_INFO[effectiveBiome].fillColor, density);
+    ctx.fillStyle = modulateBiomeColor(biomeFillColor(effectiveBiome, paletteOverride), density);
     cellPath(ctx, cell);
     ctx.fill();
   }
   for (const cell of cells) {
     if (!cell.isWater || cell.vertices.length < 2) continue;
     const effectiveBiome = season !== 0 ? getSeasonalBiome(cell, season) : cell.biome;
-    ctx.fillStyle = BIOME_INFO[effectiveBiome].fillColor;
+    ctx.fillStyle = biomeFillColor(effectiveBiome, paletteOverride);
     cellPath(ctx, cell);
     ctx.fill();
   }
@@ -1581,21 +1586,31 @@ export function render(
 
     // Layer 1: Biome fill (with seasonal variation when enabled)
     const effectiveSeason = layers.seasonalIce ? season : 0 as Season;
-    drawBiomeFill(ctx, data.cells, effectiveSeason);
+    drawBiomeFill(ctx, data.cells, effectiveSeason, data.paletteOverride);
 
-    // Layer 1b: Hillshading (shaded relief on land)
-    if (layers.hillshading) drawHillshading(ctx, data.cells, width);
+    // Layer 1b: Hillshading (shaded relief on land). Suppressed for gas
+    // worlds where elevation is synthetic and shading would imply false relief.
+    if (layers.hillshading && !data.hillshadeSuppressed) drawHillshading(ctx, data.cells, width);
 
     // Layer 1c: Permafrost overlay (seasonal blue-gray tint on sub-polar land)
     if (layers.seasonalIce && effectiveSeason !== 0) {
       drawPermafrost(ctx, data.cells, effectiveSeason);
     }
 
-    // Layer 2: Water depth shading
-    drawWaterDepth(ctx, data.cells, width, height);
+    // Layer 2: Water depth shading. Skipped on bodies where coastlines are
+    // also suppressed (lava / gas) — the water-depth tint would smear the
+    // intentional palette of those biomes.
+    if (!data.coastlinesSuppressed) drawWaterDepth(ctx, data.cells, width, height);
 
-    // Layer 3: Noisy coastlines
-    drawNoisyCoastlines(ctx, data.cells, width, scale);
+    // Layer 3: Noisy coastlines. Skipped for lava / gas worlds where
+    // land/water mismatch doesn't represent a physical coast.
+    if (!data.coastlinesSuppressed) drawNoisyCoastlines(ctx, data.cells, width, scale);
+
+    // Layer 3b: Wind overlay (gas-giant only). Streamlines + storm spirals
+    // drawn over the cell-band base layer.
+    if (layers.windOverlay && data.bodyKind === 'gas-giant') {
+      drawWindOverlay(ctx, data, seed, scale);
+    }
 
     // Political view: mute terrain with parchment overlay on land cells
     if (mapView === 'political') {
