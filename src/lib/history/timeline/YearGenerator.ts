@@ -24,6 +24,7 @@ import type { CountryEvent } from './Country';
 import { ruinifyCity } from './Ruin';
 import type { CityEntity } from '../physical/CityEntity';
 import type { Cell } from '../../types';
+import { scoreCellForSeaCity } from '../history';
 import { timed } from './timing';
 
 /** Pre-computed region topology — built once before the year loop, reused every year. */
@@ -159,6 +160,11 @@ export class YearGenerator {
       }
 
       for (const city of world.mapUsableCities.values()) {
+        // Sea cities have their own water-only expansion path immediately
+        // below — skip them here to keep the land-expansion path purely
+        // land-based and prevent a sea city from absorbing land cells in its
+        // parent region.
+        if (city.isSeaCity) continue;
         const govLevel = getCityTechLevel(world, city, 'government');
         const maxCells = maxCellsForCity(city.currentPopulation, govLevel);
         if (city.ownedCells.size >= maxCells) continue;
@@ -243,6 +249,89 @@ export class YearGenerator {
           toClaim--;
         }
       }
+      });
+    }
+
+    // Step 4c-sea: Sea-city polygon expansion. Sea cities absorb adjacent
+    // unclaimed water cells (coastal or deep ocean), capped at
+    // `max(1, floor(exploration * 0.1 + maritime * 0.2))` total owned cells.
+    // The +1 floor guarantees the founding cell is always retained even
+    // when both tech levels are 0. Deep-ocean cells (no `regionId`) are
+    // absorbed into the parent city's region — same pattern as the
+    // founding-time absorption in `CitySettlement.ts._tryFoundSeaCity`,
+    // which preserves the "land cells first" ordering by appending the
+    // water cell to the end of `region.cellIndices`. No randomness is
+    // consumed: the BFS is sorted deterministically by sea-city score then
+    // by cell index, so the timeline RNG is untouched.
+    if (cells) {
+      const cellsLocal = cells;
+      timed('sea-expansion-cells', () => {
+        // Rebuild the global claimed-cells index from scratch — step 4c
+        // (land expansion) above mutated `city.ownedCells` for non-sea
+        // cities, so a fresh snapshot is the simplest way to honour the
+        // "only unclaimed polygons can be absorbed" rule.
+        const claimedCells = new Map<number, string>();
+        for (const city of world.mapUsableCities.values()) {
+          for (const ci of city.ownedCells.keys()) {
+            claimedCells.set(ci, city.id);
+          }
+        }
+
+        for (const city of world.mapUsableCities.values()) {
+          if (!city.isSeaCity) continue;
+
+          const exploration = getCityTechLevel(world, city, 'exploration');
+          const maritime = getCityTechLevel(world, city, 'maritime');
+          const maxCells = Math.max(1, Math.floor(exploration * 0.1 + maritime * 0.2));
+          if (city.ownedCells.size >= maxCells) continue;
+
+          const region = world.mapRegions.get(city.regionId);
+          if (!region) continue;
+
+          // Frontier: unclaimed water-cell neighbours of owned cells.
+          // Includes both coastal (regionId set) and deep-ocean (regionId
+          // undefined) cells.
+          const frontier: number[] = [];
+          const seen = new Set<number>();
+          for (const ownedCi of city.ownedCells.keys()) seen.add(ownedCi);
+          for (const ownedCi of city.ownedCells.keys()) {
+            for (const ni of cellsLocal[ownedCi].neighbors) {
+              if (seen.has(ni)) continue;
+              seen.add(ni);
+              if (!cellsLocal[ni].isWater) continue;
+              if (claimedCells.has(ni)) continue;
+              frontier.push(ni);
+            }
+          }
+          if (frontier.length === 0) continue;
+
+          // Rank by harbour / coastal preference (mirror of the
+          // founding-time scoring in CitySettlement). Tiebreak on cell
+          // index for byte-deterministic replay.
+          frontier.sort((a, b) => {
+            const sa = scoreCellForSeaCity(cellsLocal[a], cellsLocal);
+            const sb = scoreCellForSeaCity(cellsLocal[b], cellsLocal);
+            if (sb !== sa) return sb - sa;
+            return a - b;
+          });
+
+          let toClaim = maxCells - city.ownedCells.size;
+          for (const ci of frontier) {
+            if (toClaim <= 0) break;
+            // Absorb deep-ocean cells into the parent region so
+            // `computeOwnership` and the renderer keep working without a
+            // new entity type. Append after existing cells to preserve
+            // the land-cells-first invariant.
+            if (cellsLocal[ci].regionId === undefined) {
+              region.cellIndices.push(ci);
+              cellsLocal[ci].regionId = region.id;
+              city.absorbedWaterCells.add(ci);
+            }
+            city.ownedCells.set(ci, absYear);
+            claimedCells.set(ci, city.id);
+            toClaim--;
+          }
+        }
       });
     }
 

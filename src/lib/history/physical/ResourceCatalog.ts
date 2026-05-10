@@ -467,10 +467,19 @@ export const RESOURCE_TECH_REQUIREMENT: Record<ResourceCategory, Record<Resource
     veryRare: { field: 'exploration', level: 40 },
   },
   marine: {
+    // Common (e.g. fish): basic shore-fishing — available from year 0 with
+    // no tech investment, same as before.
     common:   L0_EXPLORATION,
-    uncommon: L0_EXPLORATION,
-    rare:     { field: 'exploration', level: 30 },
-    veryRare: { field: 'exploration', level: 50 },
+    // Uncommon (e.g. whales, kelp, coral): need boats. Gated on `maritime 1`
+    // — the same tech tier that unlocks the sea-colonisation branch in
+    // CitySettlement.ts (SEA_SETTLEMENT_MARITIME_GATE). Pre-maritime
+    // civilisations only ever discover/trade `fish` from the sea.
+    uncommon: { field: 'maritime', level: 1 },
+    // Rare (e.g. pearls): deep-water diving requires a more developed
+    // maritime industry.
+    rare:     { field: 'maritime', level: 3 },
+    // Very rare: late-game offshore harvesting / open-ocean operations.
+    veryRare: { field: 'maritime', level: 5 },
   },
   stone: {
     common:   L0_EXPLORATION,

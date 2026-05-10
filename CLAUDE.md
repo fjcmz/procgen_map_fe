@@ -250,20 +250,20 @@ The sweep is **byte-deterministic** — re-running with the same args produces b
 
 ### Current baseline (`scripts/results/baseline-a.json`)
 
-The baseline was rebased on **2026-05-10** for the sea-colonisation feature (introduces the `maritime` tech field + `CitySettlement.ts` sea-attempt branch). Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired at the same time — `baseline-a.json` is now the only checked-in sweep result.
+The baseline was rebased on **2026-05-10** for the maritime-resources + sea-city expansion feature (`marine`-category resources moved to `maritime` tech gates in `RESOURCE_TECH_REQUIREMENT`; new `sea-expansion-cells` step in `YearGenerator.ts` lets sea cities grow into adjacent unclaimed water polygons up to `max(1, floor(exploration*0.1 + maritime*0.2))` cells). The previous rebaseline on the same date covered the sea-colonisation feature (introduces the `maritime` tech field + `CitySettlement.ts` sea-attempt branch). Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired at the same time — `baseline-a.json` is now the only checked-in sweep result.
 
 - **Args**: `seeds=5`, `years=5000`, `cells=3000`, `width=1600`, `height=1000`, `waterRatio=0.4`, `profile=DEFAULT_PROFILE` (no overlay).
-- **Wall clock**: ~85s on 4-way concurrency (per-seed 40–59s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
+- **Wall clock**: ~80s on 4-way concurrency (per-seed 38–56s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
 - **Headline aggregates** (min / median / max across 5 seeds; sanity check that your local run is in the same regime before diffing):
-  - `peakPopulation`: 616M / 1.05B / 1.49B
-  - `totalTechs`: ~1.8K (each seed in the 1777–1896 range)
-  - `totalCountries`: 31 / 33 / 33
-  - `totalWars`: 121 / 141 / 202
-  - `totalConquests`: 120 / 137 / 194
-  - `totalEmpires`: 25 / 28 / 37
+  - `peakPopulation`: 782M / 1.54B / 1.60B
+  - `totalTechs`: ~1.9K (each seed in the 1807–1959 range)
+  - `totalCountries`: 30 / 35 / 41
+  - `totalWars`: 156 / 219 / 261
+  - `totalConquests`: 151 / 214 / 253
+  - `totalEmpires`: 29 / 41 / 47
   - `totalCataclysms`: ~2.4–2.5K
   - `worldEndedCount`: 0 / 5 (no seed wipes itself out)
-  - `peakTechLevelByField` extremes: `exploration` 45–105 (lowest), `military` / `art` / `government` 121–288 (highest); `maritime` 100–150 range (new field).
+  - `peakTechLevelByField` extremes: `exploration` 44–103 (lowest), `military` / `art` / `government` 132–285 (highest); `maritime` 83–165 range.
 
 When the simulation pipeline lands a deliberate balance change, re-run `npm run sweep -- --label baseline-a` to overwrite this file in the same commit so the baseline tracks the new intended behavior. Do NOT rebaseline to make an unexplained diff disappear — investigate it first.
 
@@ -307,7 +307,8 @@ These cut across multiple specs. Layer-specific pitfalls live in each spec's "Pi
 - **Cell count performance.** World-map generation above ~10,000 cells is slow. Default is 5,000. Test world-map UI changes at low cell counts. Universe generation scales up to 10,000 systems via the slider (the sliders default to 500/1000/5000/10000).
 - **Base path.** Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source.
 - **Universe ↔ world-map seed hand-off is a stable interface.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on when they generate a world from the universe view. Changing this format would break "the same universe seed always gives the same world for a given planet". See `universe_map.md`.
-- **Sea cities are gated by the `maritime` tech field.** Once a country reaches `maritime >= 1`, large+ coastal cities can spawn child cities on water cells via `CitySettlement.ts`. At `maritime >= 4` they can claim deep-ocean cells (no `regionId`); those cells are absorbed into the parent city's region by appending to `region.cellIndices` (water cells always appended after land — preserves the land-first invariant). All sea-attempt randomness routes through `seededPRNG(`${seed}_seasettle_${parentCityId}_${year}`)` so pre-tech years stay sweep-byte-identical. Sea cities render with an anchor icon (instead of a house) on the world map; their owned water cells get a translucent kingdom-colour tint over the sea palette. The V2 city map of a sea city skips walls / river / sprawl and turns the canvas surrounding the city footprint into open ocean (stilted-platform variant). See `world_history.md`, `world_map.md`, and `city_map.md`.
+- **Sea cities are gated by the `maritime` tech field.** Once a country reaches `maritime >= 1`, large+ coastal cities can spawn child cities on water cells via `CitySettlement.ts`. At `maritime >= 4` they can claim deep-ocean cells (no `regionId`); those cells are absorbed into the parent city's region by appending to `region.cellIndices` (water cells always appended after land — preserves the land-first invariant). All sea-attempt randomness routes through `seededPRNG(`${seed}_seasettle_${parentCityId}_${year}`)` so pre-tech years stay sweep-byte-identical. Sea cities render with an anchor icon (instead of a house) on the world map; their owned water cells get a translucent kingdom-colour tint over the sea palette. The V2 city map of a sea city skips walls / river / sprawl and turns the canvas surrounding the city footprint into open ocean (stilted-platform variant). Once founded, sea cities also expand into adjacent unclaimed water polygons (coastal or deep) up to `max(1, floor(exploration * 0.1 + maritime * 0.2))` total owned cells via the `sea-expansion-cells` step in `YearGenerator.ts`; sea cities are explicitly skipped in the land-expansion step so they never absorb adjacent land. See `world_history.md`, `world_map.md`, and `city_map.md`.
+- **Marine resources are gated by `maritime` tech.** Common marine (e.g. `fish`) is still `exploration 0` (basic shore fishing). Uncommon (`whales`, `kelp`, `coral`) needs `maritime 1`, rare (`pearls`) needs `maritime 3`, very-rare needs `maritime 5`. Enforced by `RESOURCE_TECH_REQUIREMENT.marine` in `ResourceCatalog.ts`; the yearly discovery tick in `YearGenerator` step 9 promotes a region's marine resources into `discoveredResources` once the owning country crosses each level. Pre-maritime civilisations therefore only ever trade `fish` from the sea — bootstrap (`isCommonUnlockedAtZero`) only matches `exploration 0` entries, so the higher marine tiers never enter `discoveredResources` until tech catches up.
 
 ## When You Add a New Feature
 
