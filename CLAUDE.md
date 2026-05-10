@@ -247,6 +247,25 @@ The discipline: **a new feature that adds a behavioral roll must use its own sub
 
 The sweep is **byte-deterministic** — re-running with the same args produces byte-identical JSON modulo timestamps. Any non-zero diff against `scripts/results/baseline-a.json` is a real behavior change. Diff after history-simulation tuning to catch regressions.
 
+### Current baseline (`scripts/results/baseline-a.json`)
+
+The baseline was reset on **2026-05-10** to capture the present state of the world-map + world-history pipeline (post-ecumenopolis, post-timeline-hot-path optimization). Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired at the same time — `baseline-a.json` is now the only checked-in sweep result.
+
+- **Args**: `seeds=5`, `years=5000`, `cells=3000`, `width=1600`, `height=1000`, `waterRatio=0.4`, `profile=DEFAULT_PROFILE` (no overlay).
+- **Wall clock**: ~90s on 4-way concurrency (per-seed 37–58s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
+- **Headline aggregates** (min / median / max across 5 seeds; sanity check that your local run is in the same regime before diffing):
+  - `peakPopulation`: 826M / 1.27B / 2.08B
+  - `totalTechs`: 1856 / 1872 / 1916
+  - `totalCountries`: 31 / 33 / 33
+  - `totalWars`: 99 / 153 / 188
+  - `totalConquests`: 98 / 151 / 183
+  - `totalEmpires`: 22 / 30 / 41
+  - `totalCataclysms`: 2457 / 2527 / 2564
+  - `worldEndedCount`: 0 / 5 (no seed wipes itself out)
+  - `peakTechLevelByField` extremes: `exploration` 55–84 (lowest), `military` / `art` / `government` 136–289 (highest)
+
+When the simulation pipeline lands a deliberate balance change, re-run `npm run sweep -- --label baseline-a` to overwrite this file in the same commit so the baseline tracks the new intended behavior. Do NOT rebaseline to make an unexplained diff disappear — investigate it first.
+
 **Hard rules:**
 - The harness must remain browser-free. Do NOT import from `src/components/`, `src/workers/`, or any DOM-dependent module — it must run in a bare Node shell.
 - If the terrain or history pipeline grows a new step, mirror it in both `mapgen.worker.ts` and `sweep-history.ts` (same order, same arguments) or future sweeps will silently drift from in-browser behavior.
