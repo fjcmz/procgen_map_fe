@@ -23,18 +23,23 @@ function remapOne(rule: BiomeRemapRule, cell: Cell): BiomeType {
   const e = cell.elevation;
   switch (rule) {
     case 'lava': {
-      // No real water — the "water" cells are molten flows. Land splits
-      // BASALT (mid) / VOLCANIC_ASH (high).
+      // Lava-dominated world: oceans + lowlands are all molten flows; mid
+      // elevations are cooled basalt; only the highest peaks are ash.
+      // Volcanic-event hotspots overlay this in `applyVolcanism`.
       if (cell.isWater) return 'LAVA';
-      if (e < 0.55) return 'BASALT';
+      if (e < 0.40) return 'LAVA';
+      if (e < 0.65) return 'BASALT';
       return 'VOLCANIC_ASH';
     }
     case 'volcanic': {
-      // Mostly cooled basalt + ash plains, with lava in the deepest basins.
-      if (cell.isWater) return 'LAVA';
-      if (e < 0.40) return 'VOLCANIC_ASH';
-      if (e < 0.70) return 'BASALT';
-      return 'CRATER_FIELD';
+      // Mostly cooled — basalt plains, cratered mid-elevations, ash peaks.
+      // Active LAVA hotspots are stamped on top by `applyVolcanism` (1–5
+      // events near mountains). Without that overlay there's no visible
+      // lava on the surface.
+      if (cell.isWater) return 'BASALT';
+      if (e < 0.40) return 'BASALT';
+      if (e < 0.65) return 'CRATER_FIELD';
+      return 'VOLCANIC_ASH';
     }
     case 'iron': {
       if (cell.isWater) return 'METALLIC_PLAIN';

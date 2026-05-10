@@ -1,5 +1,5 @@
 import type { GenerateRequest, WorkerMessage, RegionData, ContinentData, TerrainProfile } from '../lib/types';
-import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE, SHAPE_PROFILES, remapBiomesForSubtype } from '../lib/terrain';
+import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, computeOceanCurrents, assignMoisture, assignTemperature, assignBiomes, generateRivers, hydraulicErosion, fillDepressions, PROFILES, DEFAULT_PROFILE, SHAPE_PROFILES, remapBiomesForSubtype, applyVolcanism } from '../lib/terrain';
 import { assignGasBands } from '../lib/terrain/gasBands';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
@@ -146,6 +146,9 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
     assignTemperature(cells, width, height, distFromOcean, noise, sstAnomaly, profile);
     assignBiomes(cells, width, height, noise, profile);
     if (profile.biomeRemap) remapBiomesForSubtype(cells, profile);
+    // Volcanic-event overlay runs last so its LAVA stamps survive the
+    // biome refresh. No-op for any rule other than volcanic / lava.
+    applyVolcanism(cells, seed, profile);
 
     // Terrain pipeline done — let the UI paint the map immediately while
     // buildPhysicalWorld / HistoryGenerator continue running in this worker.
