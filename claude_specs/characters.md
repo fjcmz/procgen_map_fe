@@ -59,13 +59,14 @@ Defaults to `''` for the sweep harness and any standalone test path — sub-stre
 
 Roster size scales with city tier:
 
-| Tier | Roster |
-|------|--------|
-| small | 3 |
-| medium | 6 |
-| large | 12 |
-| metropolis | 24 |
-| megalopolis | 48 |
+| Tier | Roster | Max level |
+|------|--------|-----------|
+| small | 6 | 3 |
+| medium | 12 | 5 |
+| large | 24 | 7 |
+| metropolis | 48 | 12 |
+| megalopolis | 96 | 15 |
+| ecumenopolis | 200 | 20 |
 
 ### Dominant Bias
 
@@ -78,8 +79,9 @@ Roster size scales with city tier:
 | large | 0.50 |
 | metropolis | 0.30 |
 | megalopolis | 0.15 |
+| ecumenopolis | 0.05 |
 
-So small towns are racially/religiously homogeneous; megalopolises are cosmopolitan.
+So small towns are racially/religiously homogeneous; megalopolises are cosmopolitan; ecumenopolises are planet-wide melting pots where only ~5% of NPCs match the country's dominant race + religion.
 
 ### Roll Mechanism
 
