@@ -573,7 +573,7 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
   const cityMapV2 = useMemo(() => {
     if (!needsCityMapV2 || !city || !cityEnvironment) return null;
     return generateCityMapV2(seed, city.name, cityEnvironment);
-  }, [needsCityMapV2, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [needsCityMapV2, seed, city?.name, cityEnvironment?.size, cityEnvironment?.isCoastal, cityEnvironment?.waterSide, cityEnvironment?.mountainDirection, cityEnvironment?.isSeaCity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const blockCounts = useMemo(() => {
     if (!quartersOpen || !cityMapV2) return null;

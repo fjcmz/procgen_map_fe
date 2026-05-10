@@ -292,6 +292,30 @@ The new top tier extends every existing per-size table along the same trends. Th
 
 **Continent cap**: at most one ecumenopolis per continent. Cap is enforced in `YearGenerator` step 4b — see `world_history.md` for details. The citymap layer itself is unaware of this cap (it just renders whatever `env.size` it's handed).
 
+## Sea Cities (stilted variant)
+
+When the world-map city is a sea city (`City.isSeaCity` set by `CitySettlement.ts` — see `world_history.md`), `deriveCityEnvironment` populates `CityEnvironment.isSeaCity = true`. The V2 generator orchestrator branches on this flag to produce a stilted-platform variant of the canvas — the city sits on a small footprint of polygons surrounded by open ocean on all sides.
+
+**Slice reuse / replace / skip matrix**:
+
+| Slice | Sea-city behaviour |
+|---|---|
+| `cityMapWater` (water polygon carving) | **Skipped**. The orchestrator computes `waterPolygonIds` as the **inverse** of the city footprint instead — every polygon NOT in `footprint.interior` becomes open ocean. |
+| `cityMapMountains` | **Skipped**. `env.mountainDirection` is forced to `null` for sea cities; the canvas has no land for mountains. |
+| `cityMapShape` | **Reused**. The footprint allocator runs with an empty obstacle set, so it picks an organic shape sitting in the middle of the canvas. |
+| `cityMapWalls` | **Skipped** (`wallConfig` is forced to no-walls). The sea is the perimeter; gates would have nowhere to lead. |
+| `cityMapRiver` | **Skipped**. `env.hasRiver` is forced to `false`. There is no inland river through a sea city. |
+| `cityMapNetwork` (roads/streets/bridges) | **Reused** unchanged — the existing A* still routes through the platform polygons. Surrounding water is in `obstaclePolygonIds` so paths never cross open ocean. |
+| `cityMapDistricts` / `cityMapBlocks` | **Reused** — same district classifier, same block clustering. Dock and harbour district roles still apply and now have direct ocean access on every block edge. |
+| `cityMapLandmarksUnified` | **Reused** — landmark types unchanged. (Future work: a lighthouse landmark variant for sea cities.) |
+| `cityMapBuildings` | **Reused** — interior packing fills the platform polygons. The "stilted" reading comes from the surrounding ocean rendered by the existing water-polygon layer. |
+| `cityMapSprawl` | **Skipped**. There's no land to sprawl onto — every isEdge / exterior polygon is already water. |
+| `cityMapRendererV2` | **Reused** — the existing water-polygon rendering already covers the inverted water set. The footer label reads "Sea City" instead of "Coastal". |
+
+**Culture fallback**: a sea city's world cell is OCEAN/COAST/LAKE biome, which would map `baseCulture` to a marine palette. To keep the stilted city's architectural styling sensible, `deriveCityEnvironment` falls back to a neighbouring land cell's biome when the city is a sea city, producing a normal western/arabic/eastern palette.
+
+**No new RNG sub-streams** are introduced for the stilted variant — every existing slice continues to draw from its existing `${seed}_city_${cityName}_<suffix>` stream. The skipped slices simply don't draw at all. This preserves seed-stable parity for land cities (their stream order is unchanged) and keeps sea cities byte-deterministic via the same hashing.
+
 ## Pitfalls
 
 - **Do NOT reintroduce tiles under `src/lib/citymap/`.** V2 is polygon-based by design; the pivot away from tiles is called out in every V2 file header. The spec's V1 tile language ("tile count", "1–2 tile offset", "within ≤1 tile") is translated to polygon/edge language inside each generator. Keep spec quotes inside file headers, not inside code.
@@ -320,3 +344,5 @@ The new top tier extends every existing per-size table along the same trends. Th
 - **Sprawl iterates the WHOLE block**, not a per-polygon `isEdge` filter. The block role is the authoritative "outside-walls" tag (`isExteriorBlock` classifies by `wall.interiorPolygonIds` membership).
 - **Polygon-interior geometry helpers are DUPLICATED across slices** (buildings/sprawl/landmarks/openspaces). Each slice keeps its own; if you factor them out, do all slices together so inset/mortar math stays byte-identical.
 - **`npm run sweep` is unaffected by citymap changes** (city-map generation is render-only, never reached). Any non-zero sweep diff after a citymap-only change means an accidental simulation-layer edit.
+- **Sea-city water set is the inverse of the footprint, not the coastal carve.** Don't try to combine `generateWaterPolygons` output with the inverse — for sea cities only the inverse is used, and the obstacle set is recomputed accordingly. Mixing the two would leave the city footprint half-flooded.
+- **Sea-city walls / river / sprawl are skipped, not "produced empty".** Code that consumes those outputs already handles empty arrays, but new consumers must not assume non-empty (e.g. don't iterate `wallTowers` without a length check on sea cities).

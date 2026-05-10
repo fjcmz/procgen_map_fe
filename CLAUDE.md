@@ -238,6 +238,7 @@ The codebase uses **isolated PRNG sub-streams** liberally — they're how new be
 | `${seed}_deity_<religionId>` | Religion deity binding (`characters.md`) |
 | `${seed}_chars_<cellIndex>` | Character roster roll (`characters.md`) |
 | `${seed}_city_<cityName>_voronoi` / `_walls` / `_river` / `_roads` / `_streets` / `_openspaces_*` / `_blocks_names` / `_landmarks_*` / `_buildings` / `_sprawl` | V2 city slices (`city_map.md`) |
+| `${seed}_seasettle_<parentCityId>_<year>` | Sea-colonisation attempt in `CitySettlement.ts` (`world_history.md`). Isolated so pre-`maritime`-tech years stay byte-identical to the legacy run. |
 
 The discipline: **a new feature that adds a behavioral roll must use its own sub-stream, OR be a no-op when its inputs are zero/default**. Otherwise the sweep baseline shifts.
 
@@ -249,20 +250,20 @@ The sweep is **byte-deterministic** — re-running with the same args produces b
 
 ### Current baseline (`scripts/results/baseline-a.json`)
 
-The baseline was reset on **2026-05-10** to capture the present state of the world-map + world-history pipeline (post-ecumenopolis, post-timeline-hot-path optimization). Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired at the same time — `baseline-a.json` is now the only checked-in sweep result.
+The baseline was rebased on **2026-05-10** for the sea-colonisation feature (introduces the `maritime` tech field + `CitySettlement.ts` sea-attempt branch). Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired at the same time — `baseline-a.json` is now the only checked-in sweep result.
 
 - **Args**: `seeds=5`, `years=5000`, `cells=3000`, `width=1600`, `height=1000`, `waterRatio=0.4`, `profile=DEFAULT_PROFILE` (no overlay).
-- **Wall clock**: ~90s on 4-way concurrency (per-seed 37–58s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
+- **Wall clock**: ~85s on 4-way concurrency (per-seed 40–59s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
 - **Headline aggregates** (min / median / max across 5 seeds; sanity check that your local run is in the same regime before diffing):
-  - `peakPopulation`: 826M / 1.27B / 2.08B
-  - `totalTechs`: 1856 / 1872 / 1916
+  - `peakPopulation`: 616M / 1.05B / 1.49B
+  - `totalTechs`: ~1.8K (each seed in the 1777–1896 range)
   - `totalCountries`: 31 / 33 / 33
-  - `totalWars`: 99 / 153 / 188
-  - `totalConquests`: 98 / 151 / 183
-  - `totalEmpires`: 22 / 30 / 41
-  - `totalCataclysms`: 2457 / 2527 / 2564
+  - `totalWars`: 121 / 141 / 202
+  - `totalConquests`: 120 / 137 / 194
+  - `totalEmpires`: 25 / 28 / 37
+  - `totalCataclysms`: ~2.4–2.5K
   - `worldEndedCount`: 0 / 5 (no seed wipes itself out)
-  - `peakTechLevelByField` extremes: `exploration` 55–84 (lowest), `military` / `art` / `government` 136–289 (highest)
+  - `peakTechLevelByField` extremes: `exploration` 45–105 (lowest), `military` / `art` / `government` 121–288 (highest); `maritime` 100–150 range (new field).
 
 When the simulation pipeline lands a deliberate balance change, re-run `npm run sweep -- --label baseline-a` to overwrite this file in the same commit so the baseline tracks the new intended behavior. Do NOT rebaseline to make an unexplained diff disappear — investigate it first.
 
@@ -306,6 +307,7 @@ These cut across multiple specs. Layer-specific pitfalls live in each spec's "Pi
 - **Cell count performance.** World-map generation above ~10,000 cells is slow. Default is 5,000. Test world-map UI changes at low cell counts. Universe generation scales up to 10,000 systems via the slider (the sliders default to 500/1000/5000/10000).
 - **Base path.** Local `npm run dev` serves from `/`, but production uses `/procgen_map_fe/`. Avoid hardcoded absolute paths in source.
 - **Universe ↔ world-map seed hand-off is a stable interface.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on when they generate a world from the universe view. Changing this format would break "the same universe seed always gives the same world for a given planet". See `universe_map.md`.
+- **Sea cities are gated by the `maritime` tech field.** Once a country reaches `maritime >= 1`, large+ coastal cities can spawn child cities on water cells via `CitySettlement.ts`. At `maritime >= 4` they can claim deep-ocean cells (no `regionId`); those cells are absorbed into the parent city's region by appending to `region.cellIndices` (water cells always appended after land — preserves the land-first invariant). All sea-attempt randomness routes through `seededPRNG(`${seed}_seasettle_${parentCityId}_${year}`)` so pre-tech years stay sweep-byte-identical. Sea cities render with an anchor icon (instead of a house) on the world map; their owned water cells get a translucent kingdom-colour tint over the sea palette. The V2 city map of a sea city skips walls / river / sprawl and turns the canvas surrounding the city footprint into open ocean (stilted-platform variant). See `world_history.md`, `world_map.md`, and `city_map.md`.
 
 ## When You Add a New Feature
 

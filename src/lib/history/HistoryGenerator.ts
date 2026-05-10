@@ -1439,6 +1439,7 @@ export class HistoryGenerator {
         })),
         childCellIndex,
         parentCellIndex,
+        isSeaCity: cityEntity.isSeaCity || undefined,
       });
     }
 
@@ -1487,7 +1488,7 @@ export class HistoryGenerator {
     // and total trade / conquest / cataclysm-death counts used by the sweep harness.
     const TECH_FIELDS: TechField[] = [
       'science', 'military', 'industry', 'energy', 'growth',
-      'exploration', 'biology', 'art', 'government',
+      'exploration', 'biology', 'art', 'government', 'maritime',
     ];
     const centuryCount = Math.max(1, Math.ceil(yearsToSerialize / 100));
     const techEventsPerCenturyByField: Record<TechField, number[]> = {
@@ -1500,6 +1501,7 @@ export class HistoryGenerator {
       biology: new Array(centuryCount).fill(0),
       art: new Array(centuryCount).fill(0),
       government: new Array(centuryCount).fill(0),
+      maritime: new Array(centuryCount).fill(0),
     };
     let totalTechs = 0;
     let totalTrades = 0;
@@ -1510,7 +1512,7 @@ export class HistoryGenerator {
     let totalTechDiffusions = 0;
     const peakTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
-      exploration: 0, biology: 0, art: 0, government: 0,
+      exploration: 0, biology: 0, art: 0, government: 0, maritime: 0,
     };
     // Spec stretch §5: per-field running-max time series. Populated in the
     // same walk as peakTechLevelByField — one Uint8Array per field, indexed
@@ -1528,6 +1530,7 @@ export class HistoryGenerator {
       biology: new Uint8Array(yearsToSerialize),
       art: new Uint8Array(yearsToSerialize),
       government: new Uint8Array(yearsToSerialize),
+      maritime: new Uint8Array(yearsToSerialize),
     };
     for (let yi = 0; yi < timeline.years.length; yi++) {
       const y = timeline.years[yi];
@@ -1574,11 +1577,11 @@ export class HistoryGenerator {
     // level-0 entries) to keep small-world runs comparable to large ones.
     const peakCountryTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
-      exploration: 0, biology: 0, art: 0, government: 0,
+      exploration: 0, biology: 0, art: 0, government: 0, maritime: 0,
     };
     const medianCountryTechLevelByField: Record<TechField, number> = {
       science: 0, military: 0, industry: 0, energy: 0, growth: 0,
-      exploration: 0, biology: 0, art: 0, government: 0,
+      exploration: 0, biology: 0, art: 0, government: 0, maritime: 0,
     };
     const countryList = Array.from(world.mapCountries.values());
     if (countryList.length > 0) {

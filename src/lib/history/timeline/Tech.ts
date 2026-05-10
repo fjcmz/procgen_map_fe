@@ -12,16 +12,16 @@ function rngHex(rng: () => number): string {
   ).join('');
 }
 
-export type TechField = 'science' | 'military' | 'industry' | 'energy' | 'growth' | 'exploration' | 'biology' | 'art' | 'government';
+export type TechField = 'science' | 'military' | 'industry' | 'energy' | 'growth' | 'exploration' | 'biology' | 'art' | 'government' | 'maritime';
 
 const TECH_FIELD_WEIGHTS: Record<TechField, number> = {
   science: 3, military: 3, industry: 3, energy: 2, growth: 2,
-  exploration: 1, biology: 1, art: 1, government: 1,
+  exploration: 1, biology: 1, art: 1, government: 1, maritime: 1,
 };
 const TECH_FIELD_TOTAL = (Object.values(TECH_FIELD_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
 
 /** Fields that affect trade capacity: each known tech multiplies capacity by (1 + level/10). */
-export const TRADE_TECHS = new Set<TechField>(['exploration', 'growth', 'industry', 'government']);
+export const TRADE_TECHS = new Set<TechField>(['exploration', 'growth', 'industry', 'government', 'maritime']);
 
 /**
  * Spec stretch §2: sentinel `Tech.discoverer` value for techs acquired via
@@ -35,7 +35,7 @@ export const TRADE_DIFFUSION_DISCOVERER = 'trade_diffusion';
 const ILLUSTRATE_TO_TECH: Record<IllustrateType, TechField[]> = {
   science: ['science', 'biology', 'energy'],
   military: ['military'],
-  industry: ['industry', 'energy', 'growth'],
+  industry: ['industry', 'energy', 'growth', 'maritime'],
   philosophy: ['government', 'exploration', 'art'],
   religion: ['government', 'art'],
   art: ['art'],
@@ -53,12 +53,13 @@ const TECH_ADJACENCY: Record<TechField, ReadonlyArray<TechField>> = {
   science:     ['biology', 'energy'],
   biology:     ['science'],
   energy:      ['science', 'industry'],
-  industry:    ['energy', 'growth', 'military'],
+  industry:    ['energy', 'growth', 'military', 'maritime'],
   growth:      ['industry'],
   military:    ['industry', 'government'],
   government:  ['military', 'art', 'exploration'],
   art:         ['government'],
-  exploration: ['government'],
+  exploration: ['government', 'maritime'],
+  maritime:    ['industry', 'exploration'],
 };
 
 /**
@@ -69,7 +70,7 @@ const TECH_ADJACENCY: Record<TechField, ReadonlyArray<TechField>> = {
 const SPIRIT_FIELD_BONUS: Record<Spirit, ReadonlyArray<TechField>> = {
   military:    ['military'],
   religious:   ['art', 'government'],
-  industrious: ['industry', 'energy', 'growth'],
+  industrious: ['industry', 'energy', 'growth', 'maritime'],
   neutral:     [],
 };
 

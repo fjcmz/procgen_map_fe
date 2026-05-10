@@ -186,6 +186,23 @@ export class CityEntity {
   childCityId: string | null = null;
   /** ID of the parent city that spawned this city as a settlement (if any). */
   parentCityId: string | null = null;
+  /**
+   * True iff this city was founded on a water cell via the sea-colonisation
+   * path in `CitySettlement.ts`. Drives renderer (anchor icon, owned-water
+   * tint) and dispatches the V2 city map to its stilted variant.
+   */
+  isSeaCity: boolean = false;
+  /**
+   * True iff this sea city was founded on a deep-ocean cell — one with no
+   * `regionId` at the time of founding. Such cells are absorbed into the
+   * parent city's region (appended to `region.cellIndices`, regionId stamped)
+   * to keep `computeOwnership` working without a new entity type. Recorded
+   * here so a future cleanup pass can identify which cells the city dragged
+   * in and strip them on city destruction if desired.
+   */
+  foundedOnDeepOcean: boolean = false;
+  /** Set of cell indices this sea city dragged into its parent region (deep-ocean absorption). */
+  absorbedWaterCells: Set<number> = new Set();
 
   constructor(cellIndex: number, name: string, rng: () => number) {
     this.id = IdUtil.id('city', rngHex(rng)) ?? 'city_unknown';

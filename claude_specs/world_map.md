@@ -113,6 +113,8 @@ The generation-time `profile.riverFlowThreshold` remains the absolute floor. `Mi
 - **Tree icons** vary in density (10–30%), size (0.85–1.15×), and color (lighter green at dry edges, darker at wet edges) based on `getVegetationDensity`.
 - The biome legend is a React overlay component (`Legend.tsx`), not drawn on canvas; controlled by `layers.legend`.
 - City icons are simple SVG-path-like canvas commands.
+- **Sea-city icon**: when `City.isSeaCity` is true, the renderer draws an anchor glyph (`drawAnchorIcon`) instead of `drawHouseIcon`. Capital crown still applies. The size tier (small → ecumenopolis) is honoured identically — the anchor scales the same way the house does.
+- **Owned-water tinting**: in both `drawKingdomBorders` and `drawPatternedBorders`, water cells with a non-null owner are filled with the kingdom colour at reduced alpha (`0.35` for solid fill, `0.5` for pattern fill) so the sea palette stays legible underneath the political claim. The land-↔-water border-edge skip at `renderer.ts:413-416` is unchanged — a sea-city's owned water still produces a kingdom-coloured polygon outline along the seam where its claim meets a different country's land or unowned water.
 
 ## UI Panels
 
