@@ -336,7 +336,7 @@ export function GenerationTab({
               type="checkbox"
               checked={generateHistory}
               onChange={onGenerateHistoryToggle}
-              disabled={generating || locked}
+              disabled={generating}
             />
             Generate History
           </label>
