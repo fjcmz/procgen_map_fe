@@ -255,6 +255,7 @@ All routed through `seededPRNG` from `terrain/noise.ts`. The shared prefix is `$
 | `_landmarks_monuments` | Monument polygon pick | PR 4 |
 | `_buildings` | Slot rolls (interior buildings) | PR 5 |
 | `_sprawl` | Slot rolls (outside-walls huts) | PR 5 |
+| `_sea_islands` | Sea city island layout: type roll, center placement, island growth, bridge connections | Sea island variant |
 | `_distinctive_select[_<i>]` | Distinctive feature spec pick (megalopolis: no suffix; ecumenopolis: 3–5 slots, suffix `_0`..`_4`) | Distinctive landmarks |
 | `_distinctive_place[_<i>]` | Seed-polygon pick + cluster grow for the corresponding distinctive feature | Distinctive landmarks |
 | `_distinctive_count` | Ecumenopolis-only: how many distinctive features to roll (3–5) | Distinctive landmarks |
@@ -292,29 +293,51 @@ The new top tier extends every existing per-size table along the same trends. Th
 
 **Continent cap**: at most one ecumenopolis per continent. Cap is enforced in `YearGenerator` step 4b — see `world_history.md` for details. The citymap layer itself is unaware of this cap (it just renders whatever `env.size` it's handed).
 
-## Sea Cities (stilted variant)
+## Sea Cities (island + bridge variant)
 
-When the world-map city is a sea city (`City.isSeaCity` set by `CitySettlement.ts` — see `world_history.md`), `deriveCityEnvironment` populates `CityEnvironment.isSeaCity = true`. The V2 generator orchestrator branches on this flag to produce a stilted-platform variant of the canvas — the city sits on a small footprint of polygons surrounded by open ocean on all sides.
+When the world-map city is a sea city (`City.isSeaCity` set by `CitySettlement.ts` — see `world_history.md`), `deriveCityEnvironment` populates `CityEnvironment.isSeaCity = true`. The V2 generator orchestrator branches on this flag to produce an island variant of the canvas — the city's polygon budget is split into multiple small disconnected islands (50–100 polygons each), with each pair of connected islands joined by a visible bridge drawn across the water.
+
+**Island layout** (`cityMapSeaIslands.ts` — RNG stream `${seed}_city_${cityName}_sea_islands`):
+
+Two configurations chosen at 60/40:
+
+| Configuration | Description |
+|---|---|
+| `hubSpokes` | Central hub island + N−1 satellite islands evenly arranged on a ring (orbit ≈ 28% of canvas size). Every satellite bridges to the hub. Capped at 9 islands total; cities that would require more fall back to mesh. |
+| `mesh` | All islands roughly equal in size, placed using Poisson-disk sampling (min centre-to-centre 170 px) with a jittered-grid fallback. Each island bridges to its 2 nearest neighbours by centroid distance. |
+
+**Island allocation**:
+1. `numIslands = ceil(POLYGON_COUNTS[size] / 70)` — target ~70 polygons per island.
+2. Each island gets `floor(total/n)` polygons (±1 for remainder), clamped to [50, 100].
+3. Non-edge polygons are Voronoi-partitioned to the nearest island center; the top-N by distance are taken per island; each island is BFS-pruned to its largest connected component.
+4. Any polygon adjacent to a polygon in a different island is removed (trimmed) so every island pair is separated by at least one water polygon.
+
+**Bridge segments**: for each connected island pair, `computeBridgeSegment` finds the nearest boundary polygon on each island's facing side, then places the bridge endpoints at the edge-midpoint of each boundary polygon's face toward the other island. The bridge is rendered as a stone-coloured causeway with side rails and pilings (Layer 2.7, `drawSeaBridges` in `cityMapRendererV2.ts`).
 
 **Slice reuse / replace / skip matrix**:
 
 | Slice | Sea-city behaviour |
 |---|---|
-| `cityMapWater` (water polygon carving) | **Skipped**. The orchestrator computes `waterPolygonIds` as the **inverse** of the city footprint instead — every polygon NOT in `footprint.interior` becomes open ocean. |
+| `cityMapSeaIslands` | **New** — replaces `cityMapShape` for sea cities. Produces multi-island footprint + bridge list. |
+| `cityMapWater` (water polygon carving) | **Skipped**. The orchestrator computes `waterPolygonIds` as the **inverse** of the union of all island footprints — every polygon NOT in any island becomes open ocean. |
 | `cityMapMountains` | **Skipped**. `env.mountainDirection` is forced to `null` for sea cities; the canvas has no land for mountains. |
-| `cityMapShape` | **Reused**. The footprint allocator runs with an empty obstacle set, so it picks an organic shape sitting in the middle of the canvas. |
+| `cityMapShape` | **Skipped** — replaced by `cityMapSeaIslands` above. |
 | `cityMapWalls` | **Skipped** (`wallConfig` is forced to no-walls). The sea is the perimeter; gates would have nowhere to lead. |
 | `cityMapRiver` | **Skipped**. `env.hasRiver` is forced to `false`. There is no inland river through a sea city. |
-| `cityMapNetwork` (roads/streets/bridges) | **Reused** unchanged — the existing A* still routes through the platform polygons. Surrounding water is in `obstaclePolygonIds` so paths never cross open ocean. |
+| `cityMapNetwork` (roads/streets/bridges) | **Reused** unchanged — the existing A* still routes within each island's polygon subgraph. Surrounding water is in `obstaclePolygonIds` so paths never cross open ocean. Each island gets its own internal street network; there are no A* paths between islands. |
 | `cityMapDistricts` / `cityMapBlocks` | **Reused** — same district classifier, same block clustering. Dock and harbour district roles still apply and now have direct ocean access on every block edge. |
-| `cityMapLandmarksUnified` | **Reused** — landmark types unchanged. (Future work: a lighthouse landmark variant for sea cities.) |
-| `cityMapBuildings` | **Reused** — interior packing fills the platform polygons. The "stilted" reading comes from the surrounding ocean rendered by the existing water-polygon layer. |
-| `cityMapSprawl` | **Skipped**. There's no land to sprawl onto — every isEdge / exterior polygon is already water. |
-| `cityMapRendererV2` | **Reused** — the existing water-polygon rendering already covers the inverted water set. The footer label reads "Sea City" instead of "Coastal". |
+| `cityMapLandmarksUnified` | **Reused** — landmark types unchanged. |
+| `cityMapBuildings` | **Reused** — interior packing fills all island polygons. |
+| `cityMapSprawl` | **Skipped**. There's no land to sprawl onto — every polygon outside the island footprints is ocean. |
+| `cityMapRendererV2` | **Reused** — water-polygon rendering covers all non-island polygons. `drawSeaBridges` (Layer 2.7) draws the inter-island causeways. |
 
-**Culture fallback**: a sea city's world cell is OCEAN/COAST/LAKE biome, which would map `baseCulture` to a marine palette. To keep the stilted city's architectural styling sensible, `deriveCityEnvironment` falls back to a neighbouring land cell's biome when the city is a sea city, producing a normal western/arabic/eastern palette.
+**`CityMapDataV2` fields added**:
+- `seaIslands: number[][] | null` — per-island polygon IDs (indexed by island). Null for land cities.
+- `seaBridges: { from, to }[] | null` — bridge endpoint pairs in canvas px. Null for land cities.
 
-**No new RNG sub-streams** are introduced for the stilted variant — every existing slice continues to draw from its existing `${seed}_city_${cityName}_<suffix>` stream. The skipped slices simply don't draw at all. This preserves seed-stable parity for land cities (their stream order is unchanged) and keeps sea cities byte-deterministic via the same hashing.
+**Culture fallback**: a sea city's world cell is OCEAN/COAST/LAKE biome, which would map `baseCulture` to a marine palette. To keep the architectural styling sensible, `deriveCityEnvironment` falls back to a neighbouring land cell's biome when the city is a sea city, producing a normal western/arabic/eastern palette.
+
+**RNG sub-stream**: `${seed}_city_${cityName}_sea_islands` — isolated. Every other city-map stream is unaffected; land cities are byte-identical before and after this feature.
 
 ## Pitfalls
 
@@ -344,5 +367,7 @@ When the world-map city is a sea city (`City.isSeaCity` set by `CitySettlement.t
 - **Sprawl iterates the WHOLE block**, not a per-polygon `isEdge` filter. The block role is the authoritative "outside-walls" tag (`isExteriorBlock` classifies by `wall.interiorPolygonIds` membership).
 - **Polygon-interior geometry helpers are DUPLICATED across slices** (buildings/sprawl/landmarks/openspaces). Each slice keeps its own; if you factor them out, do all slices together so inset/mortar math stays byte-identical.
 - **`npm run sweep` is unaffected by citymap changes** (city-map generation is render-only, never reached). Any non-zero sweep diff after a citymap-only change means an accidental simulation-layer edit.
-- **Sea-city water set is the inverse of the footprint, not the coastal carve.** Don't try to combine `generateWaterPolygons` output with the inverse — for sea cities only the inverse is used, and the obstacle set is recomputed accordingly. Mixing the two would leave the city footprint half-flooded.
+- **Sea-city water set is the inverse of the island union, not the coastal carve.** `waterPolygonIds` for sea cities = all polygons NOT in any island's footprint. Don't mix in `generateWaterPolygons` output — for sea cities only the inverse is used. The obstacle set is recomputed accordingly.
 - **Sea-city walls / river / sprawl are skipped, not "produced empty".** Code that consumes those outputs already handles empty arrays, but new consumers must not assume non-empty (e.g. don't iterate `wallTowers` without a length check on sea cities).
+- **Sea-city streets do not cross between islands.** Each island gets its own internal street network. The A* in `cityMapNetwork` treats water polygons as obstacles so no path crosses open ocean. The visible bridges (`seaBridges`) are purely a rendering overlay — they do not create polygon-graph edges between islands.
+- **`seaIslands` and `seaBridges` are null for land cities.** New renderer code that reads these fields must guard with a null check — not an empty-array check, since land cities have `null` not `[]`.

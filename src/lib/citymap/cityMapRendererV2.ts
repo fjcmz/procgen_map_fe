@@ -155,6 +155,18 @@ const BRIDGE_CROSS_HALF = 6;      // half-length of bridge perpendicular to rive
 const BRIDGE_ROAD_HALF = 2;       // half-width of bridge along river direction (road footprint)
 const BRIDGE_RAIL_WIDTH = 1.2;
 
+// Sea city inter-island bridges (Layer 2.7).
+// Each bridge is a causeway rendered as a filled rect (the deck) with two
+// rail lines along the sides and small circular pilings evenly spaced.
+// Drawn after water + cadastral grid but before sprawl / buildings so all
+// other ink sits visibly on top.
+const SEA_BRIDGE_HALF_WIDTH = 6;      // half-width of the deck perpendicular to direction (px)
+const SEA_BRIDGE_FILL = '#c8b888';    // warm stone / weathered wood
+const SEA_BRIDGE_RAIL_INK = '#2a241c';
+const SEA_BRIDGE_RAIL_WIDTH = 1.5;
+const SEA_BRIDGE_PILING_RADIUS = 2.5; // radius of piling dot (px)
+const SEA_BRIDGE_PILING_SPACING = 28; // px between pillar sets along the bridge
+
 // Layer 9 — open-space styling (PR 4 slice). Lighter palette per spec.
 const OPEN_SPACE_SQUARE_FILL = '#f0eadc';   // civic squares — warm parchment
 const OPEN_SPACE_SQUARE_STROKE = 'rgba(120, 100, 60, 0.4)';
@@ -380,6 +392,12 @@ export function renderCityMapV2(
   // the sparse sprawl rects placed on top.
   drawBlockBackgrounds(ctx, data, env);
 
+  // ── Layer 2.7: sea city inter-island bridges ─────────────────────────────
+  // Drawn after the water + cadastral-grid layers so bridges sit visibly
+  // on the water surface. Drawn before sprawl / streets / buildings so all
+  // land-side infrastructure appears on top of the bridge decks.
+  drawSeaBridges(ctx, data);
+
   // ── Layer 4: outside-walls sprawl (PR 5 slice) ─────────────────────────
   drawSprawl(ctx, data, ruinRng);
 
@@ -465,6 +483,74 @@ export function renderCityMapV2(
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
     drawOutlinedText(ctx, 'V2', size - 8, size - 8, 2);
+  }
+}
+
+// Draw inter-island bridges for sea cities (Layer 2.7).
+// Each bridge segment runs across the water from one island's boundary
+// edge-midpoint to another's. The deck is a filled parallelogram; side
+// rails are two thin strokes along the long edges; circular pilings are
+// placed at regular intervals along the span.
+function drawSeaBridges(ctx: CanvasRenderingContext2D, data: CityMapDataV2): void {
+  if (!data.seaBridges || data.seaBridges.length === 0) return;
+
+  for (const bridge of data.seaBridges) {
+    const { from, to } = bridge;
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const len = Math.hypot(dx, dy);
+    if (len < 1) continue;
+
+    const nx = dx / len; // unit vector along the bridge direction
+    const ny = dy / len;
+    // Perpendicular (right-hand normal) for the deck width
+    const px = -ny;
+    const py = nx;
+    const hw = SEA_BRIDGE_HALF_WIDTH;
+
+    // Bridge deck — filled parallelogram
+    ctx.fillStyle = SEA_BRIDGE_FILL;
+    ctx.beginPath();
+    ctx.moveTo(from[0] + px * hw, from[1] + py * hw);
+    ctx.lineTo(to[0]   + px * hw, to[1]   + py * hw);
+    ctx.lineTo(to[0]   - px * hw, to[1]   - py * hw);
+    ctx.lineTo(from[0] - px * hw, from[1] - py * hw);
+    ctx.closePath();
+    ctx.fill();
+
+    // Side rails along both long edges
+    ctx.strokeStyle = SEA_BRIDGE_RAIL_INK;
+    ctx.lineWidth = SEA_BRIDGE_RAIL_WIDTH;
+    ctx.lineCap = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(from[0] + px * hw, from[1] + py * hw);
+    ctx.lineTo(to[0]   + px * hw, to[1]   + py * hw);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(from[0] - px * hw, from[1] - py * hw);
+    ctx.lineTo(to[0]   - px * hw, to[1]   - py * hw);
+    ctx.stroke();
+
+    // Pilings at regular intervals — two dots on either side of the deck centreline
+    const numGaps = Math.max(1, Math.floor(len / SEA_BRIDGE_PILING_SPACING));
+    ctx.fillStyle = SEA_BRIDGE_RAIL_INK;
+    for (let k = 1; k < numGaps; k++) {
+      const t = k / numGaps;
+      const mx = from[0] + dx * t;
+      const my = from[1] + dy * t;
+      for (const side of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(
+          mx + px * hw * 0.65 * side,
+          my + py * hw * 0.65 * side,
+          SEA_BRIDGE_PILING_RADIUS,
+          0, Math.PI * 2,
+        );
+        ctx.fill();
+      }
+    }
   }
 }
 
