@@ -288,13 +288,22 @@ Sea / ocean colonisation is a tech-gated extension of the city-settlement path t
 - `drawKingdomBorders` and `drawPatternedBorders` already handle owned water cells; this feature reduces alpha to 0.35 / 0.5 over water polygons so the sea palette stays legible under the political fill.
 - `CityEnvironment.isSeaCity` is set in `deriveCityEnvironment`; it forces the V2 city map into a stilted variant — see `city_map.md`.
 
+**Sea-city polygon expansion** (new step `sea-expansion-cells` in `YearGenerator.ts`, runs immediately after the land-expansion step 4c):
+
+- Scope: every `city.isSeaCity` city. Sea cities are explicitly skipped in the land-expansion loop so they never absorb adjacent land cells from their parent region.
+- Cap: `maxOwnedCells = max(1, floor(exploration * 0.1 + maritime * 0.2))`, where both tech levels are read via the city's effective tech map (`getCityTechLevel`, the empire-founder-aware scope ladder). The `max(1, …)` clamp guarantees the founding cell is always retained even when both tech levels are 0.
+- Frontier: unclaimed water-cell neighbours of the city's owned cells. Includes coastal water (`regionId` set) AND deep-ocean cells (`regionId` undefined). Sorted descending by `scoreCellForSeaCity` (harbour / coastal / river-mouth bonuses, ICE penalty), tiebreaking on cell index for deterministic replay.
+- Claim rule: only cells absent from the global `claimedCells` map (built from `city.ownedCells` of every usable city) can be absorbed. Land cities and other sea cities both contribute, so a sea city can never grab a polygon that already belongs to a neighbour.
+- Deep-ocean absorption: when a claimed cell has no `regionId`, it is appended to `region.cellIndices`, gets `cells[ci].regionId = region.id` stamped, and is recorded in `city.absorbedWaterCells`. Same pattern as the founding-time absorption in `CitySettlement.ts._tryFoundSeaCity`; the append-after-existing-cells ordering preserves the "land cells first" invariant.
+- Determinism: zero `rng()` draws in this step. The BFS is sorted purely on cell scores + indices. Sweep behaviour shifts only because sea cities now own more cells (more cells → more capacity → more growth → larger `worldPopulation`), not because of a new RNG consumer.
+
 **Year-0 invariant unchanged**: `Cell.kingdom` is still set only on land cells via `borders.assignKingdoms`. Sea-city ownership lives entirely in the per-year Int16Array snapshot via the cell's (possibly-newly-stamped) `regionId`. Don't mutate `Cell.kingdom` from sea-related code paths.
 
 **Pitfalls specific to sea cities**:
 - Don't extend the parent region with a deep-ocean cell that already has a `regionId` (defensive check in `_tryFoundSeaCity` skips such cells before falling through).
 - Don't route any random draw through the timeline `rng` inside `_tryFoundSeaCity` — even one would shift the sweep on the first sea-tech year. Use `seaRng`.
 - Sea cities still consume an entry in the parent country's region; conquest / empire transfers operate at region granularity and naturally cover sea-city water cells.
-- `Expand.ts` is **not** sea-aware. A planned future extension would let a country expand into water-only neighbouring regions, but today expansion stays land-only.
+- `Expand.ts` (country-level territorial expansion) is **not** sea-aware. The water-cell growth that does happen is per-city, in the `sea-expansion-cells` step in `YearGenerator.ts` — only sea cities expand into water polygons, and only inside their own per-city cap. Country-level expansion into water-only neighbouring regions is still a future extension.
 - When a sea city is destroyed, its `absorbedWaterCells` remain in the parent region (no cleanup pass today). The cells stay claimable; if the parent country later loses the region, the water cells flip with the region — same as any other cell.
 
 ## Pitfalls
