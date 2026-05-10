@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
-import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season, SelectedEntity, ResourceRarityMode } from './lib/types';
+import type { MapData, MapView, PoliticalMode, LayerVisibility, WorkerMessage, Season, SelectedEntity, ResourceRarityMode, BodyKind } from './lib/types';
 import { MapCanvas } from './components/MapCanvas';
 import type { MapCanvasHandle, Transform } from './components/MapCanvas';
 import { UnifiedOverlay } from './components/UnifiedOverlay';
@@ -12,7 +12,7 @@ import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
 import type { UniverseData, PlanetData, SatelliteData, SolarSystemData } from './lib/universe/types';
-import { PROFILE_WATER_RATIOS } from './lib/terrain/profiles';
+import { planetToGenSpec, satelliteToGenSpec } from './lib/universe/bodyToProfile';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 100000;
@@ -35,6 +35,9 @@ const DEFAULT_LAYERS: LayerVisibility = {
   hillshading: true,
   seasonalIce: true,
   cityIcons: true,
+  // Default on so gas-giant maps get the wind overlay automatically.
+  // Hidden in the Layers list when bodyKind !== 'gas-giant'.
+  windOverlay: true,
 };
 
 type Screen = 'landing' | 'planet' | 'universe';
@@ -54,6 +57,15 @@ export interface WorldOrigin {
   systemName: string;
   planetId: string;
   planetName: string;
+  /** Coarse classification of the source body. Drives the GenerationTab
+   *  history-controls visibility and the canvas banner copy. */
+  bodyKind: BodyKind;
+  /** True for any non-life body — history simulation makes no sense on
+   *  lava / gas / cratered worlds. UI hides the history checkbox when set. */
+  disableHistory: boolean;
+  /** True iff `body.life` was true. Used by the canvas banner to phrase
+   *  the message ("physical map only — no civilizational history"). */
+  isLifeBody: boolean;
 }
 
 /**
@@ -113,6 +125,12 @@ export default function App() {
   // When non-null, the planet flow is in "from-universe" mode: predefined
   // generation params are locked and the GenerationTab shows a back button.
   const [worldOrigin, setWorldOrigin] = useState<WorldOrigin | null>(null);
+  // Non-life-body fields threaded through to the worker request. Default to
+  // 'rocky-life' / false / undefined so the existing rocky+life flow and the
+  // sweep stay byte-identical when omitted.
+  const [bodyKind, setBodyKind] = useState<BodyKind>('rocky-life');
+  const [disableHistory, setDisableHistory] = useState(false);
+  const [paletteOverride, setPaletteOverride] = useState<Record<string, string> | undefined>(undefined);
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -151,6 +169,9 @@ export default function App() {
         // into a later "planet from landing" entry.
         setWorldOrigin(null);
         setUniverseReturnTo(null);
+        setBodyKind('rocky-life');
+        setDisableHistory(false);
+        setPaletteOverride(undefined);
         setScreen('landing');
       } else {
         window.history.pushState({ screen }, '');
@@ -382,8 +403,11 @@ export default function App() {
       generateHistory,
       numSimYears,
       resourceRarityMode,
+      bodyKind,
+      disableHistory,
+      paletteOverride,
     });
-  }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode]);
+  }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode, bodyKind, disableHistory, paletteOverride]);
 
   const handleGenerateHistory = useCallback(() => {
     if (generating) return;
@@ -468,15 +492,20 @@ export default function App() {
       // Isolated PRNG sub-stream — same convention as the existing
       // `_racebias_<id>` / `_chars_<cellIndex>` streams in the codebase.
       const planetSeed = `${universe.seed}_${planet.id}`;
+      const spec = planetToGenSpec(planet);
 
-      const biome = planet.biome ?? 'default';
       setSeed(planetSeed);
       setNumCells(cellCountForPlanetRadius(planet.radius));
-      setWaterRatio(PROFILE_WATER_RATIOS[biome] ?? 0.40);
-      setProfileName(biome);
-      setShapeName('default');
+      setWaterRatio(spec.waterRatio);
+      setProfileName(spec.profileName);
+      setShapeName(spec.shapeName);
       setResourceRarityMode('natural');
+      // Default to off when arriving from any body (existing behavior). Non-life
+      // bodies additionally hide the toggle entirely via worldOrigin.disableHistory.
       setGenerateHistory(false);
+      setBodyKind(spec.bodyKind);
+      setDisableHistory(spec.disableHistory);
+      setPaletteOverride(spec.paletteOverride);
 
       setWorldOrigin({
         universeSeed: universe.seed,
@@ -484,6 +513,9 @@ export default function App() {
         systemName: system.humanName,
         planetId: planet.id,
         planetName: planet.humanName,
+        bodyKind: spec.bodyKind,
+        disableHistory: spec.disableHistory,
+        isLifeBody: planet.life,
       });
       // Remember which system to land on when the user clicks "Back".
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
@@ -504,15 +536,18 @@ export default function App() {
       setGenerating(false);
 
       const satelliteSeed = `${universe.seed}_${satellite.id}`;
-      const biome = satellite.biome ?? 'default';
+      const spec = satelliteToGenSpec(satellite);
 
       setSeed(satelliteSeed);
       setNumCells(cellCountForPlanetRadius(satellite.radius));
-      setWaterRatio(PROFILE_WATER_RATIOS[biome] ?? 0.40);
-      setProfileName(biome);
-      setShapeName('default');
+      setWaterRatio(spec.waterRatio);
+      setProfileName(spec.profileName);
+      setShapeName(spec.shapeName);
       setResourceRarityMode('natural');
       setGenerateHistory(false);
+      setBodyKind(spec.bodyKind);
+      setDisableHistory(spec.disableHistory);
+      setPaletteOverride(spec.paletteOverride);
 
       setWorldOrigin({
         universeSeed: universe.seed,
@@ -520,6 +555,9 @@ export default function App() {
         systemName: system.humanName,
         planetId: planet.id,
         planetName: `${planet.humanName} / ${satellite.humanName}`,
+        bodyKind: spec.bodyKind,
+        disableHistory: spec.disableHistory,
+        isLifeBody: satellite.life,
       });
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
       setScreen('planet');
@@ -541,6 +579,11 @@ export default function App() {
     setHighlightCells(null);
     setProgress(null);
     setGenerating(false);
+    // Clear non-life-body fields so a subsequent landing-screen entry into
+    // the planet flow starts from defaults.
+    setBodyKind('rocky-life');
+    setDisableHistory(false);
+    setPaletteOverride(undefined);
     setScreen('universe');
   }, []);
 
@@ -581,6 +624,9 @@ export default function App() {
           // so clear any stale world-from-planet binding.
           setWorldOrigin(null);
           setUniverseReturnTo(null);
+          setBodyKind('rocky-life');
+          setDisableHistory(false);
+          setPaletteOverride(undefined);
           setScreen(target);
         }}
       />

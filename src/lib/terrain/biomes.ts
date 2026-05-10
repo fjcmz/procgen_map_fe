@@ -147,6 +147,11 @@ export function assignBiomes(cells: Cell[], width: number, height: number, noise
 // their own visual variation or are non-vegetation types).
 const NEUTRAL_BIOMES: ReadonlySet<BiomeType> = new Set([
   'OCEAN', 'COAST', 'ICE', 'SNOW', 'BEACH',
+  // Non-life rocky biomes: no vegetation, palette is intrinsic.
+  'LAVA', 'BASALT', 'VOLCANIC_ASH', 'SULFUR_FLAT', 'METALLIC_PLAIN',
+  'CARBON_PLAIN', 'CRATER_FIELD', 'ICE_SHELF', 'DIRTY_ICE_FIELD', 'REGOLITH',
+  // Gas-giant cloud bands: paletteOverride drives color per subtype.
+  'GAS_BAND_LIGHT', 'GAS_BAND_DARK', 'GAS_STORM', 'GAS_HAZE', 'GAS_BAND_HOT',
 ]);
 
 /**
@@ -222,9 +227,17 @@ function seasonalDither(x: number, y: number, scale: number): number {
  * Returns the effective biome for a cell given the current season.
  * Applies seasonal temperature threshold offsets to shift polar biome boundaries.
  * Non-polar cells pass through unchanged. Season 0 (Spring) returns cell.biome as-is.
+ *
+ * Non-Earth biomes (lava, ice shelf, gas bands, etc.) skip seasonal logic
+ * entirely — they have no analogue of snow/ice thaw and the Whittaker
+ * fallback at the bottom would emit nonsense for them.
  */
 export function getSeasonalBiome(cell: Cell, season: Season): BiomeType {
   if (season === 0) return cell.biome;
+  if (NEUTRAL_BIOMES.has(cell.biome) && cell.biome !== 'ICE' && cell.biome !== 'SNOW' && cell.biome !== 'BEACH' && cell.biome !== 'OCEAN' && cell.biome !== 'COAST') {
+    // Non-life-body biomes pass through unchanged.
+    return cell.biome;
+  }
 
   const temp = cell.temperature;
   const dither = seasonalDither(cell.x, cell.y, 1.3);
@@ -309,4 +322,21 @@ export const BIOME_INFO: Record<BiomeType, BiomeInfo> = {
   ICE:                         { fillColor: '#d8e8f0', label: 'Ice',                       iconType: 'snow' },
   ALPINE_MEADOW:               { fillColor: '#98b86a', label: 'Alpine Meadow',             iconType: null },
   LAKE:                        { fillColor: '#5f8fb3', label: 'Lake',                      iconType: null },
+  // ── Non-life rocky biomes ──
+  LAVA:                        { fillColor: '#cc3a14', label: 'Lava Flow',                 iconType: 'mountain' },
+  BASALT:                      { fillColor: '#2a2624', label: 'Basalt Plain',              iconType: null },
+  VOLCANIC_ASH:                { fillColor: '#6a5a52', label: 'Ash Plain',                 iconType: null },
+  SULFUR_FLAT:                 { fillColor: '#d8c460', label: 'Sulfur Flat',               iconType: null },
+  METALLIC_PLAIN:              { fillColor: '#8a4a30', label: 'Iron Plain',                iconType: null },
+  CARBON_PLAIN:                { fillColor: '#1c1a1a', label: 'Carbon Plain',              iconType: null },
+  CRATER_FIELD:                { fillColor: '#7a7470', label: 'Cratered Highland',         iconType: 'mountain' },
+  ICE_SHELF:                   { fillColor: '#cfe1eb', label: 'Ice Shelf',                 iconType: 'snow' },
+  DIRTY_ICE_FIELD:             { fillColor: '#a89c8a', label: 'Dirty Ice',                 iconType: null },
+  REGOLITH:                    { fillColor: '#9a8e80', label: 'Regolith',                  iconType: null },
+  // ── Gas-giant cloud bands (defaults are jovian-flavored; per-subtype recolor via paletteOverride) ──
+  GAS_BAND_LIGHT:              { fillColor: '#d8c4a0', label: 'Light Band',                iconType: null },
+  GAS_BAND_DARK:               { fillColor: '#8a6038', label: 'Dark Band',                 iconType: null },
+  GAS_STORM:                   { fillColor: '#a82820', label: 'Storm',                     iconType: null },
+  GAS_HAZE:                    { fillColor: '#cfe0e8', label: 'Polar Haze',                iconType: null },
+  GAS_BAND_HOT:                { fillColor: '#5a1810', label: 'Deep Band',                 iconType: null },
 };

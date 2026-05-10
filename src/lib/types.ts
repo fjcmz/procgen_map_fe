@@ -51,7 +51,52 @@ export type BiomeType =
   | 'MARSH'
   | 'ICE'
   | 'ALPINE_MEADOW'
-  | 'LAKE';
+  | 'LAKE'
+  // ── Non-life rocky biomes (volcanic / lava / iron / carbon / cratered / ice_rock / desert_moon / ice variants) ──
+  | 'LAVA'
+  | 'BASALT'
+  | 'VOLCANIC_ASH'
+  | 'SULFUR_FLAT'
+  | 'METALLIC_PLAIN'
+  | 'CARBON_PLAIN'
+  | 'CRATER_FIELD'
+  | 'ICE_SHELF'
+  | 'DIRTY_ICE_FIELD'
+  | 'REGOLITH'
+  // ── Gas-giant cloud-band biomes (color via paletteOverride per-subtype) ──
+  | 'GAS_BAND_LIGHT'
+  | 'GAS_BAND_DARK'
+  | 'GAS_STORM'
+  | 'GAS_HAZE'
+  | 'GAS_BAND_HOT';
+
+/**
+ * Coarse classification for the source body that produced a world map. Used
+ * by the worker to pick branch (gas-giant skips the terrain pipeline) and by
+ * the UI to gate history controls / pick the canvas banner. `rocky-life` is
+ * the original/default flow — every existing seed maps to it.
+ */
+export type BodyKind = 'rocky-life' | 'rocky-barren' | 'gas-giant' | 'ice-shell';
+
+/**
+ * Discriminator selecting which post-`assignBiomes` rewrite to run on cells.
+ * Each rule maps the Earth-Whittaker biomes to the appropriate non-life
+ * vocabulary (lava worlds → BASALT/LAVA; cratered moons → CRATER_FIELD/etc).
+ * Lives on `TerrainProfile.biomeRemap` so a single profile field drives both
+ * the rewrite invocation and which rule fires.
+ */
+export type BiomeRemapRule =
+  | 'volcanic'
+  | 'lava'
+  | 'iron'
+  | 'carbon'
+  | 'cratered'
+  | 'ice_rock'
+  | 'desert_moon'
+  | 'methane_ice'
+  | 'sulfur_ice'
+  | 'nitrogen_ice'
+  | 'dirty_ice';
 
 export type RegionBiome = 'temperate' | 'arid' | 'desert' | 'swamp' | 'tropical' | 'tundra';
 
@@ -434,6 +479,17 @@ export interface MapData {
   continents?: ContinentData[];
   /** Phase 3: optional aggregate stats forwarded from the worker for introspection. */
   historyStats?: import('./history/HistoryGenerator').HistoryStats;
+  /** Non-life-body classification, mirrored from the request. Drives the
+   *  canvas-banner + history-controls visibility. Defaults to `'rocky-life'`
+   *  when omitted (existing flow). */
+  bodyKind?: BodyKind;
+  /** Mirrored from the request — applied at render time in `drawBiomeFill`
+   *  and the icon pass to recolor cells per subtype (gas giants). */
+  paletteOverride?: Record<string, string>;
+  /** Mirrored from `profile.suppressCoastlineRender`. */
+  coastlinesSuppressed?: boolean;
+  /** Mirrored from `profile.suppressHillshade`. */
+  hillshadeSuppressed?: boolean;
 }
 
 export interface TerrainProfile {
@@ -537,6 +593,32 @@ export interface TerrainProfile {
   /** Epsilon slope used by the Priority-Flood pass in `fillDepressions`
    *  to guarantee strictly-monotonic drainage. Default: 1e-5. */
   depressionFillEpsilon: number;
+
+  // --- Non-life body suppression flags (default false; existing profiles unaffected) ---
+  /** Skip the `hydraulicErosion` step entirely. Used by lava / cratered /
+   *  ice_rock profiles where erosion makes no physical sense. */
+  suppressErosion: boolean;
+  /** Skip `computeOceanCurrents`; downstream moisture / temperature still
+   *  run with a zero `sstAnomaly`. For bodies with no real oceans. */
+  suppressOceanCurrents: boolean;
+  /** Render-time hint surfaced on `MapData`; tells `drawNoisyCoastlines`
+   *  to early-return. For lava / gas worlds where land/water mismatch
+   *  doesn't represent a physical coast. */
+  suppressCoastlineRender: boolean;
+  /** Render-time hint surfaced on `MapData`; tells `drawHillshading` to
+   *  early-return. For gas worlds where elevation is synthetic and shading
+   *  would imply false relief. */
+  suppressHillshade: boolean;
+  /** When true, the worker skips the entire terrain pipeline and runs the
+   *  gas-giant cloud-band assignment (`assignGasBands`) instead. Cells get
+   *  synthetic elevation / temperature / moisture so the renderer hot path
+   *  doesn't NaN. Default: false. */
+  gasGiantMode: boolean;
+  /** Optional post-`assignBiomes` rewrite rule. Picks one of the
+   *  non-life biome remappings (`lava` → BASALT/LAVA, `iron` →
+   *  METALLIC_PLAIN, etc). Undefined means "leave biomes as-is" — the
+   *  default for every existing profile. */
+  biomeRemap?: BiomeRemapRule;
 }
 
 export interface GenerateMapRequest {
@@ -552,6 +634,16 @@ export interface GenerateMapRequest {
   shapeName?: string;
   profileOverrides?: Partial<TerrainProfile>;
   resourceRarityMode?: ResourceRarityMode;
+  /**
+   * Non-life-body fields. All optional; absence reproduces the existing
+   * habitable-rocky-planet flow byte-identically (sweep stays green).
+   */
+  bodyKind?: BodyKind;
+  /** Worker-side hard gate: refuse history simulation regardless of `generateHistory`. */
+  disableHistory?: boolean;
+  /** Sparse `BiomeType → hex` map applied at render time. Drives gas-giant
+   *  per-subtype recoloring without forking the renderer. */
+  paletteOverride?: Record<string, string>;
 }
 
 export interface GenerateHistoryRequest {
@@ -614,6 +706,8 @@ export interface LayerVisibility {
   seasonalIce: boolean;
   /** House icons on city cells. */
   cityIcons: boolean;
+  /** Static wind streamlines + storm spirals; only meaningful on gas-giant maps. */
+  windOverlay: boolean;
 }
 
 export interface BiomeInfo {

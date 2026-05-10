@@ -84,6 +84,14 @@ export const DEFAULT_PROFILE: TerrainProfile = {
   lakeMaxSize: 20,
   lakeMinSize: 4,
   depressionFillEpsilon: 1e-5,
+
+  // --- Non-life body suppression flags (all default false: existing profiles unaffected) ---
+  suppressErosion: false,
+  suppressOceanCurrents: false,
+  suppressCoastlineRender: false,
+  suppressHillshade: false,
+  gasGiantMode: false,
+  // biomeRemap: undefined — explicit absence means "no rewrite"
 };
 
 /** Recommended water ratios per profile (not part of TerrainProfile — passed separately on GenerateRequest). */
@@ -95,6 +103,21 @@ export const PROFILE_WATER_RATIOS: Record<string, number> = {
   swamp: 0.50,
   mountains: 0.30,
   ocean: 0.98,
+  // ── Non-life rocky bodies ──
+  volcanic: 0,
+  lava: 0,
+  iron: 0,
+  carbon: 0,
+  ice_rock: 0.10,
+  cratered: 0,
+  desert_moon: 0,
+  // ── Ice satellites (Phase 3) ──
+  methane_ice: 0.20,
+  sulfur_ice: 0.05,
+  nitrogen_ice: 0.30,
+  dirty_ice: 0.15,
+  // ── Gas giants (waterRatio is irrelevant — pipeline branch bypasses it) ──
+  gas_giant: 0,
 };
 
 /** Named terrain profiles. */
@@ -284,6 +307,249 @@ export const PROFILES: Record<string, TerrainProfile> = {
     // Archipelago → wider shelf around islands, slightly higher shallow sea threshold
     shelfWidth: 5,
     shallowSeaThreshold: 0.12,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Non-life rocky profiles
+  //
+  // These ride on the existing pipeline (Voronoi → elevation → moisture →
+  // temperature → biomes) and rely on the post-`assignBiomes` rewrite pass
+  // (`biomeRemap`) to substitute Earth biomes with the appropriate non-life
+  // vocabulary. Every profile suppresses rivers (no liquid water) and most
+  // suppress erosion / ocean currents too.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Tectonically active world: many ridges, ash plains in the lowlands,
+   *  basalt mid-elevations, lava in deep basins. */
+  volcanic: {
+    ...DEFAULT_PROFILE,
+    // Aggressive plate tectonics → visible mountain spines
+    numContinentalMin: 7,
+    numContinentalMax: 10,
+    convergentCCBoost: 0.70,
+    convergentOCBoost: 0.45,
+    seamBoostMin: 0.18,
+    seamBoostMax: 0.28,
+    seamSpreadRings: 8,
+    elevationPower: 0.85,
+    // Hot world — no polar ice
+    globalTempOffset: 0.20,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'volcanic',
+  },
+
+  /** Molten surface — lowlands are LAVA, mid elevations BASALT, peaks ASH.
+   *  No real coastlines; the land/water mismatch is meaningless. */
+  lava: {
+    ...DEFAULT_PROFILE,
+    elevationPower: 0.95,
+    convergentCCBoost: 0.50,
+    seamBoostMin: 0.10,
+    seamBoostMax: 0.18,
+    globalTempOffset: 0.30,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    suppressCoastlineRender: true,
+    biomeRemap: 'lava',
+  },
+
+  /** Iron-oxide world: rust-colored metallic plains, sparse cratered highlands. */
+  iron: {
+    ...DEFAULT_PROFILE,
+    numContinentalMin: 4,
+    numContinentalMax: 6,
+    elevationPower: 1.10,
+    globalMoistureOffset: -1.0,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'iron',
+  },
+
+  /** Graphitic carbon world: near-black surface, low contrast. */
+  carbon: {
+    ...DEFAULT_PROFILE,
+    elevationPower: 1.20,
+    globalMoistureOffset: -1.0,
+    polarNoiseAmplitude: 0.30,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'carbon',
+  },
+
+  /** Cratered moon: many small impact basins and pocked highlands. */
+  cratered: {
+    ...DEFAULT_PROFILE,
+    // Many oceanic plates mimic a dense impact-basin network.
+    numContinentalMin: 0,
+    numContinentalMax: 0,
+    numOceanicMin: 26,
+    numOceanicMax: 34,
+    convergentOCBoost: 0.50,
+    seamBoostMin: 0.04,
+    seamBoostMax: 0.08,
+    seamSpreadRings: 1,
+    elevationPower: 1.20,
+    globalMoistureOffset: -1.0,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'cratered',
+  },
+
+  /** Frozen rocky world: regolith peaks, ice-shelf basins. */
+  ice_rock: {
+    ...DEFAULT_PROFILE,
+    iceTempThreshold: 0.95,
+    snowTempThreshold: 0.90,
+    tundraTempThreshold: 0.95,
+    globalTempOffset: -0.60,
+    lapseRate: 0.20,
+    polarLandSuppressStrength: 0.0,
+    polarIceStart: 0.20,
+    polarIceEnd: 0.50,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'ice_rock',
+  },
+
+  /** Lifeless desert moon: reuses the desert profile's tectonics with REGOLITH/SULFUR_FLAT remap. */
+  desert_moon: {
+    ...DEFAULT_PROFILE,
+    // Same dune-like tectonics as the desert profile but with non-life remap.
+    numContinentalMin: 6,
+    numContinentalMax: 9,
+    continentalGrowthMin: 2.5,
+    continentalGrowthMax: 4.0,
+    seamBoostMin: 0.12,
+    seamBoostMax: 0.18,
+    seamSpreadRings: 6,
+    convergentCCBoost: 0.45,
+    elevationPower: 0.95,
+    globalMoistureOffset: -1.0,
+    globalTempOffset: 0.10,
+    iceTempThreshold: 0,
+    snowTempThreshold: 0,
+    tundraTempThreshold: 0,
+    polarIceStart: 0.99,
+    polarIceEnd: 1.0,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'desert_moon',
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Ice-satellite profiles (Phase 3)
+  //
+  // Inherit the snowball-Earth `ice` math (cold thresholds, weak currents,
+  // suppressed rivers / erosion / ocean currents) and differ only in their
+  // biomeRemap target — which in turn maps to the per-subtype palette.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  methane_ice: {
+    ...DEFAULT_PROFILE,
+    iceTempThreshold: 0.95,
+    snowTempThreshold: 0.90,
+    tundraTempThreshold: 0.95,
+    globalTempOffset: -0.65,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'methane_ice',
+  },
+
+  sulfur_ice: {
+    ...DEFAULT_PROFILE,
+    iceTempThreshold: 0.90,
+    snowTempThreshold: 0.85,
+    tundraTempThreshold: 0.92,
+    globalTempOffset: -0.45,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'sulfur_ice',
+  },
+
+  nitrogen_ice: {
+    ...DEFAULT_PROFILE,
+    iceTempThreshold: 0.95,
+    snowTempThreshold: 0.92,
+    tundraTempThreshold: 0.95,
+    globalTempOffset: -0.70,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'nitrogen_ice',
+  },
+
+  dirty_ice: {
+    ...DEFAULT_PROFILE,
+    iceTempThreshold: 0.92,
+    snowTempThreshold: 0.88,
+    tundraTempThreshold: 0.94,
+    globalTempOffset: -0.55,
+    polarLandSuppressStrength: 0.0,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    biomeRemap: 'dirty_ice',
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Gas-giant pseudo-profile (Phase 2)
+  //
+  // Most numerical fields are irrelevant: `gasGiantMode: true` flips a
+  // worker-side branch that bypasses the entire terrain pipeline and runs
+  // `assignGasBands` instead. We still inherit DEFAULT_PROFILE so the type
+  // is satisfied. Render flags suppress coast / hillshade / rivers since
+  // none of those make sense on a cloud-banded surface.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  gas_giant: {
+    ...DEFAULT_PROFILE,
+    suppressRivers: true,
+    suppressErosion: true,
+    suppressOceanCurrents: true,
+    suppressCoastlineRender: true,
+    suppressHillshade: true,
+    gasGiantMode: true,
   },
 };
 
