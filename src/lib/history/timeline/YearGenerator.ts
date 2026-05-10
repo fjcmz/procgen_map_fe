@@ -11,7 +11,7 @@ import type { Illustrate } from './Illustrate';
 import { religionGenerator } from './Religion';
 import type { Religion } from './Religion';
 import { tradeGenerator } from './Trade';
-import { wonderGenerator, getStandingWonderTierSum } from './Wonder';
+import { wonderGenerator, getStandingWonderTierSum, buildCountryPooledRegions } from './Wonder';
 import { cataclysmGenerator } from './Cataclysm';
 import { warGenerator } from './War';
 import type { War } from './War';
@@ -78,9 +78,13 @@ export class YearGenerator {
           }
           capacity = Math.min(cellCap, capacity);
         }
-        const growthLevel = getCityTechLevel(world, city, 'growth');
+        // Resolve the city's effective tech map once and read both growth + energy
+        // off it directly — saves a redundant region→country→empire-founder walk
+        // on every city per year.
+        const cityTechs = getCityEffectiveTechs(world, city);
+        const growthLevel = cityTechs?.get('growth')?.level ?? 0;
         if (growthLevel > 0) {
-          const energyLevel = getCityTechLevel(world, city, 'energy');
+          const energyLevel = cityTechs?.get('energy')?.level ?? 0;
           const energyMult = 1 + 0.05 * Math.min(energyLevel, 10);
           capacity *= 1 + growthLevel * 0.12 * energyMult;
         }
@@ -111,9 +115,12 @@ export class YearGenerator {
     // the new tier rare without disturbing the rest of the size ladder.
     const ecumenoContinents = new Set<string>();
     for (const city of world.mapUsableCities.values()) {
-      const govLevel = getCityTechLevel(world, city, 'government');
-      const indLevel = getCityTechLevel(world, city, 'industry');
-      const expLevel = getCityTechLevel(world, city, 'exploration');
+      // Same cache pattern as the growth loop: one tech-map walk per city
+      // instead of three.
+      const cityTechs = getCityEffectiveTechs(world, city);
+      const govLevel = cityTechs?.get('government')?.level ?? 0;
+      const indLevel = cityTechs?.get('industry')?.level ?? 0;
+      const expLevel = cityTechs?.get('exploration')?.level ?? 0;
       let nextSize = computeCitySize(city.currentPopulation, govLevel, indLevel, expLevel);
       if (nextSize === 'ecumenopolis') {
         const region = world.mapRegions.get(city.regionId);
@@ -461,8 +468,12 @@ export class YearGenerator {
     // 5. Wonders: random [0, max(2, usableCities/500)-1]
     timed('wonder', () => {
       const wonderCount = Math.floor(rng() * Math.max(2, Math.floor(world.mapUsableCities.size / 500)));
+      // Country↔region membership is stable across the whole wonder phase
+      // (Conquer/Empire run after this step), so build the pooled-region map
+      // once and reuse across all attempts.
+      const countryPooledRegions = wonderCount > 0 ? buildCountryPooledRegions(world) : undefined;
       for (let i = 0; i < wonderCount; i++) {
-        const w = wonderGenerator.generate(rng, year, world);
+        const w = wonderGenerator.generate(rng, year, world, countryPooledRegions);
         if (w) year.wonders.push(w); else break;
       }
     });

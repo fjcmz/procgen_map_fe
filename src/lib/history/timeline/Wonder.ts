@@ -5,7 +5,7 @@ import type { CityEntity } from '../physical/CityEntity';
 import type { Region } from '../physical/Region';
 import type { Resource } from '../physical/Resource';
 import type { ResourceType } from '../physical/ResourceCatalog';
-import { getCityTechLevel, type TechField } from './Tech';
+import { getCityEffectiveTechs, type TechField } from './Tech';
 import type { Empire } from './Empire';
 import {
   WONDER_TIER_RESOURCES,
@@ -191,28 +191,46 @@ function consumeResources(
   return consumed;
 }
 
-export class WonderGenerator {
-  generate(rng: () => number, year: Year, world: World): Wonder | null {
-    // Pre-build per-country pooled region lists in world.mapRegions insertion
-    // order — same filter as the original loop inside collectPooledResources,
-    // but computed once per country (~31) instead of once per candidate city
-    // (~200).  Rebuilding per generate() call because empire membership can
-    // change between year ticks (Conquer/Empire generators run afterwards).
-    const countryPooledRegions = new Map<string, Region[]>();
-    for (const [cId, country] of world.mapCountries) {
-      const ids = new Set<string>([cId]);
-      if (country.memberOf) {
-        for (const m of country.memberOf.countries) ids.add(m);
-      }
-      const rs: Region[] = [];
-      for (const r of world.mapRegions.values()) {
-        if ((r.countryId && ids.has(r.countryId)) ||
-            (r.expansionOwnerId && ids.has(r.expansionOwnerId))) {
-          rs.push(r);
-        }
-      }
-      countryPooledRegions.set(cId, rs);
+/**
+ * Build the per-country pooled-region map used by wonder resource collection.
+ *
+ * Iterates `world.mapCountries` in insertion order and, for each country, walks
+ * `world.mapRegions` (also insertion order) collecting regions owned via
+ * `countryId` or `expansionOwnerId` — including any empire siblings via
+ * `memberOf.countries`. The map is stable across all wonder attempts within a
+ * single year (Conquer/Empire run after the wonder phase), so callers can build
+ * it once per year and pass it into `WonderGenerator.generate`.
+ */
+export function buildCountryPooledRegions(world: World): Map<string, Region[]> {
+  const countryPooledRegions = new Map<string, Region[]>();
+  for (const [cId, country] of world.mapCountries) {
+    const ids = new Set<string>([cId]);
+    if (country.memberOf) {
+      for (const m of country.memberOf.countries) ids.add(m);
     }
+    const rs: Region[] = [];
+    for (const r of world.mapRegions.values()) {
+      if ((r.countryId && ids.has(r.countryId)) ||
+          (r.expansionOwnerId && ids.has(r.expansionOwnerId))) {
+        rs.push(r);
+      }
+    }
+    countryPooledRegions.set(cId, rs);
+  }
+  return countryPooledRegions;
+}
+
+export class WonderGenerator {
+  generate(
+    rng: () => number,
+    year: Year,
+    world: World,
+    countryPooledRegions?: Map<string, Region[]>,
+  ): Wonder | null {
+    // YearGenerator builds and reuses the pooled-region map across all wonder
+    // attempts within a single year. Fall back to building it ourselves so the
+    // function is still safe to call standalone (tests, future callers).
+    const pooledRegions = countryPooledRegions ?? buildCountryPooledRegions(world);
 
     // Phase 1: Build candidates with feasible tier and weight
     const candidates: Array<{ city: CityEntity; weight: number; tier: number }> = [];
@@ -223,19 +241,25 @@ export class WonderGenerator {
       // City size gate: must be large, metropolis, megalopolis, or ecumenopolis
       if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis' && c.size !== 'ecumenopolis') continue;
 
+      // Resolve the city's effective tech map once; the candidate filter reads
+      // 12 levels off it below (9 for totalTech + growth/government/industry).
+      // The map is the same reference each call inside one year, so direct
+      // reads are byte-equivalent to repeated `getCityTechLevel(...)` calls.
+      const effectiveTechs = getCityEffectiveTechs(world, c);
+
       // Compute total tech level across all 9 fields
       let totalTech = 0;
       for (const field of ALL_TECH_FIELDS) {
-        totalTech += getCityTechLevel(world, c, field);
+        totalTech += effectiveTechs?.get(field)?.level ?? 0;
       }
 
       // Cooldown: 50yr base, reduced by 1 per 2 growth tech levels, min 10
-      const growthLevel = getCityTechLevel(world, c, 'growth');
+      const growthLevel = effectiveTechs?.get('growth')?.level ?? 0;
       const cooldown = Math.max(10, 100 - Math.floor(growthLevel / 2));
       if (absYear - c.mostRecentWonderBuilt < cooldown) continue;
 
       // Max standing wonders: floor(government / 5), minimum 1
-      const govLevel = getCityTechLevel(world, c, 'government');
+      const govLevel = effectiveTechs?.get('government')?.level ?? 0;
       const maxStanding = Math.max(1, Math.floor(govLevel / 5));
       if (getStandingWonderCount(world, c) >= maxStanding) continue;
 
@@ -251,7 +275,7 @@ export class WonderGenerator {
       if (c.size === 'megalopolis' && maxTier > 10) maxTier = 10;
 
       // Collect pooled resources for this city's entity hierarchy
-      const pool = collectPooledResources(world, c, countryPooledRegions);
+      const pool = collectPooledResources(world, c, pooledRegions);
 
       // Find highest affordable tier
       let feasibleTier = 0;
@@ -264,7 +288,7 @@ export class WonderGenerator {
       if (feasibleTier === 0) continue; // can't afford any tier
 
       // Weight: industry tech bonus × tier bonus
-      const industryLevel = Math.min(getCityTechLevel(world, c, 'industry'), 10);
+      const industryLevel = Math.min(effectiveTechs?.get('industry')?.level ?? 0, 10);
       const weight = (1 + 0.1 * industryLevel) * (1 + 0.1 * feasibleTier);
       candidates.push({ city: c, weight, tier: feasibleTier });
     }
@@ -285,7 +309,7 @@ export class WonderGenerator {
     const tier = pick.tier;
 
     // Phase 3: Consume resources from the pooled hierarchy
-    const pool = collectPooledResources(world, city, countryPooledRegions);
+    const pool = collectPooledResources(world, city, pooledRegions);
     const resourcesConsumed = consumeResources(pool, tier - 1);
 
     // Phase 4: Pick a name

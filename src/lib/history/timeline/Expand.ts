@@ -4,7 +4,7 @@ import type { World } from '../physical/World';
 import type { Year } from './Year';
 import type { Region } from '../physical/Region';
 import type { CountryEvent } from './Country';
-import { getCountryTechLevel } from './Tech';
+import { getCountryEffectiveTechs } from './Tech';
 import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
 import { scoreCellForCity } from '../history';
@@ -86,10 +86,12 @@ export class ExpandGenerator {
       }
       if (totalPop < EXPANSION_POP_GATE) continue;
 
-      // Tech levels via scope ladder
-      const exploration = getCountryTechLevel(world, country, 'exploration');
-      const government = getCountryTechLevel(world, country, 'government');
-      const growth = getCountryTechLevel(world, country, 'growth');
+      // Tech levels via scope ladder — resolve the country's effective tech map
+      // once (handles the empire-founder hop) and read three fields directly.
+      const countryTechs = getCountryEffectiveTechs(world, country);
+      const exploration = countryTechs.get('exploration')?.level ?? 0;
+      const government = countryTechs.get('government')?.level ?? 0;
+      const growth = countryTechs.get('growth')?.level ?? 0;
 
       // Probability of expanding this year
       const prob = Math.min(0.6, 0.2 + exploration * 0.05 + government * 0.03 + growth * 0.01);
