@@ -68,56 +68,62 @@ const CANVAS_SIZE = 1000;
 
 // `cityMapBlocks.ts:713-719` (CRAFT_COUNT_RANGE)
 const INDUSTRIAL_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [1, 3],
-  medium:      [2, 5],
-  large:       [3, 7],
-  metropolis:  [5, 10],
-  megalopolis: [8, 16],
+  small:        [1, 3],
+  medium:       [2, 5],
+  large:        [3, 7],
+  metropolis:   [5, 10],
+  megalopolis:  [8, 16],
+  ecumenopolis: [16, 28],
 };
 
 // `cityMapMilitaryQuarters.ts:62-68` (MIL_COUNT_RANGE)
 const MILITARY_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [0, 1],
-  medium:      [0, 2],
-  large:       [1, 3],
-  metropolis:  [2, 4],
-  megalopolis: [3, 6],
+  small:        [0, 1],
+  medium:       [0, 2],
+  large:        [1, 3],
+  metropolis:   [2, 4],
+  megalopolis:  [3, 6],
+  ecumenopolis: [6, 10],
 };
 
 // `cityMapSFHQuarters.ts:47-53` (SFH_COUNT_RANGE)
 const FAITH_AUX_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [0, 1],
-  medium:      [0, 2],
-  large:       [1, 3],
-  metropolis:  [2, 5],
-  megalopolis: [4, 8],
+  small:        [0, 1],
+  medium:       [0, 2],
+  large:        [1, 3],
+  metropolis:   [2, 5],
+  megalopolis:  [4, 8],
+  ecumenopolis: [8, 14],
 };
 
 // `cityMapEntertainmentQuarters.ts:78-84` (ENTERTAINMENT_COUNT_RANGE)
 const ENTERTAINMENT_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [0, 0],
-  medium:      [0, 1],
-  large:       [1, 2],
-  metropolis:  [1, 3],
-  megalopolis: [2, 5],
+  small:        [0, 0],
+  medium:       [0, 1],
+  large:        [1, 2],
+  metropolis:   [1, 3],
+  megalopolis:  [2, 5],
+  ecumenopolis: [5, 9],
 };
 
 // `cityMapTradeFinanceQuarters.ts:70-76` (TF_COUNT_RANGE)
 const TRADE_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [0, 1],
-  medium:      [0, 2],
-  large:       [1, 2],
-  metropolis:  [2, 5],
-  megalopolis: [4, 7],
+  small:        [0, 1],
+  medium:       [0, 2],
+  large:        [1, 2],
+  metropolis:   [2, 5],
+  megalopolis:  [4, 7],
+  ecumenopolis: [7, 12],
 };
 
 // `cityMapExcludedQuarters.ts:82-88` (EXCLUDED_COUNT_RANGE)
 const EXCLUDED_COUNT_RANGE: Record<CitySize, [number, number]> = {
-  small:       [0, 0],
-  medium:      [0, 1],
-  large:       [1, 2],
-  metropolis:  [1, 3],
-  megalopolis: [2, 5],
+  small:        [0, 0],
+  medium:       [0, 1],
+  large:        [1, 2],
+  metropolis:   [1, 3],
+  megalopolis:  [2, 5],
+  ecumenopolis: [4, 8],
 };
 
 // ─── Shared helpers ────────────────────────────────────────────────────────

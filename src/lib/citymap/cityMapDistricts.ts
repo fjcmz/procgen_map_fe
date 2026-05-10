@@ -62,6 +62,9 @@ const SLUM_MAX_DIAMETER = 10;
  * Spec line 56: "megalopolis 25% second cluster".
  */
 const MEGALOPOLIS_SECOND_SLUM_PROB = 0.25;
+/** Ecumenopolis: 55% chance of a second slum cluster, 30% chance of a third. */
+const ECUMENOPOLIS_SECOND_SLUM_PROB = 0.55;
+const ECUMENOPOLIS_THIRD_SLUM_PROB = 0.30;
 
 // ─── Public API ─────────────────────────────────────────────────────────────
 
@@ -174,6 +177,15 @@ export function placeSlumClusters(
     if (rng() < MEGALOPOLIS_SECOND_SLUM_PROB) {
       for (const id of candidates[1].ids) picked.add(id);
     }
+  } else if (env.size === 'ecumenopolis' && candidates.length >= 2) {
+    // Ecumenopolis: bigger second-cluster chance + a chance of a third cluster.
+    const rng = seededPRNG(`${seed}_city_${cityName}_districts_slums`);
+    if (rng() < ECUMENOPOLIS_SECOND_SLUM_PROB) {
+      for (const id of candidates[1].ids) picked.add(id);
+      if (candidates.length >= 3 && rng() < ECUMENOPOLIS_THIRD_SLUM_PROB) {
+        for (const id of candidates[2].ids) picked.add(id);
+      }
+    }
   }
 
   return picked;
@@ -190,6 +202,7 @@ const DOCK_PROBABILITY: Record<CitySize, number> = {
   large: 0.8,
   metropolis: 1,
   megalopolis: 1,
+  ecumenopolis: 1,
 };
 const DOCK_SECOND_CLUSTER_PROB = 0.3;
 
@@ -420,7 +433,8 @@ export function assignDistricts(
     const dockRng = seededPRNG(`${seed}_city_${cityName}_districts_docks`);
     const placeFirst = dockRng() < dockProb;
     const placeSecond =
-      env.size === 'megalopolis' && dockRng() < DOCK_SECOND_CLUSTER_PROB;
+      (env.size === 'megalopolis' || env.size === 'ecumenopolis') &&
+      dockRng() < DOCK_SECOND_CLUSTER_PROB;
     if (placeFirst) {
       growDockCluster(polygons, waterPolygonIds, interior, dockPolygonIds, dockRng);
     }

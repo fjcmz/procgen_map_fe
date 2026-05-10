@@ -22,7 +22,7 @@
 
 import type { BiomeType } from '../types';
 
-export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis';
+export type CitySize = 'small' | 'medium' | 'large' | 'metropolis' | 'megalopolis' | 'ecumenopolis';
 
 /**
  * Base architectural / aesthetic culture of a city. Drives renderer-only

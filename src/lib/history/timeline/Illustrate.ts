@@ -116,8 +116,12 @@ export class IllustrateGenerator {
     let totalWeight = 0;
     for (const c of world.mapUsableCities.values()) {
       if (!c.founded) continue;
-      if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis') continue;
-      const w = 1 + WONDER_ATTRACTION_FACTOR * c.wonderTierSum;
+      if (c.size !== 'large' && c.size !== 'metropolis' && c.size !== 'megalopolis' && c.size !== 'ecumenopolis') continue;
+      // Ecumenopolis is the rarest tier — give it a flat 1.5× boost on top of
+      // the wonder-attraction bonus so cosmopolitan cities stand out as
+      // illustrate-magnets even before they finish building megaprojects.
+      const sizeMult = c.size === 'ecumenopolis' ? 1.5 : 1.0;
+      const w = sizeMult * (1 + WONDER_ATTRACTION_FACTOR * c.wonderTierSum);
       candidates.push({ city: c, weight: w });
       totalWeight += w;
     }
