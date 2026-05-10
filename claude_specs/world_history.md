@@ -20,11 +20,11 @@ The orchestrator is `HistoryGenerator` (Phase 6) in `src/lib/history/HistoryGene
 
 ## Physical World (always runs)
 
-`buildPhysicalWorld(cells, width, rng, rarityWeights, seed)` in `history/history.ts` runs unconditionally before history. It uses Phase 3 generator classes internally:
+`buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind)` in `history/history.ts` runs unconditionally before history. It uses Phase 3 generator classes internally:
 
 1. **Continents**: BFS flood-fill on connected land cells; groups ≥10 cells form a `Continent` (via `continentGenerator`).
 2. **Regions**: each continent subdivided into ~30-cell clusters via multi-source BFS seeding. Each gets a `RegionBiome` derived from its dominant Voronoi biome (via `regionGenerator`). Geographic adjacency wired with `regionGenerator.assignNeighbours` (symmetric cell-geometry adjacency); `regionGenerator.updatePotentialNeighbours` computes BFS-layered `potentialNeighbours` (distance graph).
-3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (17 types: strategic/agricultural/luxury) via `resourceGenerator`. Each rolls `10d10+20` for `original`. Trade constants `TRADE_MIN=10`, `TRADE_USE=5`.
+3. **Resources**: 1–10 `Resource` entities per region, weighted-random type (49 specs across 12 categories — see `ResourceCatalog.ts`) via `resourceGenerator`. Each rolls `10d10+20` for `original`. Trade constants `TRADE_MIN=10`, `TRADE_USE=5`. Body-level gates (driven by `bodyKind` and a one-time `cells.some(isWater)` scan) block agricultural / biological specs (`requiresWater`) on dry bodies and unlock 10 sci-fi strategic specs (`requiresLifeless`) on truly barren rocky planets / satellites — see "Lifeless rocky bodies" below.
 4. **Cities**: 1–5 `CityEntity` objects per region placed on highest-scoring terrain cells via climate-aware `scoreCellForCity`, via `cityGenerator`. Names from `generateCityName()` in `nameGenerator.ts` (syllable combinator, 1000+ unique names with `Set<string>` dedup, 2–3 syllables, optional fantasy suffixes).
 
 `scoreCellForCity` boosts:
@@ -35,6 +35,17 @@ The orchestrator is `HistoryGenerator` (Phase 6) in `src/lib/history/HistoryGene
 And penalizes extreme biomes (tundra -5, desert -4, bare/scorched -3, temperate desert/marsh -2) with mitigation from rivers (-2) and coast (-1) so harsh-biome cities still appear near water features.
 
 The `World`/`Continent`/`Region`/`CityEntity`/`Resource` class instances live **only inside the worker** (Map/Set are not structured-clone safe). The worker serializes them into plain `RegionData[]` / `ContinentData[]` for `MapData`. `CityEntity` (rich simulation entity) is distinct from the lightweight render-type `City` in `types.ts`.
+
+### Lifeless rocky bodies (resource gating)
+
+`buildPhysicalWorld` derives a `BodyContext = { hasLife, hasWater }` from its `bodyKind` argument and a one-time `cells.some(isWater)` scan, and threads it into both `resourceGenerator.generateForRegion` and `generateSeaResourcesForRegion`. The context drives two new `HabitatSpec` flags in `ResourceCatalog.ts`:
+
+- **`requiresWater: true`** — biological / agricultural specs (livestock / crops / cashCrops / forestry / marine / spices / textiles / exotic, ~28 entries). Hard-rejected when `!body.hasWater`. Removes all agriculture from dry rocky planets (lava / iron / carbon / cratered / desert_moon / volcanic). Lifeless ocean planets and ice-shells still pass since they do have water cells.
+- **`requiresLifeless: true`** — the 10 sci-fi strategic specs (`helium_3`, `deuterium`, `tritium`, `thorium`, `antimatter`, `iridosmium`, `naqahdah`, `promethium`, `xenon_ice`, `monatomic_gold`). Hard-rejected when `body.hasLife || body.hasWater` — only spawn on truly barren rocky planets / satellites. Slot into the existing `metals` / `energy` categories so the renderer's icon bucketing (`getLegacyCategory`) keeps them in the `strategic` bucket without any art changes.
+
+`hasLife` is purely `bodyKind === 'rocky-life'`; `hasWater` is computed from cells so an ocean-subtype barren planet correctly reports water and a lava world correctly reports none. When `!body.hasWater`, `scaleAbundance` adds `+100` to each resource's `bonus` dice (mean per-deposit stockpile rises from ~75 to ~175 — the "higher quantity of the other resources" knob). `count`/`sides` stay unchanged so RNG call count per resource is identical to the Earth-like path; this keeps the per-region budget stable.
+
+Defaults (`bodyKind = 'rocky-life'`, `hasLife = true`, `hasWater = true` when the cell scan hits water) reproduce Earth-like behavior byte-identically, so the sweep harness — which generates with `waterRatio = 0.4` and never passes a `bodyKind` — stays green.
 
 ## Timeline Model
 

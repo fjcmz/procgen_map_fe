@@ -5,7 +5,7 @@
  * then serializes the result into HistoryData for the renderer and UI.
  */
 
-import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail, ReligionDetail } from '../types';
+import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail, ReligionDetail, BodyKind } from '../types';
 import { DEITY_SPECS } from '../fantasy/Deity';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
@@ -1031,6 +1031,13 @@ export class HistoryGenerator {
      * Defaults to '' for the sweep harness.
      */
     seed: string = '',
+    /**
+     * Source body classification. Defaults to `'rocky-life'` so the sweep
+     * harness and every habitable-rocky generation stay byte-identical;
+     * lifeless bodies (`rocky-barren`, `ice-shell`) skip history simulation
+     * upstream so this is mostly a buildPhysicalWorld pass-through here.
+     */
+    bodyKind: BodyKind = 'rocky-life',
   ): {
     cities: City[];
     roads: Road[];
@@ -1040,7 +1047,7 @@ export class HistoryGenerator {
     stats: HistoryStats;
   } {
     // Phase 0: Build physical world
-    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed);
+    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind);
 
     // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
     const historyRoot = HistoryRoot.INSTANCE;

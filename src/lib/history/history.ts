@@ -1,4 +1,4 @@
-import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, EmpireSnapshotEntry } from '../types';
+import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, EmpireSnapshotEntry, BodyKind } from '../types';
 import { generateRoads } from './roads';
 import { BIOME_TO_REGION_BIOME } from './physical/Region';
 import type { World } from './physical/World';
@@ -287,10 +287,32 @@ export function buildPhysicalWorld(
    * Defaults to '' for backwards compatibility (sweep harness, standalone).
    */
   seed: string = '',
+  /**
+   * Source body classification for the world (`rocky-life` for habitable
+   * Earth-likes, `rocky-barren` for lifeless rock, `ice-shell` for icy
+   * satellites, `gas-giant` short-circuits before reaching here). Drives the
+   * `requiresWater` / `requiresLifeless` resource gates and the abundance
+   * boost applied to non-life resources on dry barren worlds. Defaults to
+   * `'rocky-life'` so the sweep harness and every habitable-rocky generation
+   * stay byte-identical.
+   */
+  bodyKind: BodyKind = 'rocky-life',
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[]; usedCityNames: Set<string> } {
   const usedCityNames = new Set<string>();
   const numCells = cells.length;
   const world = worldGenerator.generate(rng, seed);
+
+  // Body-level signals threaded into ResourceGenerator. `hasWater` is
+  // computed from the cells (any `isWater` cell counts) so an ocean-subtype
+  // barren planet correctly reports water and a lava world correctly reports
+  // none. `hasLife` is purely a function of `bodyKind` — only life-bearing
+  // rocky bodies host a biosphere.
+  const bodyHasLife = bodyKind === 'rocky-life';
+  let bodyHasWater = false;
+  for (let i = 0; i < numCells; i++) {
+    if (cells[i].isWater) { bodyHasWater = true; break; }
+  }
+  const bodyContext = { hasLife: bodyHasLife, hasWater: bodyHasWater };
 
   // --- Step 1: Find continents via BFS flood-fill on connected land cells ---
   const cellContinent = new Int16Array(numCells).fill(-1);
@@ -458,14 +480,14 @@ export function buildPhysicalWorld(
     // advances — see `specs/resources.md` Phase 3 and the plan file
     // `plans/mossy-tickling-taco.md`.
     for (const region of seedToRegion.values()) {
-      region.resources = resourceGenerator.generateForRegion(region, cells, rng, rarityWeights);
+      region.resources = resourceGenerator.generateForRegion(region, cells, rng, rarityWeights, bodyContext);
       for (const r of region.resources) {
         if (isCommonUnlockedAtZero(r.type)) {
           region.discoveredResources.add(r.type);
         }
       }
       // Sea resource pass: place resources on shallow water cells
-      const seaResources = resourceGenerator.generateSeaResourcesForRegion(region, cells, rng, rarityWeights);
+      const seaResources = resourceGenerator.generateSeaResourcesForRegion(region, cells, rng, rarityWeights, bodyContext);
       region.resources.push(...seaResources);
       for (const r of seaResources) {
         if (isCommonUnlockedAtZero(r.type)) {
