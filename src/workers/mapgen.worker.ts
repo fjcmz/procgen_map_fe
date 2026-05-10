@@ -166,7 +166,7 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
       const rng = seededPRNG(seed + '_history');
 
       post({ type: 'PROGRESS', step: 'Simulating history…', pct: 72 });
-      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed);
+      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed, req.bodyKind);
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
@@ -176,7 +176,7 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
     } else {
       post({ type: 'PROGRESS', step: 'Building world…', pct: 65 });
       const rng = seededPRNG(seed + '_world');
-      const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed);
+      const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, req.bodyKind);
       regions = result.regionData;
       continents = result.continentData;
     }

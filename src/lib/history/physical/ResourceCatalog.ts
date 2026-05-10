@@ -53,7 +53,10 @@ export type ResourceType =
   // textiles (1)
   | 'silk'
   // exotic (3)
-  | 'ivory' | 'incense' | 'furs';
+  | 'ivory' | 'incense' | 'furs'
+  // strategic-exotic (10) — only spawn on lifeless rocky bodies without water
+  | 'helium_3' | 'deuterium' | 'tritium' | 'thorium' | 'antimatter'
+  | 'iridosmium' | 'naqahdah' | 'promethium' | 'xenon_ice' | 'monatomic_gold';
 
 export type ResourceCategory =
   | 'metals'
@@ -122,6 +125,15 @@ export interface HabitatSpec {
   requiresSea?: boolean;
   /** Soft flag — resource can spawn on shallow sea cells in addition to land. */
   allowsSea?: boolean;
+  /** Hard gate — body must have at least one water cell. Used to block
+   *  agricultural / biological resources on dry rocky planets (lava, iron,
+   *  carbon, cratered, desert_moon, volcanic). Lifeless ocean planets and
+   *  ice-shells still pass since they have water cells. */
+  requiresWater?: boolean;
+  /** Hard gate — body must be lifeless AND have no water cells. Drives the
+   *  10 sci-fi strategic resources (helium-3, deuterium, naqahdah, …) which
+   *  only appear on truly barren rocky planets / satellites. */
+  requiresLifeless?: boolean;
 }
 
 export interface AbundanceDice {
@@ -250,75 +262,116 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
 
   // ---------------- livestock ----------------
   spec('cattle', 'livestock', ['food', 'trade'],
-    { biomes: ['temperate', 'arid'], moisture: [0.25, 1, 0.35, 0.85], temperature: [0.3, 0.85, 0.4, 0.75] }, 'common'),
+    { biomes: ['temperate', 'arid'], moisture: [0.25, 1, 0.35, 0.85], temperature: [0.3, 0.85, 0.4, 0.75], requiresWater: true }, 'common'),
   spec('sheep', 'livestock', ['food', 'trade'],
-    { biomes: ['temperate', 'arid', 'tundra'], temperature: [0.1, 0.75, 0.2, 0.65] }, 'common'),
+    { biomes: ['temperate', 'arid', 'tundra'], temperature: [0.1, 0.75, 0.2, 0.65], requiresWater: true }, 'common'),
   spec('horses', 'livestock', ['military', 'trade'],
-    { biomes: ['temperate', 'arid'], moisture: [0.2, 0.8, 0.3, 0.7] }, 'uncommon'),
+    { biomes: ['temperate', 'arid'], moisture: [0.2, 0.8, 0.3, 0.7], requiresWater: true }, 'uncommon'),
   spec('yak', 'livestock', ['food'],
-    { biomes: ['tundra', 'temperate'], requiresMountain: true, temperature: [0, 0.45] }, 'rare'),
+    { biomes: ['tundra', 'temperate'], requiresMountain: true, temperature: [0, 0.45], requiresWater: true }, 'rare'),
 
   // ---------------- crops ----------------
   spec('wheat', 'crops', ['food', 'trade'],
-    { biomes: ['temperate', 'arid'], moisture: [0.3, 0.9, 0.4, 0.8], temperature: [0.3, 0.8, 0.4, 0.7] }, 'common'),
+    { biomes: ['temperate', 'arid'], moisture: [0.3, 0.9, 0.4, 0.8], temperature: [0.3, 0.8, 0.4, 0.7], requiresWater: true }, 'common'),
   spec('rice', 'crops', ['food', 'trade'],
-    { biomes: ['tropical', 'swamp', 'temperate'], moisture: [0.55, 1, 0.7, 1], requiresRiver: true }, 'common'),
+    { biomes: ['tropical', 'swamp', 'temperate'], moisture: [0.55, 1, 0.7, 1], requiresRiver: true, requiresWater: true }, 'common'),
   spec('maize', 'crops', ['food', 'trade'],
-    { biomes: ['temperate', 'tropical', 'arid'], moisture: [0.25, 0.9, 0.35, 0.8] }, 'common'),
+    { biomes: ['temperate', 'tropical', 'arid'], moisture: [0.25, 0.9, 0.35, 0.8], requiresWater: true }, 'common'),
   spec('barley', 'crops', ['food'],
-    { biomes: ['temperate', 'tundra'], temperature: [0.1, 0.65, 0.2, 0.55] }, 'common'),
+    { biomes: ['temperate', 'tundra'], temperature: [0.1, 0.65, 0.2, 0.55], requiresWater: true }, 'common'),
   spec('dates', 'crops', ['food', 'trade'],
-    { biomes: ['desert', 'arid'], requiresRiver: true, temperature: [0.6, 1, 0.75, 1] }, 'uncommon'),
+    { biomes: ['desert', 'arid'], requiresRiver: true, temperature: [0.6, 1, 0.75, 1], requiresWater: true }, 'uncommon'),
 
   // ---------------- cashCrops ----------------
   spec('cotton', 'cashCrops', ['trade', 'industry'],
-    { biomes: ['arid', 'tropical'], temperature: [0.5, 1, 0.6, 0.9], moisture: [0.25, 0.85, 0.35, 0.75] }, 'uncommon'),
+    { biomes: ['arid', 'tropical'], temperature: [0.5, 1, 0.6, 0.9], moisture: [0.25, 0.85, 0.35, 0.75], requiresWater: true }, 'uncommon'),
   spec('tea', 'cashCrops', ['trade', 'luxury', 'art'],
-    { biomes: ['tropical', 'temperate'], requiresMountain: true, moisture: [0.55, 1, 0.65, 0.95] }, 'uncommon'),
+    { biomes: ['tropical', 'temperate'], requiresMountain: true, moisture: [0.55, 1, 0.65, 0.95], requiresWater: true }, 'uncommon'),
   spec('coffee', 'cashCrops', ['trade', 'luxury'],
-    { biomes: ['tropical'], requiresMountain: true, temperature: [0.5, 0.95, 0.6, 0.9] }, 'uncommon'),
+    { biomes: ['tropical'], requiresMountain: true, temperature: [0.5, 0.95, 0.6, 0.9], requiresWater: true }, 'uncommon'),
   spec('sugar', 'cashCrops', ['trade', 'food', 'luxury'],
-    { biomes: ['tropical', 'swamp'], moisture: [0.5, 1, 0.6, 0.95] }, 'uncommon'),
+    { biomes: ['tropical', 'swamp'], moisture: [0.5, 1, 0.6, 0.95], requiresWater: true }, 'uncommon'),
   spec('incense', 'cashCrops', ['trade', 'luxury'],
-    { biomes: ['temperate', 'tropical'], moisture: [0.35, 0.9, 0.45, 0.8] }, 'uncommon'),
+    { biomes: ['temperate', 'tropical'], moisture: [0.35, 0.9, 0.45, 0.8], requiresWater: true }, 'uncommon'),
 
   // ---------------- forestry ----------------
   spec('timber', 'forestry', ['industry', 'trade'],
-    { biomes: ['temperate', 'tropical', 'tundra'], moisture: [0.35, 1, 0.5, 1] }, 'common'),
+    { biomes: ['temperate', 'tropical', 'tundra'], moisture: [0.35, 1, 0.5, 1], requiresWater: true }, 'common'),
   spec('hardwood', 'forestry', ['industry', 'art', 'trade'],
-    { biomes: ['tropical'], moisture: [0.6, 1, 0.7, 1], temperature: [0.55, 1, 0.7, 1] }, 'uncommon'),
+    { biomes: ['tropical'], moisture: [0.6, 1, 0.7, 1], temperature: [0.55, 1, 0.7, 1], requiresWater: true }, 'uncommon'),
   spec('amber', 'forestry', ['luxury', 'art', 'religion'],
-    { biomes: ['temperate', 'tundra'], temperature: [0, 0.55, 0.1, 0.45], requiresCoast: true }, 'rare'),
+    { biomes: ['temperate', 'tundra'], temperature: [0, 0.55, 0.1, 0.45], requiresCoast: true, requiresWater: true }, 'rare'),
 
   // ---------------- marine ----------------
   spec('fish', 'marine', ['food', 'trade'],
-    { requiresSea: true }, 'common'),
+    { requiresSea: true, requiresWater: true }, 'common'),
   spec('whales', 'marine', ['industry', 'trade'],
-    { biomes: ['tundra', 'temperate'], requiresSea: true, temperature: [0, 0.55, 0.05, 0.4] }, 'uncommon'),
+    { biomes: ['tundra', 'temperate'], requiresSea: true, temperature: [0, 0.55, 0.05, 0.4], requiresWater: true }, 'uncommon'),
   spec('pearls', 'marine', ['luxury', 'art', 'religion'],
-    { biomes: ['tropical'], requiresSea: true, temperature: [0.6, 1, 0.7, 1] }, 'rare'),
+    { biomes: ['tropical'], requiresSea: true, temperature: [0.6, 1, 0.7, 1], requiresWater: true }, 'rare'),
   spec('kelp', 'marine', ['food', 'industry'],
-    { biomes: ['temperate', 'tropical'], requiresSea: true, temperature: [0.3, 0.85, 0.4, 0.75] }, 'common'),
+    { biomes: ['temperate', 'tropical'], requiresSea: true, temperature: [0.3, 0.85, 0.4, 0.75], requiresWater: true }, 'common'),
   spec('coral', 'marine', ['luxury', 'art', 'science'],
-    { biomes: ['tropical'], requiresSea: true, temperature: [0.65, 1, 0.7, 0.95] }, 'uncommon'),
+    { biomes: ['tropical'], requiresSea: true, temperature: [0.65, 1, 0.7, 0.95], requiresWater: true }, 'uncommon'),
 
   // ---------------- spices ----------------
   spec('pepper', 'spices', ['trade', 'luxury', 'food'],
-    { biomes: ['tropical'], moisture: [0.55, 1, 0.7, 1] }, 'uncommon'),
+    { biomes: ['tropical'], moisture: [0.55, 1, 0.7, 1], requiresWater: true }, 'uncommon'),
   spec('saffron', 'spices', ['trade', 'luxury', 'art'],
-    { biomes: ['arid', 'temperate'], temperature: [0.4, 0.85, 0.5, 0.75], moisture: [0.15, 0.6, 0.25, 0.5] }, 'veryRare'),
+    { biomes: ['arid', 'temperate'], temperature: [0.4, 0.85, 0.5, 0.75], moisture: [0.15, 0.6, 0.25, 0.5], requiresWater: true }, 'veryRare'),
 
   // ---------------- textiles ----------------
   spec('silk', 'textiles', ['luxury', 'trade', 'art'],
-    { biomes: ['temperate', 'tropical'], moisture: [0.4, 0.95, 0.55, 0.85], temperature: [0.4, 0.9, 0.5, 0.8] }, 'rare'),
+    { biomes: ['temperate', 'tropical'], moisture: [0.4, 0.95, 0.55, 0.85], temperature: [0.4, 0.9, 0.5, 0.8], requiresWater: true }, 'rare'),
 
   // ---------------- exotic ----------------
   spec('ivory', 'exotic', ['luxury', 'art', 'religion', 'trade'],
-    { biomes: ['tropical', 'arid'] }, 'rare'),
+    { biomes: ['tropical', 'arid'], requiresWater: true }, 'rare'),
   spec('incense', 'exotic', ['religion', 'luxury', 'trade'],
-    { biomes: ['desert', 'arid'], moisture: [0, 0.45] }, 'rare'),
+    { biomes: ['desert', 'arid'], moisture: [0, 0.45], requiresWater: true }, 'rare'),
   spec('furs', 'exotic', ['luxury', 'trade'],
-    { biomes: ['tundra', 'temperate'], temperature: [0, 0.5, 0.05, 0.4], moisture: [0.25, 1] }, 'uncommon'),
+    { biomes: ['tundra', 'temperate'], temperature: [0, 0.5, 0.05, 0.4], moisture: [0.25, 1], requiresWater: true }, 'uncommon'),
+
+  // ---------------- strategic-exotic (lifeless rocky bodies only) ----------------
+  // Sci-fi feedstocks of a future-tech extraction industry. Each one gates on
+  // `requiresLifeless: true` so they are rejected on every life-bearing world
+  // (the sweep + every habitable-rocky generation stays byte-identical). All
+  // biome whitelists pull from the lifeless-mapped {arid, tundra} buckets in
+  // BIOME_TO_REGION_BIOME — that's where lava / iron / carbon / cratered cells
+  // land at the region level.
+  // Helium-3 from solar-wind-implanted regolith — the canonical sci-fi fusion
+  // fuel ("the Moon is a treasure" trope).
+  spec('helium_3', 'energy', ['industry', 'science', 'military'],
+    { biomes: ['arid', 'tundra'], requiresLifeless: true }, 'common'),
+  // Deuterium ice — heavy-water cryo deposits on cold airless bodies.
+  spec('deuterium', 'energy', ['industry', 'science'],
+    { biomes: ['tundra'], requiresLifeless: true, temperature: [0, 0.4] }, 'uncommon'),
+  // Tritium-bearing impact glass — a much rarer fusion supplement.
+  spec('tritium', 'energy', ['science', 'military'],
+    { biomes: ['arid', 'tundra'], requiresLifeless: true, requiresMountain: true }, 'rare'),
+  // Thorium — fissile metal concentrated in volcanic / lava terrain.
+  spec('thorium', 'energy', ['industry', 'science', 'military'],
+    { biomes: ['arid'], requiresLifeless: true, temperature: [0.5, 1] }, 'uncommon'),
+  // Antimatter pockets — exotic magnetically-trapped traces in iron / carbon
+  // cores. The crown-jewel late-game energy source.
+  spec('antimatter', 'energy', ['science', 'military'],
+    { biomes: ['arid'], requiresLifeless: true }, 'veryRare'),
+  // Iridosmium — platinum-group asteroidal alloy, dense and refractory.
+  spec('iridosmium', 'metals', ['industry', 'military'],
+    { biomes: ['arid'], requiresLifeless: true, requiresMountain: true }, 'uncommon'),
+  // Naqahdah — fictional Stargate-style superconductor; the wildcard
+  // strategic resource of the lifeless tier.
+  spec('naqahdah', 'metals', ['industry', 'military', 'science'],
+    { biomes: ['arid', 'tundra'], requiresLifeless: true }, 'rare'),
+  // Promethium-147 — radioisotope battery feedstock; cratered surfaces only.
+  spec('promethium', 'energy', ['science', 'military'],
+    { biomes: ['arid'], requiresLifeless: true }, 'rare'),
+  // Xenon clathrates — noble-gas ices, prized as ion-engine propellant.
+  spec('xenon_ice', 'energy', ['industry', 'science'],
+    { biomes: ['tundra'], requiresLifeless: true, temperature: [0, 0.35] }, 'uncommon'),
+  // Monatomic gold — ORME-style exotic metallic state from carbon worlds.
+  spec('monatomic_gold', 'metals', ['luxury', 'science'],
+    { biomes: ['arid'], requiresLifeless: true }, 'veryRare'),
 ];
 
 // ---------------------------------------------------------------------------

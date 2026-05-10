@@ -4,11 +4,42 @@ import { Resource } from './Resource';
 import {
   RESOURCE_SPECS,
   RARITY_WEIGHTS_BY_MODE,
+  type AbundanceDice,
   type ClimateRange,
   type HabitatSpec,
   type ResourceSpec,
   type ResourceRarity,
 } from './ResourceCatalog';
+
+/**
+ * Body-level signals threaded down from `buildPhysicalWorld`. Drives the
+ * `requiresWater` / `requiresLifeless` habitat gates and the abundance
+ * boost for non-life resources on dry barren worlds.
+ *
+ * Default `{ hasLife: true, hasWater: true }` reproduces today's life-bearing
+ * Earth-like behavior byte-identically (sweep stays green).
+ */
+export interface BodyContext {
+  hasLife: boolean;
+  hasWater: boolean;
+}
+
+const DEFAULT_BODY: BodyContext = { hasLife: true, hasWater: true };
+
+/**
+ * Abundance bonus added to the dice `bonus` field on dry bodies (no water
+ * cells). Doubles the mean per-deposit stockpile from ~75 to ~175 — the
+ * "higher quantity of the other resources" knob from the lifeless-rocky
+ * spec. Adding to `bonus` keeps the RNG call count identical to the
+ * Earth-like path (10d10 still rolls 10 numbers), so per-region budget is
+ * unchanged on the lifeless code path too.
+ */
+const DRY_BODY_ABUNDANCE_BONUS = 100;
+
+function scaleAbundance(base: AbundanceDice, body: BodyContext): AbundanceDice {
+  if (body.hasWater) return base;
+  return { count: base.count, sides: base.sides, bonus: base.bonus + DRY_BODY_ABUNDANCE_BONUS };
+}
 
 /**
  * Habitat-aware per-cell resource generator.
@@ -165,8 +196,23 @@ function evalRange(range: ClimateRange, value: number): number {
  */
 const OFF_BIOME_FIT = 0.2;
 
-export function computeFitScore(spec: ResourceSpec, profile: RegionProfile, isSea = false): number {
+export function computeFitScore(
+  spec: ResourceSpec,
+  profile: RegionProfile,
+  isSea = false,
+  body: BodyContext = DEFAULT_BODY,
+): number {
   const h: HabitatSpec = spec.habitat;
+
+  // Body-level gates (driven by the world's life/water signals).
+  // - `requiresWater`: blocks biological / agricultural specs on dry bodies
+  //   (lava, iron, carbon, cratered, desert_moon, volcanic, gas-giant).
+  // - `requiresLifeless`: restricts the 10 sci-fi strategic specs
+  //   (helium-3, deuterium, naqahdah, …) to truly barren worlds — no life
+  //   AND no water. Lifeless ocean planets and ice-shells therefore only
+  //   block agriculture (no boost on bonus / no exotic strategics).
+  if (h.requiresWater && !body.hasWater) return 0;
+  if (h.requiresLifeless && (body.hasLife || body.hasWater)) return 0;
 
   // Sea/land exclusion gates
   if (isSea && !h.requiresSea && !h.allowsSea) return 0; // land-only spec on a sea cell
@@ -253,12 +299,13 @@ function buildCellFit(
   regionBiome: RegionBiome,
   rarityWeights: Record<ResourceRarity, number>,
   isSea = false,
+  body: BodyContext = DEFAULT_BODY,
 ): CellFit {
   const profile = buildCellProfile(cell, regionBiome);
   const pool: EligibleEntry[] = [];
   let totalWeight = 0;
   for (const spec of RESOURCE_SPECS) {
-    const fit = computeFitScore(spec, profile, isSea);
+    const fit = computeFitScore(spec, profile, isSea, body);
     if (fit <= 0) continue;
     const w = rarityWeights[spec.rarity] * fit;
     pool.push({ spec, weight: w });
@@ -290,6 +337,7 @@ export class ResourceGenerator {
     cells: Cell[],
     rng: () => number,
     rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+    body: BodyContext = DEFAULT_BODY,
   ): Resource[] {
     // --- Step A: target count (1 rng call) ---
     const count = Math.floor(rng() * 10) + 1;
@@ -299,7 +347,7 @@ export class ResourceGenerator {
     for (const ci of region.cellIndices) {
       const c = cells[ci];
       if (!c || c.isWater) continue;
-      fits.push(buildCellFit(ci, c, region.biome, rarityWeights));
+      fits.push(buildCellFit(ci, c, region.biome, rarityWeights, false, body));
     }
 
     // Sort by totalWeight descending, tiebreak by cellIndex ascending
@@ -325,7 +373,8 @@ export class ResourceGenerator {
       }
       const idx = weightedPickIndex(cf.pool, rng);
       const picked = cf.pool[idx].spec;
-      const res = new Resource(cf.cellIndex, picked.type, rng, picked.abundance);
+      const abundance = scaleAbundance(picked.abundance, body);
+      const res = new Resource(cf.cellIndex, picked.type, rng, abundance);
       out.push(res);
 
       // Populate the per-cell index
@@ -353,6 +402,7 @@ export class ResourceGenerator {
     cells: Cell[],
     rng: () => number,
     rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+    body: BodyContext = DEFAULT_BODY,
   ): Resource[] {
     // --- Step A: target count (1 rng call) ---
     const seaCount = Math.floor(rng() * 3) + 1; // 1-3 sea resources
@@ -364,7 +414,7 @@ export class ResourceGenerator {
       if (!c || !c.isWater) continue;
       // Shallow sea = COAST biome water cells (elevation >= 0.1)
       if (c.biome !== 'COAST') continue;
-      fits.push(buildCellFit(ci, c, region.biome, rarityWeights, true));
+      fits.push(buildCellFit(ci, c, region.biome, rarityWeights, true, body));
     }
 
     fits.sort((a, b) => b.totalWeight - a.totalWeight || a.cellIndex - b.cellIndex);
@@ -385,7 +435,8 @@ export class ResourceGenerator {
       }
       const idx = weightedPickIndex(cf.pool, rng);
       const picked = cf.pool[idx].spec;
-      const res = new Resource(cf.cellIndex, picked.type, rng, picked.abundance);
+      const abundance = scaleAbundance(picked.abundance, body);
+      const res = new Resource(cf.cellIndex, picked.type, rng, abundance);
       out.push(res);
 
       let arr = region.cellResources.get(cf.cellIndex);
