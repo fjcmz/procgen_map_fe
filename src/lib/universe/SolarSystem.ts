@@ -1,6 +1,7 @@
 import { IdUtil } from '../history/IdUtil';
 import type { Star } from './Star';
 import type { Planet } from './Planet';
+import type { Wormhole } from './Wormhole';
 import type { SystemKind } from './SystemKind';
 
 function rngHex(rng: () => number): string {
@@ -20,6 +21,12 @@ export class SolarSystem {
   kind: SystemKind = 'main_sequence';
   stars: Star[] = [];
   planets: Planet[] = [];
+  /**
+   * Wormholes anchored to this system. Always present; only populated for
+   * standalone-kind systems (see `isStandaloneKind`). Generation happens
+   * in a dedicated phase after sector layout in `UniverseGenerator`.
+   */
+  wormholes: Wormhole[] = [];
   sectorId: string = '';
   // Transient
   universeId: string = '';

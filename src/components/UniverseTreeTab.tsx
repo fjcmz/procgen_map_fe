@@ -7,6 +7,7 @@ import type {
   StarData,
   PlanetData,
   SatelliteData,
+  WormholeData,
 } from '../lib/universe/types';
 import type { StarComposition } from '../lib/universe/Star';
 import type { PlanetComposition, PlanetBiome } from '../lib/universe/Planet';
@@ -33,6 +34,7 @@ interface Filters {
   satellite: SatelliteFilter;
   biome: BiomeFilter;
   lifeOnly: boolean;
+  wormholeOnly: boolean;
 }
 
 const DEFAULT_FILTERS: Filters = {
@@ -42,6 +44,7 @@ const DEFAULT_FILTERS: Filters = {
   satellite: 'any',
   biome: 'any',
   lifeOnly: false,
+  wormholeOnly: false,
 };
 
 const BIOME_OPTIONS: ReadonlyArray<readonly [BiomeFilter, string]> = [
@@ -121,8 +124,15 @@ function kindMatches(system: SolarSystemData, f: Filters): boolean {
 
 function systemPasses(system: SolarSystemData, f: Filters): boolean {
   if (!kindMatches(system, f)) return false;
+  // Wormhole filter is system-level: only standalone systems can carry
+  // wormholes, so this implicitly narrows the tree to a subset of those.
+  if (f.wormholeOnly && (!system.wormholes || system.wormholes.length === 0)) return false;
   if (system.stars.some(s => starMatches(s, f))) return true;
   if (!isStandaloneKind(system.kind) && system.planets.some(p => planetPasses(p, f))) return true;
+  // Standalone systems with wormholes need an explicit pass — they have no
+  // planets (so the second branch above falls through) but should still
+  // surface in the tree when only the wormhole filter is on.
+  if (isStandaloneKind(system.kind) && system.wormholes && system.wormholes.length > 0) return true;
   return false;
 }
 
@@ -222,6 +232,14 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
             onChange={e => setFilter('lifeOnly', e.target.checked)}
           />
           <span>Life only (planets &amp; moons)</span>
+        </label>
+        <label style={s.lifeRow}>
+          <input
+            type="checkbox"
+            checked={filters.wormholeOnly}
+            onChange={e => setFilter('wormholeOnly', e.target.checked)}
+          />
+          <span>Systems with wormholes only</span>
         </label>
       </div>
 
@@ -398,11 +416,15 @@ function SystemNode({
   const visibleStars = system.stars.filter(st => starMatches(st, filters));
   const standalone = isStandaloneKind(system.kind);
   const visiblePlanets = standalone ? [] : system.planets.filter(p => planetPasses(p, filters));
-  const childCount = visibleStars.length + visiblePlanets.length;
+  const wormholes = system.wormholes ?? [];
+  const childCount = visibleStars.length + visiblePlanets.length + wormholes.length;
   const starCountLabel = formatCount(visibleStars.length, system.stars.length, 'star');
   const planetCountLabel = standalone
     ? 'no planets'
     : formatCount(visiblePlanets.length, system.planets.length, 'planet');
+  const wormholeLabel = wormholes.length > 0
+    ? `, ${wormholes.length} ${pluralize(wormholes.length, 'wormhole')}`
+    : '';
   const info = SYSTEM_KIND_INFO[system.kind];
 
   return (
@@ -421,7 +443,7 @@ function SystemNode({
             {info.displayName}
           </span>
           <span style={s.dim}>
-            {' '}— {starCountLabel}, {planetCountLabel}
+            {' '}— {starCountLabel}, {planetCountLabel}{wormholeLabel}
           </span>
         </button>
       </div>
@@ -446,6 +468,14 @@ function SystemNode({
               onSelect={onSelect}
             />
           ))}
+          {wormholes.map(wormhole => (
+            <WormholeNode
+              key={wormhole.id}
+              wormhole={wormhole}
+              system={system}
+              onSelect={onSelect}
+            />
+          ))}
           {childCount === 0 && (
             <div style={s.emptyChild}>
               {standalone ? 'standalone body — no planets' : 'no matching children'}
@@ -453,6 +483,33 @@ function SystemNode({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function WormholeNode({
+  wormhole, system, onSelect,
+}: {
+  wormhole: WormholeData;
+  system: SolarSystemData;
+  onSelect: (entity: PopupEntity) => void;
+}) {
+  return (
+    <div style={s.node}>
+      <div style={s.row}>
+        <Caret open={false} hasChildren={false} />
+        <button
+          style={s.label}
+          onClick={() => onSelect({ kind: 'wormhole', systemId: system.id, wormholeId: wormhole.id })}
+          title="Show details"
+        >
+          <span style={s.icon}>◌</span>
+          <span style={s.sci}>{wormhole.scientificName}</span>
+          <span style={s.dim}>
+            {' '}— {wormhole.partnerId ? 'connected' : 'unconnected'}
+          </span>
+        </button>
+      </div>
     </div>
   );
 }

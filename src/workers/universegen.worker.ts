@@ -8,6 +8,7 @@ import type {
   SolarSystemData,
   GalaxyData,
   SectorData,
+  WormholeData,
 } from '../lib/universe/types';
 
 function post(msg: UniverseWorkerMessage): void {
@@ -57,6 +58,15 @@ function serializeUniverse(universe: Universe): UniverseData {
         life: sat.life,
         biome: sat.biome,
       })),
+    })),
+    wormholes: ss.wormholes.map<WormholeData>(w => ({
+      id: w.id,
+      scientificName: w.scientificName,
+      systemId: w.solarSystemId,
+      galaxyId: w.galaxyId,
+      partnerId: w.partnerId,
+      offsetX: w.offsetX,
+      offsetY: w.offsetY,
     })),
   }));
   const galaxies: GalaxyData[] = universe.galaxies.map(g => {

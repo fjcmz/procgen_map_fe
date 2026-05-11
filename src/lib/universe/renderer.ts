@@ -312,8 +312,50 @@ export interface HitCircle {
   x: number;
   y: number;
   r: number;
-  kind: 'galaxy' | 'system' | 'planet' | 'satellite';
+  kind: 'galaxy' | 'system' | 'planet' | 'satellite' | 'wormhole';
   id: string;
+}
+
+// ── Wormhole visuals ──────────────────────────────────────────────────────
+// All wormholes share a fixed palette so they read as a single "kind" across
+// the universe (planets/satellites vary per subtype/biome; wormholes don't).
+// Drawn as a dark grey disc with a thin white halo, statically positioned
+// (no orbital motion) at a per-wormhole content-space offset from the system
+// centre.
+const WORMHOLE_CORE_PX = 7;
+const WORMHOLE_CORE_FILL = '#2a2a2e';
+const WORMHOLE_HALO_FILL = 'rgba(255,255,255,0.92)';
+const WORMHOLE_RING_ALPHA = 0.55;
+// `WormholeGenerator` bakes offsets as fractions of "minSide" (the shorter
+// viewport dimension). The renderer multiplies by this factor — see
+// `drawSystemScene` — so wormholes scale with the system view automatically.
+const WORMHOLE_OFFSET_MIN_SIDE_FACTOR = 1;
+const WORMHOLE_CONNECTION_STROKE = 'rgba(240,245,255,0.58)';
+const WORMHOLE_CONNECTION_DASH: [number, number] = [4, 4];
+
+function drawWormholeBody(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  viewScale: number,
+): void {
+  const coreR = WORMHOLE_CORE_PX / viewScale;
+  // Halo: thin white ring just outside the core. Drawn first so the dark
+  // core sits on top (cleaner edge than stroking after a fill).
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR + 1.4 / viewScale, 0, Math.PI * 2);
+  ctx.fillStyle = WORMHOLE_HALO_FILL;
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+  ctx.fillStyle = WORMHOLE_CORE_FILL;
+  ctx.fill();
+  // Inner highlight ring for a touch of depth without going full glow.
+  ctx.beginPath();
+  ctx.arc(cx, cy, coreR * 0.55, 0, Math.PI * 2);
+  ctx.strokeStyle = `rgba(255,255,255,${WORMHOLE_RING_ALPHA})`;
+  ctx.lineWidth = 0.8 / viewScale;
+  ctx.stroke();
 }
 
 // LOD blend zone for the multi-galaxy scene. Below `LOD_BLEND_START` only
@@ -1019,22 +1061,36 @@ export function drawGalaxyScene(
   const originX = vw / 2;
   const originY = vh / 2;
 
+  // Pre-compute every galaxy's canvas-space centre once. Cross-galaxy
+  // wormhole lines need both endpoints, drawn after the galaxy bodies so the
+  // dashes land on top of the (rendered first) glyphs / embedded spirals.
+  const galaxyCanvasPos = new Map<string, { x: number; y: number }>();
+  for (const galaxy of data.galaxies) {
+    const gSpreadCanvas = galaxy.spread * worldScale;
+    const h0 = hashId(galaxy.id);
+    const h1 = Math.imul(h0 ^ (h0 >>> 16), 0x45d9f3b) >>> 0;
+    const jx = h0 / 0x100000000 * 2 - 1;
+    const jy = h1 / 0x100000000 * 2 - 1;
+    const gcx = originX + galaxy.cx * worldScale + jx * 0.2 * gSpreadCanvas;
+    const gcy = originY + galaxy.cy * worldScale + jy * 0.2 * gSpreadCanvas;
+    galaxyCanvasPos.set(galaxy.id, { x: gcx, y: gcy });
+  }
+
   const hit: HitCircle[] = [];
   for (const galaxy of data.galaxies) {
     const gSpreadCanvas = galaxy.spread * worldScale;
 
-    // Derive per-galaxy position jitter and initial rotation from galaxy id.
+    // Derive per-galaxy rotation offset from galaxy id (positions are
+    // pre-computed in `galaxyCanvasPos` above so the cross-galaxy wormhole
+    // overlay can read them).
     const h0 = hashId(galaxy.id);
     const h1 = Math.imul(h0 ^ (h0 >>> 16), 0x45d9f3b) >>> 0;
     const h2 = Math.imul(h1 ^ (h1 >>> 16), 0x45d9f3b) >>> 0;
-    const jx = h0 / 0x100000000 * 2 - 1;   // ±1, used for x position jitter
-    const jy = h1 / 0x100000000 * 2 - 1;   // ±1, used for y position jitter
     const rotOff = h2 / 0x100000000 * Math.PI * 2;
 
-    // Apply ±20% of spread as a position offset so galaxies don't sit on a
-    // perfectly regular grid even after layout recentering.
-    const gcx = originX + galaxy.cx * worldScale + jx * 0.2 * gSpreadCanvas;
-    const gcy = originY + galaxy.cy * worldScale + jy * 0.2 * gSpreadCanvas;
+    const cached = galaxyCanvasPos.get(galaxy.id)!;
+    const gcx = cached.x;
+    const gcy = cached.y;
     const gRadiusCanvas = galaxy.radius * worldScale;
     const gScreenRadius = gRadiusCanvas * viewScale;
 
@@ -1075,7 +1131,74 @@ export function drawGalaxyScene(
       hit.push(...subHit);
     }
   }
+
+  // Cross-galaxy wormhole links. Walk every wormhole once; for each pair
+  // whose two endpoints sit in different galaxies, draw one dotted line
+  // between the two galaxy centres (deduplicated per galaxy pair so multiple
+  // wormhole connections between the same two galaxies render as a single
+  // line). Drawn last so it sits on top of glyphs and embedded spirals.
+  drawCrossGalaxyWormholeLines(ctx, data, galaxyCanvasPos, viewScale);
+
   return { hit };
+}
+
+/**
+ * Render dotted white lines between galaxies that share at least one
+ * wormhole connection across the galaxy boundary. Pairs deduplicated per
+ * galaxy-pair (sorted-tuple key) so multiple wormhole links between the same
+ * two galaxies render as one line.
+ */
+function drawCrossGalaxyWormholeLines(
+  ctx: CanvasRenderingContext2D,
+  data: UniverseData,
+  galaxyCanvasPos: Map<string, { x: number; y: number }>,
+  viewScale: number,
+): void {
+  // wormholeId → galaxyId, built lazily from `data.solarSystems` so this
+  // helper has no dependency on the worker-side `Universe.mapWormholes`.
+  const wormholeGalaxy = new Map<string, string>();
+  for (const sys of data.solarSystems) {
+    if (!sys.wormholes || sys.wormholes.length === 0) continue;
+    for (const w of sys.wormholes) {
+      wormholeGalaxy.set(w.id, w.galaxyId);
+    }
+  }
+
+  const drawnPairs = new Set<string>();
+  let dashApplied = false;
+  for (const sys of data.solarSystems) {
+    if (!sys.wormholes || sys.wormholes.length === 0) continue;
+    for (const w of sys.wormholes) {
+      if (!w.partnerId) continue;
+      const partnerGalaxy = wormholeGalaxy.get(w.partnerId);
+      if (!partnerGalaxy || partnerGalaxy === w.galaxyId) continue; // same galaxy → handled inside drawGalaxySpiral
+
+      const a = w.galaxyId < partnerGalaxy ? w.galaxyId : partnerGalaxy;
+      const b = w.galaxyId < partnerGalaxy ? partnerGalaxy : w.galaxyId;
+      const key = `${a}|${b}`;
+      if (drawnPairs.has(key)) continue;
+      drawnPairs.add(key);
+
+      const here = galaxyCanvasPos.get(w.galaxyId);
+      const there = galaxyCanvasPos.get(partnerGalaxy);
+      if (!here || !there) continue;
+
+      if (!dashApplied) {
+        ctx.save();
+        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+        ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
+        ctx.lineWidth = 1 / viewScale;
+        dashApplied = true;
+      }
+      ctx.beginPath();
+      ctx.moveTo(here.x, here.y);
+      ctx.lineTo(there.x, there.y);
+      ctx.stroke();
+    }
+  }
+  if (dashApplied) {
+    ctx.restore();
+  }
 }
 
 function galaxyRotationOffset(galaxyId: string): number {
@@ -1189,6 +1312,10 @@ function drawGalaxySpiral(
   }
 
   const hit: HitCircle[] = [];
+  // Map system id → rotated screen position. Reused below to draw dotted
+  // wormhole connection lines without re-running the rotation per pair.
+  // Only systems that survive the frustum cull are inserted.
+  const visibleSystemPos = new Map<string, { x: number; y: number }>();
   for (let i = 0; i < systems.length; i++) {
     const raw = rawPositions[i];
     const dx = raw.x - cx;
@@ -1209,6 +1336,7 @@ function drawGalaxySpiral(
     const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
 
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
+    visibleSystemPos.set(systems[i].id, { x: px, y: py });
 
     const dominant = systems[i].stars[0] ?? null;
     if (dominant && isExoticSubtype(dominant.subtype)) {
@@ -1222,6 +1350,62 @@ function drawGalaxySpiral(
       drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
     }
   }
+
+  // Same-galaxy wormhole connection lines. Dotted white, drawn after the
+  // system dots so the line endpoints land cleanly on top of each visible
+  // system. Pairs are deduplicated via a sorted id tuple so each connection
+  // is drawn exactly once even when both endpoints are visible.
+  const drawnPairs = new Set<string>();
+  let dashApplied = false;
+  for (const sys of systems) {
+    if (!sys.wormholes || sys.wormholes.length === 0) continue;
+    const here = visibleSystemPos.get(sys.id);
+    if (!here) continue;
+    for (const wormhole of sys.wormholes) {
+      if (!wormhole.partnerId) continue;
+      // Resolve the partner's parent system. Stored on each wormhole in
+      // `systemIdToWormhole`-style lookups — but the renderer doesn't carry
+      // a universe-wide index. Instead, we walk the galaxy's systems for
+      // an O(N · wormholes) match. N is tiny per galaxy (≤ 100 standalone
+      // systems in practice), and we already filtered to in-galaxy systems.
+      let partnerSystemId: string | null = null;
+      for (const candidate of systems) {
+        if (!candidate.wormholes) continue;
+        for (const cw of candidate.wormholes) {
+          if (cw.id === wormhole.partnerId) {
+            partnerSystemId = candidate.id;
+            break;
+          }
+        }
+        if (partnerSystemId) break;
+      }
+      if (!partnerSystemId) continue; // partner lives in another galaxy
+      const partnerPos = visibleSystemPos.get(partnerSystemId);
+      if (!partnerPos) continue; // partner system was culled
+
+      const a = wormhole.id < wormhole.partnerId ? wormhole.id : wormhole.partnerId;
+      const b = wormhole.id < wormhole.partnerId ? wormhole.partnerId : wormhole.id;
+      const key = `${a}|${b}`;
+      if (drawnPairs.has(key)) continue;
+      drawnPairs.add(key);
+
+      if (!dashApplied) {
+        ctx.save();
+        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+        ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
+        ctx.lineWidth = 1 / viewScale;
+        dashApplied = true;
+      }
+      ctx.beginPath();
+      ctx.moveTo(here.x, here.y);
+      ctx.lineTo(partnerPos.x, partnerPos.y);
+      ctx.stroke();
+    }
+  }
+  if (dashApplied) {
+    ctx.restore();
+  }
+
   return hit;
 }
 
@@ -1433,6 +1617,30 @@ export function drawSystemScene(
       ctx.stroke();
     }
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.6, 8 / viewScale), kind: 'planet', id: planet.id });
+  }
+
+  // ── 6. Draw wormholes ─────────────────────────────────────────────────────
+  //
+  // Standalone-kind systems are the only ones that ever carry wormholes; the
+  // generator gates creation behind `isStandaloneKind(kind)`. Standalone
+  // systems have no planets, so the wormholes inhabit otherwise-empty space
+  // around the central exotic body. Positions are baked at generation time as
+  // unit-vector offsets scaled by minSide so they fall at a consistent visual
+  // distance from the centre regardless of viewport size.
+  if (system.wormholes && system.wormholes.length > 0) {
+    const offsetScale = minSide * WORMHOLE_OFFSET_MIN_SIDE_FACTOR;
+    for (const wormhole of system.wormholes) {
+      const wx = cx + wormhole.offsetX * offsetScale;
+      const wy = cy + wormhole.offsetY * offsetScale;
+      drawWormholeBody(ctx, wx, wy, viewScale);
+      hit.push({
+        x: wx,
+        y: wy,
+        r: Math.max((WORMHOLE_CORE_PX + 4) / viewScale, 10 / viewScale),
+        kind: 'wormhole',
+        id: wormhole.id,
+      });
+    }
   }
 
   return { hit };

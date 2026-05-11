@@ -4,6 +4,7 @@ import type { Star } from './Star';
 import type { Planet } from './Planet';
 import type { Satellite } from './Satellite';
 import type { Galaxy } from './Galaxy';
+import type { Wormhole } from './Wormhole';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -31,10 +32,12 @@ export class Universe {
   mapPlanets: Map<string, Planet> = new Map();
   mapSatellites: Map<string, Satellite> = new Map();
   mapGalaxies: Map<string, Galaxy> = new Map();
+  mapWormholes: Map<string, Wormhole> = new Map();
   // Per-tier used-name sets for deduplication within a generation run
   usedStarNames: Set<string> = new Set();
   usedPlanetNames: Set<string> = new Set();
   usedSatelliteNames: Set<string> = new Set();
+  usedWormholeNames: Set<string> = new Set();
 
   constructor(rng: () => number, seed: string = '') {
     this.id = IdUtil.id('universe', rngHex(rng)) ?? 'universe_unknown';

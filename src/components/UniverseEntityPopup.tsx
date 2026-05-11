@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData } from '../lib/universe/types';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { StarSubtype } from '../lib/universe/SystemKind';
 import type { PopupEntity } from './UniverseCanvas';
@@ -75,6 +75,18 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     return m;
   }, [data.galaxies]);
 
+  // Universe-wide wormhole lookup: id → { wormhole, parent system }. The
+  // wormhole popup uses this to resolve its partner (anywhere in the
+  // universe) without re-scanning every system per render.
+  const wormholeById = useMemo(() => {
+    const m = new Map<string, { wormhole: WormholeData; system: SolarSystemData }>();
+    for (const sys of data.solarSystems) {
+      if (!sys.wormholes) continue;
+      for (const w of sys.wormholes) m.set(w.id, { wormhole: w, system: sys });
+    }
+    return m;
+  }, [data.solarSystems]);
+
   const galaxy: GalaxyData | null =
     entity.kind === 'galaxy'
       ? data.galaxies.find(g => g.id === entity.galaxyId) ?? null
@@ -95,6 +107,10 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'satellite' && planet
       ? planet.satellites.find(s => s.id === entity.satelliteId) ?? null
       : null;
+  const wormhole: WormholeData | null =
+    entity.kind === 'wormhole' && system
+      ? system.wormholes?.find(w => w.id === entity.wormholeId) ?? null
+      : null;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -109,12 +125,21 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'system' ? '↑ Universe' :
     entity.kind === 'star' ? '↑ System' :
     entity.kind === 'planet' ? '↑ System' :
+    entity.kind === 'wormhole' ? '↑ System' :
     '↑ Planet';
 
+  // For wormholes, the "down" button jumps to the partner's parent system
+  // (the wormhole's only navigation affordance besides closing). Only
+  // available when the wormhole actually has a partner.
+  const wormholePartner =
+    entity.kind === 'wormhole' && wormhole?.partnerId
+      ? wormholeById.get(wormhole.partnerId) ?? null
+      : null;
   const downLabel =
     entity.kind === 'galaxy' ? '↓ Enter Galaxy' :
     entity.kind === 'system' ? '↓ Enter System' :
     entity.kind === 'planet' ? '↓ Enter Planet' :
+    entity.kind === 'wormhole' && wormholePartner ? '↳ Jump to Connected System' :
     null;
 
   // Every planet and satellite gets a "Generate World" button. Life-bearing
@@ -146,10 +171,12 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     entity.kind === 'star' && star ? star.humanName :
     entity.kind === 'planet' && planet ? planet.humanName :
     entity.kind === 'satellite' && satellite ? satellite.humanName :
+    entity.kind === 'wormhole' && wormhole ? wormhole.scientificName :
     entity.kind === 'galaxy' ? 'Galaxy' :
     entity.kind === 'system' ? 'Solar System' :
     entity.kind === 'star' ? 'Star' :
     entity.kind === 'planet' ? 'Planet' :
+    entity.kind === 'wormhole' ? 'Wormhole' :
     'Satellite';
 
   const content = (
@@ -189,6 +216,22 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
           )}
           {entity.kind === 'satellite' && satellite && planet && system && (
             <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} />
+          )}
+          {entity.kind === 'wormhole' && wormhole && system && (
+            <WormholeDetails
+              wormhole={wormhole}
+              parentSystem={system}
+              parentGalaxy={galaxyBySystem.get(system.id) ?? null}
+              partner={wormholePartner}
+              partnerGalaxy={
+                wormholePartner ? galaxyBySystem.get(wormholePartner.system.id) ?? null : null
+              }
+              crossGalaxy={
+                wormholePartner
+                  ? wormholePartner.wormhole.galaxyId !== wormhole.galaxyId
+                  : false
+              }
+            />
           )}
         </div>
 
@@ -421,6 +464,71 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
         ))}
         {planet.satellites.length === 0 && <Item><span style={s.dim}>none</span></Item>}
       </CollapsibleSection>
+    </>
+  );
+}
+
+function WormholeDetails({
+  wormhole, parentSystem, parentGalaxy, partner, partnerGalaxy, crossGalaxy,
+}: {
+  wormhole: WormholeData;
+  parentSystem: SolarSystemData;
+  parentGalaxy: GalaxyData | null;
+  partner: { wormhole: WormholeData; system: SolarSystemData } | null;
+  partnerGalaxy: GalaxyData | null;
+  crossGalaxy: boolean;
+}) {
+  const parentInfo = SYSTEM_KIND_INFO[parentSystem.kind];
+  return (
+    <>
+      <div style={s.nameRow}>
+        <span style={s.humanName}>{wormhole.scientificName}</span>
+      </div>
+      <Row label="Type"><span style={s.dim}>Wormhole — fixed traversable shortcut</span></Row>
+
+      <Section title="Parent System">
+        <Item>
+          <EntityLabel humanName={parentSystem.humanName} scientificName={parentSystem.scientificName} />
+          <span style={s.dim}> — {parentInfo.displayName}</span>
+        </Item>
+      </Section>
+
+      {parentGalaxy && (
+        <Section title="Parent Galaxy">
+          <Item>
+            <EntityLabel humanName={parentGalaxy.humanName} scientificName={parentGalaxy.scientificName} />
+          </Item>
+        </Section>
+      )}
+
+      <Section title="Connection">
+        {partner ? (
+          <>
+            <Item>
+              <span style={s.dim}>Connects to </span>
+              <span style={s.entityScientificName}>{partner.wormhole.scientificName}</span>
+            </Item>
+            <Item>
+              <span style={s.dim}>In system </span>
+              <EntityLabel
+                humanName={partner.system.humanName}
+                scientificName={partner.system.scientificName}
+              />
+            </Item>
+            {partnerGalaxy && (
+              <Item>
+                <span style={s.dim}>{crossGalaxy ? 'Cross-galaxy bridge to ' : 'Within galaxy '}</span>
+                <EntityLabel
+                  humanName={partnerGalaxy.humanName}
+                  scientificName={partnerGalaxy.scientificName}
+                />
+              </Item>
+            )}
+          </>
+        ) : (
+          <Item><span style={s.dim}>Unconnected — no partner wormhole.</span></Item>
+        )}
+      </Section>
     </>
   );
 }
