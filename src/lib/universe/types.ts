@@ -60,8 +60,8 @@ export interface SolarSystemData {
   planets: PlanetData[];
   /**
    * Wormholes anchored to this system. Only ever non-empty when
-   * `isStandaloneKind(kind) === true`: 20% of standalone systems carry one
-   * wormhole, 10% carry two, 70% carry none. Each wormhole pairs reciprocally
+   * `isStandaloneKind(kind) === true`: 40% of standalone systems carry one
+   * wormhole, 10% carry two, 50% carry none. Each wormhole pairs reciprocally
    * with another in the universe (90% same-galaxy, 10% cross-galaxy when a
    * candidate exists, otherwise falls back to the other bucket).
    */

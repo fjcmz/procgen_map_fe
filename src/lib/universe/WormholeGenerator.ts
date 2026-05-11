@@ -19,15 +19,14 @@ const WORMHOLE_RADIUS_BASE = 0.18; // fraction of minSide — set by renderer
 const WORMHOLE_RADIUS_JITTER = 0.04;
 
 /**
- * 20% chance of one wormhole, 10% of two, 70% of none. Sequence used: first
- * draw decides whether any wormhole is present, second draw promotes to two.
- * Implemented in {@link rollWormholeCount} so the contract is reusable / unit-
- * testable without instantiating the generator.
+ * 40% chance of one wormhole, 10% of two, 50% of none — i.e. 50% of standalone
+ * systems carry at least one wormhole. The "two" bucket stays at 10%; the
+ * "one" bucket absorbs the extra probability.
  */
 export function rollWormholeCount(rng: () => number): number {
   const r = rng();
   if (r < 0.10) return 2;
-  if (r < 0.30) return 1;
+  if (r < 0.50) return 1;
   return 0;
 }
 
