@@ -185,37 +185,29 @@ export function UniverseScreen({
     return null;
   }, [data]);
 
-  // Navigate to the entity's parent scene and close the popup.
+  // Navigate one scene level up from the current view and close the popup.
   //
   // Hierarchy for navigation purposes:
-  //   Universe → System → Planet (→ Satellite via popup only)
-  // Galaxy view is treated as a side-branch lookup of the universe, NOT a
-  // hierarchy level between universe and system. Going "up" from a system
-  // therefore jumps all the way out to the universe — landing back on the
-  // galaxy view would be a noop (it's the scene the user just clicked from)
-  // and offers no progress out. The same rule applies to Gen-tab back():
-  // see UniverseCanvas.back().
+  //   Universe → System → Planet
+  // Galaxy view is a side-branch lookup of the universe, NOT a hierarchy
+  // level between universe and system. So planet → system, system → universe,
+  // galaxy view (focused) → universe, universe → no-op.
+  //
+  // The popup decides WHETHER to show the Up button (only when this scene
+  // parent equals the selected entity's parent scene). The action below is
+  // always "scene-level back" regardless of the entity kind.
   const handlePopupNavigateUp = useCallback(() => {
     if (!popupEntity) return;
     setPopupEntity(null);
-    if (popupEntity.kind === 'galaxy') {
-      // ↑ Universe — clear focus to the multi-galaxy overview.
+    const s = sceneState;
+    if (s.scene === 'planet' && s.systemId) {
+      canvasRef.current?.navigateTo('system', s.systemId);
+    } else if (s.scene === 'system') {
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
-    } else if (popupEntity.kind === 'system') {
-      // ↑ Universe — system parent is the universe; galaxy view is skipped.
+    } else if (s.scene === 'galaxy' && s.galaxyId) {
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
-    } else if (popupEntity.kind === 'star') {
-      // ↑ System — star is inside the system scene; close popup, stay there.
-      canvasRef.current?.navigateTo('system', popupEntity.systemId);
-    } else if (popupEntity.kind === 'planet') {
-      canvasRef.current?.navigateTo('system', popupEntity.systemId);
-    } else if (popupEntity.kind === 'satellite') {
-      canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
-    } else if (popupEntity.kind === 'wormhole') {
-      // Up from a wormhole returns to its parent system.
-      canvasRef.current?.navigateTo('system', popupEntity.systemId);
     }
-  }, [popupEntity]);
+  }, [popupEntity, sceneState]);
 
   // Navigate into the entity's child scene and close the popup.
   const handlePopupNavigateDown = useCallback(() => {
@@ -315,6 +307,7 @@ export function UniverseScreen({
         <UniverseEntityPopup
           entity={popupEntity}
           data={data}
+          sceneState={sceneState}
           onClose={handlePopupClose}
           onNavigateUp={handlePopupNavigateUp}
           onNavigateDown={
