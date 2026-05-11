@@ -11,6 +11,8 @@ import type { SatelliteSubtype } from './Satellite';
 import { computeLayoutExtent } from './galaxyLayout';
 import { buildOrGetSectorMesh, drawGalaxySectors } from './galaxySectors';
 import type { SectorData } from './types';
+import type { StarSubtype } from './SystemKind';
+import { STAR_SUBTYPE_HUE } from './SystemKindInfo';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -383,15 +385,301 @@ export function drawBackground(
 interface StarPalette { core: string; glowInner: string; glowOuter: string }
 
 function starFill(s: StarData): StarPalette {
+  // Exotic subtypes use a declarative palette so the renderer is consistent
+  // with popup colours. Antimatter override stays in effect — antimatter
+  // anywhere should read pink/purple regardless of subtype.
   if (s.composition === 'ANTIMATTER') {
     return { core: '#f4d8ff', glowInner: 'rgba(220,140,255,0.8)', glowOuter: 'rgba(120,40,180,0)' };
   }
-  // brightness 100..1000 → tint warmer at the bright end
+  const subHue = STAR_SUBTYPE_HUE[s.subtype];
+  if (subHue) return subHue;
+  // Fallback (main_sequence and any future unmapped subtype): brightness tint.
   const t = Math.max(0, Math.min(1, (s.brightness - 100) / 900));
   const r = Math.round(255 * (0.85 + 0.15 * t));
   const g = Math.round(220 * (0.7 + 0.3 * (1 - Math.abs(t - 0.5) * 2)));
   const b = Math.round(255 * (1 - 0.7 * t));
   return { core: `rgb(${r},${g},${b})`, glowInner: `rgba(${r},${g},${b},0.8)`, glowOuter: `rgba(${r},${g},${b},0)` };
+}
+
+/**
+ * Exotic subtypes whose visuals can't be expressed as a circle + glow gradient.
+ * Drawn via dedicated helpers that bypass the offscreen glow cache.
+ */
+const EXOTIC_SUBTYPES: ReadonlySet<StarSubtype> = new Set<StarSubtype>([
+  'stellar_black_hole',
+  'supermassive_black_hole',
+  'pulsar',
+  'white_hole',
+  'magnetar',
+  'quasar',
+  'quark_star',
+  'boson_star',
+]);
+
+function isExoticSubtype(t: StarSubtype): boolean {
+  return EXOTIC_SUBTYPES.has(t);
+}
+
+/**
+ * Stable rotation angle [0, 2π) derived from a body id — used for pulsar
+ * beam orientation and other deterministic per-body angles.
+ */
+function rotationFromId(id: string, salt: number = 0): number {
+  let h = 0x1f83d9ab ^ salt;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return (h >>> 0) / 0x100000000 * Math.PI * 2;
+}
+
+function drawAccretionRing(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  inner: string, outer: string,
+  thickness: number = 0.55,
+): void {
+  const outerR = r * 2.6;
+  const grd = ctx.createRadialGradient(cx, cy, r * 0.9, cx, cy, outerR);
+  grd.addColorStop(0, 'rgba(0,0,0,0)');
+  grd.addColorStop(0.35, inner);
+  grd.addColorStop(0.7, outer);
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, thickness);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(0, 0, outerR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawBlackHole(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  supermassive: boolean,
+): void {
+  const inner = supermassive ? 'rgba(255,180,80,0.85)' : 'rgba(255,140,40,0.75)';
+  const outer = supermassive ? 'rgba(160,40,0,0.30)' : 'rgba(120,30,0,0.20)';
+  drawAccretionRing(ctx, cx, cy, r, inner, outer, supermassive ? 0.40 : 0.55);
+  // Photon ring + dark core.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 1.10, 0, Math.PI * 2);
+  ctx.strokeStyle = supermassive ? 'rgba(255,210,140,0.85)' : 'rgba(255,180,80,0.7)';
+  ctx.lineWidth = Math.max(0.6, r * 0.10);
+  ctx.stroke();
+  drawCircle(ctx, cx, cy, r * 0.85, '#04020a');
+}
+
+function drawNeutronStar(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  palette: StarPalette,
+): void {
+  // Sharp blue-white pinpoint with a tight inner halo.
+  const haloR = r * 2.0;
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+  grd.addColorStop(0, palette.glowInner);
+  grd.addColorStop(1, palette.glowOuter);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+  ctx.fill();
+  drawCircle(ctx, cx, cy, Math.max(0.8, r * 0.6), palette.core);
+}
+
+function drawPulsar(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  starId: string,
+  palette: StarPalette,
+): void {
+  // Twin beams along a stable axis derived from the star id.
+  const angle = rotationFromId(starId);
+  const beamLen = r * 5.5;
+  const beamWidth = r * 0.9;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  const grd = ctx.createLinearGradient(0, 0, beamLen, 0);
+  grd.addColorStop(0, palette.glowInner);
+  grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.moveTo(0, -beamWidth);
+  ctx.lineTo(beamLen, -beamWidth * 0.15);
+  ctx.lineTo(beamLen, beamWidth * 0.15);
+  ctx.lineTo(0, beamWidth);
+  ctx.closePath();
+  ctx.fill();
+  ctx.rotate(Math.PI);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.moveTo(0, -beamWidth);
+  ctx.lineTo(beamLen, -beamWidth * 0.15);
+  ctx.lineTo(beamLen, beamWidth * 0.15);
+  ctx.lineTo(0, beamWidth);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  drawNeutronStar(ctx, cx, cy, r, palette);
+}
+
+function drawWhiteHole(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  palette: StarPalette,
+): void {
+  const haloR = r * 3.2;
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+  grd.addColorStop(0, palette.glowInner);
+  grd.addColorStop(0.5, 'rgba(255,240,200,0.5)');
+  grd.addColorStop(1, palette.glowOuter);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+  ctx.fill();
+  // Radial burst rays.
+  ctx.save();
+  ctx.translate(cx, cy);
+  const rays = 12;
+  for (let i = 0; i < rays; i++) {
+    ctx.rotate((Math.PI * 2) / rays);
+    const linGrd = ctx.createLinearGradient(0, 0, haloR * 0.95, 0);
+    linGrd.addColorStop(0, 'rgba(255,255,240,0.9)');
+    linGrd.addColorStop(1, 'rgba(255,220,160,0)');
+    ctx.fillStyle = linGrd;
+    ctx.beginPath();
+    ctx.moveTo(0, -r * 0.15);
+    ctx.lineTo(haloR * 0.95, -r * 0.04);
+    ctx.lineTo(haloR * 0.95, r * 0.04);
+    ctx.lineTo(0, r * 0.15);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+  drawCircle(ctx, cx, cy, r * 0.85, palette.core);
+}
+
+function drawMagnetar(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  starId: string,
+  palette: StarPalette,
+): void {
+  // Concentric magnetic field rings on a tilted axis.
+  const tilt = rotationFromId(starId, 0x91);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(tilt);
+  for (let i = 1; i <= 3; i++) {
+    const rr = r * (1.5 + i * 0.9);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rr, rr * 0.35, 0, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(150,200,255,${0.5 / i})`;
+    ctx.lineWidth = Math.max(0.5, r * 0.18 / i);
+    ctx.stroke();
+  }
+  ctx.restore();
+  drawNeutronStar(ctx, cx, cy, r, palette);
+}
+
+function drawQuasar(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  starId: string,
+  palette: StarPalette,
+): void {
+  drawAccretionRing(ctx, cx, cy, r, 'rgba(255,200,100,0.9)', 'rgba(180,60,20,0.35)', 0.32);
+  // Central jet — vertical with a slight tilt per id.
+  const tilt = rotationFromId(starId, 0xa5) * 0.3 - Math.PI / 2;
+  const jetLen = r * 6;
+  const jetW = r * 0.4;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(tilt);
+  for (const dir of [1, -1]) {
+    const grd = ctx.createLinearGradient(0, 0, 0, dir * jetLen);
+    grd.addColorStop(0, palette.glowInner);
+    grd.addColorStop(1, 'rgba(255,200,100,0)');
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.moveTo(-jetW, 0);
+    ctx.lineTo(jetW, 0);
+    ctx.lineTo(jetW * 0.15, dir * jetLen);
+    ctx.lineTo(-jetW * 0.15, dir * jetLen);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+  drawCircle(ctx, cx, cy, r * 0.9, palette.core);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 1.1, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(255,230,140,0.8)';
+  ctx.lineWidth = Math.max(0.6, r * 0.12);
+  ctx.stroke();
+}
+
+function drawCompactGlow(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, r: number,
+  palette: StarPalette,
+): void {
+  const haloR = r * 2.4;
+  const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+  grd.addColorStop(0, palette.glowInner);
+  grd.addColorStop(1, palette.glowOuter);
+  ctx.fillStyle = grd;
+  ctx.beginPath();
+  ctx.arc(cx, cy, haloR, 0, Math.PI * 2);
+  ctx.fill();
+  drawCircle(ctx, cx, cy, r, palette.core);
+}
+
+/**
+ * Branch a star draw on subtype. Falls back to the standard glow-canvas +
+ * solid core for ordinary star subtypes (main sequence, dwarfs, giants).
+ */
+function drawStarBody(
+  ctx: CanvasRenderingContext2D,
+  cx: number, cy: number, starPx: number,
+  star: StarData,
+): void {
+  const palette = starFill(star);
+  switch (star.subtype) {
+    case 'stellar_black_hole':
+      drawBlackHole(ctx, cx, cy, starPx, false);
+      return;
+    case 'supermassive_black_hole':
+      drawBlackHole(ctx, cx, cy, starPx, true);
+      return;
+    case 'pulsar':
+      drawPulsar(ctx, cx, cy, starPx, star.id, palette);
+      return;
+    case 'neutron_star':
+      drawNeutronStar(ctx, cx, cy, starPx, palette);
+      return;
+    case 'white_hole':
+      drawWhiteHole(ctx, cx, cy, starPx, palette);
+      return;
+    case 'magnetar':
+      drawMagnetar(ctx, cx, cy, starPx, star.id, palette);
+      return;
+    case 'quasar':
+      drawQuasar(ctx, cx, cy, starPx, star.id, palette);
+      return;
+    case 'quark_star':
+    case 'boson_star':
+      drawCompactGlow(ctx, cx, cy, starPx, palette);
+      return;
+    default: {
+      // Standard star: cached glow + solid core.
+      const outerR = starPx * GLOW_OUTER_MULT;
+      ctx.drawImage(getOrBuildGlowCanvas(palette), cx - outerR, cy - outerR, outerR * 2, outerR * 2);
+      drawCircle(ctx, cx, cy, starPx, palette.core);
+    }
+  }
 }
 
 // ── Glow canvas cache ─────────────────────────────────────────────────────
@@ -923,10 +1211,16 @@ function drawGalaxySpiral(
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
 
     const dominant = systems[i].stars[0] ?? null;
-    const palette = dominant ? starFill(dominant) : { core: '#fff', glowInner: 'rgba(255,255,255,0.8)', glowOuter: 'rgba(255,255,255,0)' };
-    const outerR = sizePx * GLOW_OUTER_MULT;
-    ctx.drawImage(getOrBuildGlowCanvas(palette), px - outerR, py - outerR, outerR * 2, outerR * 2);
-    drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
+    if (dominant && isExoticSubtype(dominant.subtype)) {
+      // Exotic systems use their dedicated visual at galaxy zoom too —
+      // scaled down so they blend into the spiral but stay recognisable.
+      drawStarBody(ctx, px, py, sizePx * 0.6, dominant);
+    } else {
+      const palette = dominant ? starFill(dominant) : { core: '#fff', glowInner: 'rgba(255,255,255,0.8)', glowOuter: 'rgba(255,255,255,0)' };
+      const outerR = sizePx * GLOW_OUTER_MULT;
+      ctx.drawImage(getOrBuildGlowCanvas(palette), px - outerR, py - outerR, outerR * 2, outerR * 2);
+      drawCircle(ctx, px, py, sizePx * 0.6, palette.core);
+    }
   }
   return hit;
 }
@@ -1094,19 +1388,13 @@ export function drawSystemScene(
 
   if (starLayouts.length === 1) {
     const { star, px: starPx } = starLayouts[0];
-    const palette = starFill(star);
-    const outerR = starPx * GLOW_OUTER_MULT;
-    ctx.drawImage(getOrBuildGlowCanvas(palette), cx - outerR, cy - outerR, outerR * 2, outerR * 2);
-    drawCircle(ctx, cx, cy, starPx, palette.core);
+    drawStarBody(ctx, cx, cy, starPx, star);
   } else {
     for (const { star, px: starPx, ringR, omega, phase } of starLayouts) {
       const angle = phase + omega * timeSec;
       const sx = cx + Math.cos(angle) * ringR;
       const sy = cy + Math.sin(angle) * ringR;
-      const palette = starFill(star);
-      const outerR = starPx * GLOW_OUTER_MULT;
-      ctx.drawImage(getOrBuildGlowCanvas(palette), sx - outerR, sy - outerR, outerR * 2, outerR * 2);
-      drawCircle(ctx, sx, sy, starPx, palette.core);
+      drawStarBody(ctx, sx, sy, starPx, star);
     }
   }
 

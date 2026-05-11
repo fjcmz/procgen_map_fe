@@ -1,7 +1,27 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData } from '../lib/universe/types';
+import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
+import type { StarSubtype } from '../lib/universe/SystemKind';
 import type { PopupEntity } from './UniverseCanvas';
+
+const STAR_SUBTYPE_LABEL: Record<StarSubtype, string> = {
+  main_sequence: 'Main-sequence star',
+  red_dwarf: 'Red dwarf',
+  blue_giant: 'Blue giant',
+  red_giant: 'Red giant',
+  white_dwarf: 'White dwarf',
+  brown_dwarf: 'Brown dwarf',
+  neutron_star: 'Neutron star',
+  pulsar: 'Pulsar',
+  stellar_black_hole: 'Stellar black hole',
+  supermassive_black_hole: 'Supermassive black hole',
+  white_hole: 'White hole',
+  magnetar: 'Magnetar',
+  quark_star: 'Quark star',
+  boson_star: 'Boson star',
+  quasar: 'Quasar',
+};
 
 interface Props {
   entity: PopupEntity;
@@ -276,10 +296,18 @@ function SystemDetails({
   parentGalaxy: GalaxyData | null;
   parentSector: SectorData | null;
 }) {
+  const info = SYSTEM_KIND_INFO[system.kind];
+  const standalone = isStandaloneKind(system.kind);
   return (
     <>
       <NameRow humanName={system.humanName} scientificName={system.scientificName} />
-      <Row label="Type">{system.composition.toLowerCase()}</Row>
+      <Row label="Kind">
+        <span style={{ ...s.kindBadge, background: info.hue.core, color: kindBadgeText(info.hue.core) }}>
+          {info.displayName}
+        </span>
+      </Row>
+      <Row label="About"><span style={s.dim}>{info.description}</span></Row>
+      <Row label="Composition">{system.composition.toLowerCase()}</Row>
       {parentSector && (
         <Row label="Sector">
           <span style={s.entityScientificName}>{parentSector.scientificName}</span>
@@ -300,33 +328,55 @@ function SystemDetails({
         {system.stars.map(star => (
           <Item key={star.id}>
             <EntityLabel humanName={star.humanName} scientificName={star.scientificName} />
-            <span style={s.dim}> — {star.composition.toLowerCase()}, r={star.radius.toFixed(1)}, brightness={star.brightness.toFixed(0)}</span>
+            <span style={s.dim}> — {STAR_SUBTYPE_LABEL[star.subtype]}, {star.composition.toLowerCase()}, r={star.radius.toFixed(1)}</span>
           </Item>
         ))}
       </CollapsibleSection>
 
-      <CollapsibleSection title="Planets" count={system.planets.length}>
-        {system.planets.map(planet => (
-          <Item key={planet.id}>
-            <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
-            <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
-            {planet.life && <span style={s.life}> ★life</span>}
-            {planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
-            {planet.satellites.length > 0 && (
-              <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
-            )}
+      {standalone ? (
+        <Section title="Planetary System">
+          <Item>
+            <span style={s.dim}>
+              No planetary bodies — this {info.displayName.toLowerCase()} dominates its system.
+            </span>
           </Item>
-        ))}
-        {system.planets.length === 0 && <Item><span style={s.dim}>none</span></Item>}
-      </CollapsibleSection>
+        </Section>
+      ) : (
+        <CollapsibleSection title="Planets" count={system.planets.length}>
+          {system.planets.map(planet => (
+            <Item key={planet.id}>
+              <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
+              <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
+              {planet.life && <span style={s.life}> ★life</span>}
+              {planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
+              {planet.satellites.length > 0 && (
+                <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
+              )}
+            </Item>
+          ))}
+          {system.planets.length === 0 && <Item><span style={s.dim}>none</span></Item>}
+        </CollapsibleSection>
+      )}
     </>
   );
 }
 
+/** Pick a readable text colour for a kind badge based on background luminance. */
+function kindBadgeText(bgHex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(bgHex);
+  if (!m) return '#0a0820';
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.55 ? '#0a0820' : '#f4f8ff';
+}
+
 function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: SolarSystemData }) {
+  const parentInfo = SYSTEM_KIND_INFO[parentSystem.kind];
   return (
     <>
       <NameRow humanName={star.humanName} scientificName={star.scientificName} />
+      <Row label="Type">{STAR_SUBTYPE_LABEL[star.subtype]}</Row>
       <Row label="Composition">{star.composition.toLowerCase()}</Row>
       <Row label="Radius">{star.radius.toFixed(2)}</Row>
       <Row label="Brightness">{star.brightness.toFixed(0)}</Row>
@@ -334,7 +384,7 @@ function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: Sol
       <Section title="Parent System">
         <Item>
           <EntityLabel humanName={parentSystem.humanName} scientificName={parentSystem.scientificName} />
-          <span style={s.dim}> ({parentSystem.composition.toLowerCase()}, {parentSystem.stars.length} star{parentSystem.stars.length !== 1 ? 's' : ''})</span>
+          <span style={s.dim}> — {parentInfo.displayName}, {parentSystem.stars.length} star{parentSystem.stars.length !== 1 ? 's' : ''}</span>
         </Item>
       </Section>
     </>
@@ -683,5 +733,13 @@ const s: Record<string, React.CSSProperties> = {
     border: '1px solid #5f8aa8',
     color: '#e8f0ff',
     fontWeight: 'bold',
+  },
+  kindBadge: {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: 10,
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 0.3,
   },
 };

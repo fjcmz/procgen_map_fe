@@ -11,6 +11,7 @@ import type {
 import type { StarComposition } from '../lib/universe/Star';
 import type { PlanetComposition, PlanetBiome } from '../lib/universe/Planet';
 import type { SatelliteComposition } from '../lib/universe/Satellite';
+import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { PopupEntity } from './UniverseCanvas';
 
 interface UniverseTreeTabProps {
@@ -99,7 +100,7 @@ function planetPasses(planet: PlanetData, f: Filters): boolean {
 
 function systemPasses(system: SolarSystemData, f: Filters): boolean {
   if (system.stars.some(s => starMatches(s, f))) return true;
-  if (system.planets.some(p => planetPasses(p, f))) return true;
+  if (!isStandaloneKind(system.kind) && system.planets.some(p => planetPasses(p, f))) return true;
   return false;
 }
 
@@ -367,10 +368,14 @@ function SystemNode({
   const key = `sys:${system.id}`;
   const isOpen = expanded.has(key);
   const visibleStars = system.stars.filter(st => starMatches(st, filters));
-  const visiblePlanets = system.planets.filter(p => planetPasses(p, filters));
+  const standalone = isStandaloneKind(system.kind);
+  const visiblePlanets = standalone ? [] : system.planets.filter(p => planetPasses(p, filters));
   const childCount = visibleStars.length + visiblePlanets.length;
   const starCountLabel = formatCount(visibleStars.length, system.stars.length, 'star');
-  const planetCountLabel = formatCount(visiblePlanets.length, system.planets.length, 'planet');
+  const planetCountLabel = standalone
+    ? 'no planets'
+    : formatCount(visiblePlanets.length, system.planets.length, 'planet');
+  const info = SYSTEM_KIND_INFO[system.kind];
 
   return (
     <div style={s.node}>
@@ -384,8 +389,11 @@ function SystemNode({
           <span style={s.icon}>●</span>
           <span style={s.name}>{system.humanName}</span>
           <span style={s.sci}> ({system.scientificName})</span>
+          <span style={{ ...s.kindBadge, background: info.hue.core, color: kindBadgeText(info.hue.core) }}>
+            {info.displayName}
+          </span>
           <span style={s.dim}>
-            {' '}— {system.composition.toLowerCase()}, {starCountLabel}, {planetCountLabel}
+            {' '}— {starCountLabel}, {planetCountLabel}
           </span>
         </button>
       </div>
@@ -411,12 +419,23 @@ function SystemNode({
             />
           ))}
           {childCount === 0 && (
-            <div style={s.emptyChild}>no matching children</div>
+            <div style={s.emptyChild}>
+              {standalone ? 'standalone body — no planets' : 'no matching children'}
+            </div>
           )}
         </div>
       )}
     </div>
   );
+}
+
+function kindBadgeText(bgHex: string): string {
+  const m = /^#([0-9a-f]{6})$/i.exec(bgHex);
+  if (!m) return '#0a0820';
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.55 ? '#0a0820' : '#f4f8ff';
 }
 
 function StarNode({
@@ -777,5 +796,15 @@ const s: Record<string, React.CSSProperties> = {
     color: '#c8a04a',
     fontStyle: 'italic',
     fontSize: 11,
+  },
+  kindBadge: {
+    display: 'inline-block',
+    padding: '0 6px',
+    marginLeft: 6,
+    borderRadius: 8,
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 0.2,
+    lineHeight: '14px',
   },
 };

@@ -1,6 +1,7 @@
 import { IdUtil } from '../history/IdUtil';
 import type { Star } from './Star';
 import type { Planet } from './Planet';
+import type { SystemKind } from './SystemKind';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -15,6 +16,8 @@ export class SolarSystem {
   humanName: string = '';
   scientificName: string = '';
   composition: SolarSystemComposition = 'ROCK';
+  /** Taxonomic kind — drives star count, planet gating, and renderer style. */
+  kind: SystemKind = 'main_sequence';
   stars: Star[] = [];
   planets: Planet[] = [];
   sectorId: string = '';

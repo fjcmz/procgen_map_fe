@@ -2,6 +2,7 @@ import type { StarComposition } from './Star';
 import type { PlanetComposition, PlanetSubtype, PlanetBiome } from './Planet';
 import type { SatelliteComposition, SatelliteSubtype } from './Satellite';
 import type { SolarSystemComposition } from './SolarSystem';
+import type { SystemKind, StarSubtype } from './SystemKind';
 
 /**
  * Plain, structured-clone-safe shapes that cross the worker boundary.
@@ -44,6 +45,7 @@ export interface StarData {
   radius: number;
   brightness: number;
   composition: StarComposition;
+  subtype: StarSubtype;
 }
 
 export interface SolarSystemData {
@@ -51,7 +53,10 @@ export interface SolarSystemData {
   humanName: string;
   scientificName: string;
   composition: SolarSystemComposition;
+  /** Taxonomic kind — see {@link SystemKind} / `SYSTEM_KIND_INFO`. */
+  kind: SystemKind;
   stars: StarData[];
+  /** Empty for standalone kinds (e.g. supermassive_black_hole). */
   planets: PlanetData[];
   sectorId: string;
 }
