@@ -122,7 +122,7 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
   const grouped = data.galaxies.length > 1;
   const upLabel =
     entity.kind === 'galaxy' ? '↑ Universe' :
-    entity.kind === 'system' ? '↑ Universe' :
+    entity.kind === 'system' ? (grouped ? '↑ Galaxy' : '↑ Universe') :
     entity.kind === 'star' ? '↑ System' :
     entity.kind === 'planet' ? '↑ System' :
     entity.kind === 'wormhole' ? '↑ System' :

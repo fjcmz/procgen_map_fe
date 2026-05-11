@@ -49,6 +49,13 @@ const PLANET_MIN_PX = 1;
 const PLANET_MAX_PX = 6;
 const STAR_MIN_PX = 5;
 const STAR_MAX_PX = 16;
+
+// Absolute screen-pixel cap for the outermost geometry of an exotic standalone
+// body at galaxy view. The exotic draw helpers (drawQuasar's jet, drawWhiteHole's
+// halo, drawPulsar's beams, …) extend the input radius by up to 6×, so without
+// a cap a single quasar can dwarf the entire arm. We clamp the input r per
+// subtype so the drawn extent never exceeds STANDALONE_CAP_PX screen pixels.
+const STANDALONE_CAP_PX = 11;
 // Absolute generation bounds for star radius (StarGenerator: [400, 900]).
 // Used for size mapping so visual disk size is proportional to actual radius
 // regardless of which other stars share the system.
@@ -680,6 +687,25 @@ function drawCompactGlow(
 }
 
 /**
+ * Maximum outer-extent multiplier the exotic draw helpers apply to their
+ * input `r`. Mirrors the actual constants in drawBlackHole / drawNeutronStar /
+ * drawPulsar / drawWhiteHole / drawMagnetar / drawQuasar / drawCompactGlow.
+ * Used at galaxy-view call sites to clamp `r` so the rendered extent never
+ * exceeds `STANDALONE_CAP_PX` screen pixels.
+ */
+const EXOTIC_MAX_EXTENT_MULT: Partial<Record<StarSubtype, number>> = {
+  stellar_black_hole: 1.2,        // photon ring at r * 1.10
+  supermassive_black_hole: 1.2,
+  pulsar: 5.5,                    // beam length r * 5.5
+  neutron_star: 2.0,              // halo r * 2.0
+  white_hole: 3.2,                // halo r * 3.2 + rays at haloR * 0.95
+  magnetar: 4.2,                  // outer ring r * (1.5 + 3 * 0.9)
+  quasar: 6.0,                    // jet length r * 6
+  quark_star: 2.4,                // compact glow halo r * 2.4
+  boson_star: 2.4,
+};
+
+/**
  * Branch a star draw on subtype. Falls back to the standard glow-canvas +
  * solid core for ordinary star subtypes (main sequence, dwarfs, giants).
  */
@@ -1037,12 +1063,14 @@ export function drawGalaxyScene(
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
       const rotOff = galaxyRotationOffset(focus.id);
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors) };
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors, 'galaxy') };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
 
   // Single-galaxy legacy path: byte-identical to pre-grouping rendering.
+  // A single-galaxy universe IS conceptually the galaxy view — sectors and
+  // intra-galaxy wormholes stay visible.
   if (data.galaxies.length <= 1) {
     const cx = vw / 2;
     const cy = vh / 2;
@@ -1051,7 +1079,7 @@ export function drawGalaxyScene(
     const singleShape = data.galaxies[0]?.shape ?? 'spiral';
     const singleId = data.galaxies[0]?.id ?? '';
     const singleSectors = data.galaxies[0]?.sectors ?? [];
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors) };
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors, 'galaxy') };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -1126,7 +1154,7 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id, galaxy.sectors);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id, galaxy.sectors, 'universe');
       ctx.restore();
       hit.push(...subHit);
     }
@@ -1185,7 +1213,11 @@ function drawCrossGalaxyWormholeLines(
 
       if (!dashApplied) {
         ctx.save();
-        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+        // Dash pattern scaled by 1/viewScale so dash spacing stays constant
+        // in screen pixels at every zoom (matches the line width below).
+        const dashUnit = WORMHOLE_CONNECTION_DASH[0] / viewScale;
+        ctx.setLineDash([dashUnit, dashUnit]);
+        ctx.lineDashOffset = 0;
         ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
         ctx.lineWidth = 1 / viewScale;
         dashApplied = true;
@@ -1254,6 +1286,18 @@ function getOrBuildLayout(
  * galaxy's shape. Extracted from `drawGalaxyScene` so it can be reused for
  * the single-galaxy legacy path, focus mode, and each above-LOD galaxy in
  * the multi-galaxy view. Returns hit circles in canvas coordinates.
+ *
+ * `mode` discriminates the two callers:
+ *   - 'galaxy'   — focus mode + single-galaxy legacy: draw sectors and intra-
+ *                  galaxy wormhole connection lines; per-system hits are
+ *                  pushed with `kind: 'system'` so the system popup opens.
+ *   - 'universe' — embedded spiral in the multi-galaxy overview: skip sectors
+ *                  and intra-galaxy wormhole lines (only inter-galaxy lines
+ *                  are drawn, separately by drawCrossGalaxyWormholeLines).
+ *                  Per-system hits are pushed with `kind: 'galaxy'` and the
+ *                  parent galaxyId so clicks resolve to the galaxy popup —
+ *                  the user must explicitly enter the galaxy view to inspect
+ *                  individual systems.
  */
 function drawGalaxySpiral(
   ctx: CanvasRenderingContext2D,
@@ -1269,6 +1313,7 @@ function drawGalaxySpiral(
   shape: 'spiral' | 'oval' = 'spiral',
   galaxyId: string = '',
   sectors: SectorData[] = [],
+  mode: 'universe' | 'galaxy' = 'galaxy',
 ): HitCircle[] {
   const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread, shape, galaxyId);
 
@@ -1280,11 +1325,13 @@ function drawGalaxySpiral(
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
 
   // Sector mesh sits between glow halo and star dots — thin Voronoi edges
-  // only, no fill or glow. LOD fade is inherited from the caller's
-  // globalAlpha (systemsAlpha in the multi-galaxy path), so sectors fade in
-  // lockstep with star dots.
-  const mesh = buildOrGetSectorMesh(sectors, cx, cy, spread, shape, galaxyId);
-  drawGalaxySectors(ctx, mesh, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
+  // only, no fill or glow. Only drawn in the dedicated galaxy view; the
+  // multi-galaxy universe overview suppresses sectors so the embedded
+  // spirals read as galaxy outlines, not subdivided maps.
+  if (mode === 'galaxy') {
+    const mesh = buildOrGetSectorMesh(sectors, cx, cy, spread, shape, galaxyId);
+    drawGalaxySectors(ctx, mesh, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
+  }
 
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
@@ -1333,16 +1380,32 @@ function drawGalaxySpiral(
     if (viewBounds && !circleIntersectsViewBounds(px, py, cullMargin, viewBounds)) continue;
 
     // Only compute exact sizePx (Math.sqrt inside scaleMap) for visible systems.
-    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
+    // Defensive clamp at 14 / viewScale matches the cull margin (line above)
+    // and guards against any future caller passing cameraScale > 1.
+    const sizePx = Math.min(
+      scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale,
+      14 / viewScale,
+    );
 
-    hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
+    // In universe mode every embedded-system hit resolves to the parent
+    // galaxy popup — the only way to inspect a system is to enter the
+    // galaxy view first.
+    if (mode === 'galaxy') {
+      hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
+    } else {
+      hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'galaxy', id: galaxyId });
+    }
     visibleSystemPos.set(systems[i].id, { x: px, y: py });
 
     const dominant = systems[i].stars[0] ?? null;
     if (dominant && isExoticSubtype(dominant.subtype)) {
       // Exotic systems use their dedicated visual at galaxy zoom too —
       // scaled down so they blend into the spiral but stay recognisable.
-      drawStarBody(ctx, px, py, sizePx * 0.6, dominant);
+      // Cap the input r so the outermost geometry (jet / halo / beams) never
+      // exceeds STANDALONE_CAP_PX screen pixels and dwarfs the rest of the arm.
+      const mult = EXOTIC_MAX_EXTENT_MULT[dominant.subtype] ?? 6;
+      const exoticR = Math.min(sizePx * 0.6, STANDALONE_CAP_PX / (mult * viewScale));
+      drawStarBody(ctx, px, py, exoticR, dominant);
     } else {
       const palette = dominant ? starFill(dominant) : { core: '#fff', glowInner: 'rgba(255,255,255,0.8)', glowOuter: 'rgba(255,255,255,0)' };
       const outerR = sizePx * GLOW_OUTER_MULT;
@@ -1354,56 +1417,64 @@ function drawGalaxySpiral(
   // Same-galaxy wormhole connection lines. Dotted white, drawn after the
   // system dots so the line endpoints land cleanly on top of each visible
   // system. Pairs are deduplicated via a sorted id tuple so each connection
-  // is drawn exactly once even when both endpoints are visible.
-  const drawnPairs = new Set<string>();
-  let dashApplied = false;
-  for (const sys of systems) {
-    if (!sys.wormholes || sys.wormholes.length === 0) continue;
-    const here = visibleSystemPos.get(sys.id);
-    if (!here) continue;
-    for (const wormhole of sys.wormholes) {
-      if (!wormhole.partnerId) continue;
-      // Resolve the partner's parent system. Stored on each wormhole in
-      // `systemIdToWormhole`-style lookups — but the renderer doesn't carry
-      // a universe-wide index. Instead, we walk the galaxy's systems for
-      // an O(N · wormholes) match. N is tiny per galaxy (≤ 100 standalone
-      // systems in practice), and we already filtered to in-galaxy systems.
-      let partnerSystemId: string | null = null;
-      for (const candidate of systems) {
-        if (!candidate.wormholes) continue;
-        for (const cw of candidate.wormholes) {
-          if (cw.id === wormhole.partnerId) {
-            partnerSystemId = candidate.id;
-            break;
+  // is drawn exactly once even when both endpoints are visible. Only drawn
+  // in the dedicated galaxy view; the multi-galaxy universe overview shows
+  // only inter-galaxy connections (rendered separately).
+  if (mode === 'galaxy') {
+    const drawnPairs = new Set<string>();
+    let dashApplied = false;
+    for (const sys of systems) {
+      if (!sys.wormholes || sys.wormholes.length === 0) continue;
+      const here = visibleSystemPos.get(sys.id);
+      if (!here) continue;
+      for (const wormhole of sys.wormholes) {
+        if (!wormhole.partnerId) continue;
+        // Resolve the partner's parent system. Stored on each wormhole in
+        // `systemIdToWormhole`-style lookups — but the renderer doesn't carry
+        // a universe-wide index. Instead, we walk the galaxy's systems for
+        // an O(N · wormholes) match. N is tiny per galaxy (≤ 100 standalone
+        // systems in practice), and we already filtered to in-galaxy systems.
+        let partnerSystemId: string | null = null;
+        for (const candidate of systems) {
+          if (!candidate.wormholes) continue;
+          for (const cw of candidate.wormholes) {
+            if (cw.id === wormhole.partnerId) {
+              partnerSystemId = candidate.id;
+              break;
+            }
           }
+          if (partnerSystemId) break;
         }
-        if (partnerSystemId) break;
-      }
-      if (!partnerSystemId) continue; // partner lives in another galaxy
-      const partnerPos = visibleSystemPos.get(partnerSystemId);
-      if (!partnerPos) continue; // partner system was culled
+        if (!partnerSystemId) continue; // partner lives in another galaxy
+        const partnerPos = visibleSystemPos.get(partnerSystemId);
+        if (!partnerPos) continue; // partner system was culled
 
-      const a = wormhole.id < wormhole.partnerId ? wormhole.id : wormhole.partnerId;
-      const b = wormhole.id < wormhole.partnerId ? wormhole.partnerId : wormhole.id;
-      const key = `${a}|${b}`;
-      if (drawnPairs.has(key)) continue;
-      drawnPairs.add(key);
+        const a = wormhole.id < wormhole.partnerId ? wormhole.id : wormhole.partnerId;
+        const b = wormhole.id < wormhole.partnerId ? wormhole.partnerId : wormhole.id;
+        const key = `${a}|${b}`;
+        if (drawnPairs.has(key)) continue;
+        drawnPairs.add(key);
 
-      if (!dashApplied) {
-        ctx.save();
-        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
-        ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
-        ctx.lineWidth = 1 / viewScale;
-        dashApplied = true;
+        if (!dashApplied) {
+          ctx.save();
+          // Dash pattern scaled by 1/viewScale so dash spacing stays constant
+          // in screen pixels at every zoom (matches the line width below).
+          const dashUnit = WORMHOLE_CONNECTION_DASH[0] / viewScale;
+          ctx.setLineDash([dashUnit, dashUnit]);
+          ctx.lineDashOffset = 0;
+          ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
+          ctx.lineWidth = 1 / viewScale;
+          dashApplied = true;
+        }
+        ctx.beginPath();
+        ctx.moveTo(here.x, here.y);
+        ctx.lineTo(partnerPos.x, partnerPos.y);
+        ctx.stroke();
       }
-      ctx.beginPath();
-      ctx.moveTo(here.x, here.y);
-      ctx.lineTo(partnerPos.x, partnerPos.y);
-      ctx.stroke();
     }
-  }
-  if (dashApplied) {
-    ctx.restore();
+    if (dashApplied) {
+      ctx.restore();
+    }
   }
 
   return hit;
