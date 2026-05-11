@@ -33,7 +33,8 @@ export type PopupEntity =
   | { kind: 'system'; systemId: string }
   | { kind: 'star'; systemId: string; starId: string }
   | { kind: 'planet'; systemId: string; planetId: string }
-  | { kind: 'satellite'; systemId: string; planetId: string; satelliteId: string };
+  | { kind: 'satellite'; systemId: string; planetId: string; satelliteId: string }
+  | { kind: 'wormhole'; systemId: string; wormholeId: string };
 
 export interface UniverseCanvasHandle {
   reset: () => void;
@@ -409,6 +410,12 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
             planetId: state.planetId!,
             satelliteId: hit.id,
           });
+        } else if (hit.kind === 'wormhole') {
+          onEntityClickRef.current?.({
+            kind: 'wormhole',
+            systemId: state.systemId!,
+            wormholeId: hit.id,
+          });
         }
       };
 
@@ -496,6 +503,12 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
             systemId: state.systemId!,
             planetId: state.planetId!,
             satelliteId: hit.id,
+          });
+        } else if (hit.kind === 'wormhole') {
+          onEntityClickRef.current?.({
+            kind: 'wormhole',
+            systemId: state.systemId!,
+            wormholeId: hit.id,
           });
         }
       };

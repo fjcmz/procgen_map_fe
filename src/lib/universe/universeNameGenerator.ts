@@ -254,6 +254,46 @@ function makeSatelliteHumanName(rng: () => number): string {
   return pick(SAT_ONSETS, rng) + pick(SAT_VOWELS, rng) + pick(SAT_CODAS, rng);
 }
 
+// ── Wormhole ──────────────────────────────────────────────────────────────
+
+/**
+ * Wormhole catalog designation — scientific only (no human name per spec).
+ * Format: `WH-<system-tag>-<NN>` where the system tag is a 4-hex-digit hash
+ * of the parent system's id and NN is the 1-based per-system index. Reads
+ * as a wormhole catalog entry alongside the existing `NGC-XXXX` / `SEC-XXXX`
+ * patterns. Dedupe via the per-universe `usedWormholeNames` set, mirroring
+ * the planet/satellite retry-up-to-9 convention.
+ *
+ * Sub-stream: `${seed}_wormholename_${wormholeId}` — isolated, never
+ * perturbs physics or naming for other tiers.
+ */
+export function generateWormholeName(
+  seed: string,
+  wormholeId: string,
+  systemId: string,
+  indexInSystem: number,
+  usedNames: Set<string>,
+): { scientific: string } {
+  const rng = seededPRNG(`${seed}_wormholename_${wormholeId}`);
+  // 4-hex tag derived from system id so multiple wormholes in the same system
+  // share a stem (visually grouped) but the per-wormhole rng can still draw
+  // a tiebreaker on collision.
+  let sysHash = 0x811c9dc5;
+  for (let i = 0; i < systemId.length; i++) {
+    sysHash ^= systemId.charCodeAt(i);
+    sysHash = (Math.imul(sysHash, 0x01000193)) >>> 0;
+  }
+  const sysTag = sysHash.toString(16).toUpperCase().padStart(4, '0').slice(0, 4);
+  const idx = String(indexInSystem + 1).padStart(2, '0');
+  let scientific = `WH-${sysTag}-${idx}`;
+  for (let i = 0; i < 9 && usedNames.has(scientific); i++) {
+    const salt = Math.floor(rng() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    scientific = `WH-${sysTag}-${idx}-${salt}`;
+  }
+  usedNames.add(scientific);
+  return { scientific };
+}
+
 /**
  * Scientific name: `{planetScientific}{moon-letter}` — e.g. "HD 149026 IIIa".
  * `moonIndex` is 0-based (first moon = 0 → 'a').

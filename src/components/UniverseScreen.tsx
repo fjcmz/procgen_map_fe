@@ -204,24 +204,55 @@ export function UniverseScreen({
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
     } else if (popupEntity.kind === 'satellite') {
       canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
+    } else if (popupEntity.kind === 'wormhole') {
+      // Up from a wormhole returns to its parent system.
+      canvasRef.current?.navigateTo('system', popupEntity.systemId);
     }
   }, [popupEntity, galaxyIdOfSystem]);
 
   // Navigate into the entity's child scene and close the popup.
   const handlePopupNavigateDown = useCallback(() => {
     if (!popupEntity) return;
-    setPopupEntity(null);
     if (popupEntity.kind === 'galaxy') {
       // ↓ Enter Galaxy → galaxy focus mode (single-spiral view of just this
       // galaxy, mirrors legacy single-galaxy rendering).
+      setPopupEntity(null);
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, popupEntity.galaxyId);
     } else if (popupEntity.kind === 'system') {
+      setPopupEntity(null);
       canvasRef.current?.navigateTo('system', popupEntity.systemId);
     } else if (popupEntity.kind === 'planet') {
+      setPopupEntity(null);
       canvasRef.current?.navigateTo('planet', popupEntity.systemId, popupEntity.planetId);
+    } else if (popupEntity.kind === 'wormhole') {
+      // ↳ Jump to Connected System — resolve the wormhole's partner here so
+      // the popup component stays stateless. If the connection is missing
+      // (shouldn't happen for partnered wormholes, but guard anyway) we fall
+      // back to closing the popup silently.
+      if (!data) return;
+      let partnerSystemId: string | null = null;
+      outer: for (const sys of data.solarSystems) {
+        if (!sys.wormholes) continue;
+        for (const w of sys.wormholes) {
+          if (w.id === popupEntity.wormholeId) {
+            if (!w.partnerId) break outer;
+            for (const sys2 of data.solarSystems) {
+              if (!sys2.wormholes) continue;
+              if (sys2.wormholes.some(p => p.id === w.partnerId)) {
+                partnerSystemId = sys2.id;
+                break outer;
+              }
+            }
+          }
+        }
+      }
+      setPopupEntity(null);
+      if (partnerSystemId) {
+        canvasRef.current?.navigateTo('system', partnerSystemId);
+      }
     }
     // star + satellite are leaves — no down navigation
-  }, [popupEntity]);
+  }, [popupEntity, data]);
 
   // Tree / popup entity selection: navigate the canvas to the scene that
   // displays the entity, then open the details popup. Galaxy → galaxy focus
@@ -240,6 +271,8 @@ export function UniverseScreen({
       canvasRef.current?.navigateTo('system', entity.systemId);
     } else if (entity.kind === 'satellite') {
       canvasRef.current?.navigateTo('planet', entity.systemId, entity.planetId);
+    } else if (entity.kind === 'wormhole') {
+      canvasRef.current?.navigateTo('system', entity.systemId);
     }
     setPopupEntity(entity);
   }, [galaxyIdOfSystem]);
@@ -278,7 +311,7 @@ export function UniverseScreen({
           onClose={handlePopupClose}
           onNavigateUp={handlePopupNavigateUp}
           onNavigateDown={
-            popupEntity.kind === 'galaxy' || popupEntity.kind === 'system' || popupEntity.kind === 'planet'
+            popupEntity.kind === 'galaxy' || popupEntity.kind === 'system' || popupEntity.kind === 'planet' || popupEntity.kind === 'wormhole'
               ? handlePopupNavigateDown
               : undefined
           }

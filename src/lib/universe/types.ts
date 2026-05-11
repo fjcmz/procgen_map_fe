@@ -58,7 +58,34 @@ export interface SolarSystemData {
   stars: StarData[];
   /** Empty for standalone kinds (e.g. supermassive_black_hole). */
   planets: PlanetData[];
+  /**
+   * Wormholes anchored to this system. Only ever non-empty when
+   * `isStandaloneKind(kind) === true`: 20% of standalone systems carry one
+   * wormhole, 10% carry two, 70% carry none. Each wormhole pairs reciprocally
+   * with another in the universe (90% same-galaxy, 10% cross-galaxy when a
+   * candidate exists, otherwise falls back to the other bucket).
+   */
+  wormholes: WormholeData[];
   sectorId: string;
+}
+
+/**
+ * Plain-data shape for a wormhole. Each instance lives inside exactly one
+ * `SolarSystemData.wormholes` array; the universe-wide partner lookup is
+ * built by walking every system once on the main thread.
+ */
+export interface WormholeData {
+  id: string;
+  scientificName: string;
+  /** Parent system id (matches a {@link SolarSystemData.id}). */
+  systemId: string;
+  /** Parent galaxy id. Cached at generation time for cross-galaxy pairing. */
+  galaxyId: string;
+  /** Partner wormhole id, or null if no partner was found at generation time. */
+  partnerId: string | null;
+  /** Fixed offset from the system view's centre, in content-space units. */
+  offsetX: number;
+  offsetY: number;
 }
 
 /**

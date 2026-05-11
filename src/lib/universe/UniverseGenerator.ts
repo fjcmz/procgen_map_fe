@@ -6,6 +6,8 @@ import { rndSize } from './helpers';
 import { generateGalaxyName, generateUniverseName } from './universeNameGenerator';
 import { layoutGalaxies } from './galaxyLayout';
 import { seededPRNG } from '../terrain/noise';
+import { isStandaloneKind } from './SystemKind';
+import { wormholeGenerator, rollWormholeCount, pairWormholes } from './WormholeGenerator';
 
 export interface UniverseGenerateOptions {
   /**
@@ -70,6 +72,27 @@ export class UniverseGenerator {
     for (const galaxy of universe.galaxies) {
       sectorGenerator.generate(galaxy, seed);
     }
+
+    // Wormhole generation phase. Runs after galaxy assignment so every
+    // standalone system already knows its parent galaxy id — required for
+    // the 90/10 same-galaxy / cross-galaxy pairing bias. Isolated sub-streams
+    // keep this feature byte-stable independent of anything else.
+    const systemToGalaxy = new Map<string, string>();
+    for (const galaxy of universe.galaxies) {
+      for (const sys of galaxy.solarSystems) {
+        systemToGalaxy.set(sys.id, galaxy.id);
+      }
+    }
+    for (const sys of universe.solarSystems) {
+      if (!isStandaloneKind(sys.kind)) continue;
+      const galaxyId = systemToGalaxy.get(sys.id) ?? '';
+      const countRng = seededPRNG(`${seed}_wormhole_count_${sys.id}`);
+      const count = rollWormholeCount(countRng);
+      for (let i = 0; i < count; i++) {
+        wormholeGenerator.generate(sys, galaxyId, i, universe);
+      }
+    }
+    pairWormholes(universe);
 
     if (universe.galaxies.length === 1) {
       // Legacy single-galaxy case: name the universe with the same galaxy
