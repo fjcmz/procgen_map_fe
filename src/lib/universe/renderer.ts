@@ -1037,7 +1037,8 @@ export function drawGalaxyScene(
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
       const rotOff = galaxyRotationOffset(focus.id);
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors) };
+      const crossDirs = buildCrossGalaxyDirections(data, focus.id);
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors, crossDirs) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
@@ -1051,7 +1052,10 @@ export function drawGalaxyScene(
     const singleShape = data.galaxies[0]?.shape ?? 'spiral';
     const singleId = data.galaxies[0]?.id ?? '';
     const singleSectors = data.galaxies[0]?.sectors ?? [];
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors) };
+    // Cross-galaxy stubs are a no-op here (single-galaxy universes can't have
+    // cross-galaxy wormholes) but the helper handles that case cleanly.
+    const crossDirs = buildCrossGalaxyDirections(data, singleId);
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors, crossDirs) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -1140,6 +1144,49 @@ export function drawGalaxyScene(
   drawCrossGalaxyWormholeLines(ctx, data, galaxyCanvasPos, viewScale);
 
   return { hit };
+}
+
+/**
+ * Build a per-wormhole map of unit-vector world-frame directions pointing
+ * from the current galaxy's centre toward each cross-galaxy partner's
+ * galaxy. Used by the focused-galaxy view (single-spiral / focus mode) to
+ * draw outbound stubs without rendering the target galaxy. Entries are
+ * keyed by the SOURCE wormhole id; only wormholes anchored in the current
+ * galaxy whose partner lives elsewhere get an entry.
+ */
+function buildCrossGalaxyDirections(
+  data: UniverseData,
+  currentGalaxyId: string,
+): Map<string, { dx: number; dy: number }> {
+  const result = new Map<string, { dx: number; dy: number }>();
+  const current = data.galaxies.find(g => g.id === currentGalaxyId);
+  if (!current || data.galaxies.length < 2) return result;
+
+  const galaxyById = new Map(data.galaxies.map(g => [g.id, g]));
+  // wormholeId → galaxyId — built once from the flattened universe data.
+  const wormholeGalaxy = new Map<string, string>();
+  for (const sys of data.solarSystems) {
+    if (!sys.wormholes || sys.wormholes.length === 0) continue;
+    for (const w of sys.wormholes) wormholeGalaxy.set(w.id, w.galaxyId);
+  }
+
+  for (const sys of data.solarSystems) {
+    if (!sys.wormholes || sys.wormholes.length === 0) continue;
+    for (const w of sys.wormholes) {
+      if (w.galaxyId !== currentGalaxyId) continue;
+      if (!w.partnerId) continue;
+      const partnerGalaxyId = wormholeGalaxy.get(w.partnerId);
+      if (!partnerGalaxyId || partnerGalaxyId === currentGalaxyId) continue;
+      const partnerGalaxy = galaxyById.get(partnerGalaxyId);
+      if (!partnerGalaxy) continue;
+      const dx = partnerGalaxy.cx - current.cx;
+      const dy = partnerGalaxy.cy - current.cy;
+      const len = Math.hypot(dx, dy);
+      if (len === 0) continue;
+      result.set(w.id, { dx: dx / len, dy: dy / len });
+    }
+  }
+  return result;
 }
 
 /**
@@ -1269,6 +1316,17 @@ function drawGalaxySpiral(
   shape: 'spiral' | 'oval' = 'spiral',
   galaxyId: string = '',
   sectors: SectorData[] = [],
+  /**
+   * Optional: when the renderer wants to surface cross-galaxy wormhole links
+   * inside a focused single-galaxy view, this map provides — per wormhole id
+   * anchored in the current galaxy — a unit-vector direction (in world frame,
+   * unaffected by galaxy spin) pointing toward the partner's galaxy. The
+   * renderer draws a dashed stub from the source system out into that
+   * direction, terminating off the visible rim without rendering the target.
+   * `null` (default) suppresses the stub layer entirely — used by the multi-
+   * galaxy embedded path where full inter-galaxy lines are drawn separately.
+   */
+  crossGalaxyDirections: Map<string, { dx: number; dy: number }> | null = null,
 ): HitCircle[] {
   const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread, shape, galaxyId);
 
@@ -1404,6 +1462,52 @@ function drawGalaxySpiral(
   }
   if (dashApplied) {
     ctx.restore();
+  }
+
+  // Cross-galaxy stubs. In focused single-galaxy view, surface wormholes
+  // whose partner sits in another galaxy by drawing a dashed line from the
+  // source system out in the world-frame direction of the partner's galaxy —
+  // terminating just past the visible rim so the user can read "this link
+  // exits the galaxy in roughly that direction" without ever rendering the
+  // destination. Skipped (null map) in the multi-galaxy embed path, which
+  // already draws full inter-galaxy lines between galaxy centres.
+  if (crossGalaxyDirections && crossGalaxyDirections.size > 0) {
+    const stubLen = spread * 0.45;
+    const tipMarkerR = 2.5 / viewScale;
+    let stubDashApplied = false;
+    for (const sys of systems) {
+      if (!sys.wormholes || sys.wormholes.length === 0) continue;
+      const pos = visibleSystemPos.get(sys.id);
+      if (!pos) continue;
+      for (const wormhole of sys.wormholes) {
+        const dir = crossGalaxyDirections.get(wormhole.id);
+        if (!dir) continue;
+        if (!stubDashApplied) {
+          ctx.save();
+          ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+          ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
+          ctx.lineWidth = 1 / viewScale;
+          stubDashApplied = true;
+        }
+        const endX = pos.x + dir.dx * stubLen;
+        const endY = pos.y + dir.dy * stubLen;
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        // Tiny open ring at the tip suggests "destination off-screen" without
+        // implying a clickable target. Drawn solid (no dash) by toggling
+        // setLineDash, then restoring the dashed style for the next stub.
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(endX, endY, tipMarkerR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+      }
+    }
+    if (stubDashApplied) {
+      ctx.restore();
+    }
   }
 
   return hit;
