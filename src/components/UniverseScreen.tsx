@@ -193,10 +193,11 @@ export function UniverseScreen({
       // ↑ Universe — multi-galaxy overview (clear focus).
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
     } else if (popupEntity.kind === 'system') {
-      // ↑ Universe — clear any galaxy focus and drop to the multi-galaxy
-      // overview (or the single-galaxy view when N=1, which is the same
-      // scene as the universe).
-      canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
+      // ↑ Galaxy — drop into the parent galaxy's focused view. In a single-
+      // galaxy universe `galaxyIdOfSystem` returns null and we collapse to
+      // the universe overview, which is the same scene anyway.
+      const galId = galaxyIdOfSystem(popupEntity.systemId);
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, galId ?? undefined);
     } else if (popupEntity.kind === 'star') {
       const galId = galaxyIdOfSystem(popupEntity.systemId);
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, galId ?? undefined);
