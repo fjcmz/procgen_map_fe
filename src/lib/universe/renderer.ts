@@ -365,11 +365,11 @@ const WORMHOLE_CONNECTION_STROKE = 'rgba(240,245,255,0.58)';
 // is the same as `WORMHOLE_CONNECTION_STROKE` (0.58); tiers scale that.
 //   Tier 1 — line incident to hovered galaxy: full brightness (== base).
 //   Tier 2 — line whose at-least-one endpoint is a wormhole neighbour of the
-//            hovered galaxy: ~30% of base.
+//            hovered galaxy: ~50% of base.
 //   Tier 3 — every other inter-galaxy line: ~10% of base.
-// When no galaxy is hovered, every line falls back to tier 2 (30%).
+// When no galaxy is hovered, every line falls back to tier 2 (50%).
 const WORMHOLE_LINE_TIER_FULL = 'rgba(240,245,255,0.58)';
-const WORMHOLE_LINE_TIER_DIM = 'rgba(240,245,255,0.17)';     // ≈ 0.58 × 0.3
+const WORMHOLE_LINE_TIER_DIM = 'rgba(240,245,255,0.29)';     // ≈ 0.58 × 0.5
 const WORMHOLE_LINE_TIER_FAINT = 'rgba(240,245,255,0.06)';   // ≈ 0.58 × 0.1
 const WORMHOLE_CONNECTION_DASH: [number, number] = [4, 4];
 
