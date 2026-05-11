@@ -24,13 +24,15 @@ The universe entity instances live **only inside `universegen.worker.ts`** — t
 | `types.ts` | Plain structured-clone-safe shapes that cross the worker boundary — `UniverseData`, `GalaxyData`, `SolarSystemData`, `StarData`, `PlanetData`, `SatelliteData`, `UniverseGenerateRequest`, `UniverseWorkerMessage`. **Start here when looking up a serialized field** |
 | `Universe.ts` | Top-level entity. Owns the per-tier `usedNames: Set<string>` dedup sets, the runtime indexes (`mapSolarSystems`/`mapStars`/`mapPlanets`/`mapSatellites`/`mapGalaxies`), and the captured worker `seed: string` so generators can derive isolated PRNG sub-streams via `seededPRNG(`${seed}_<purpose>_<id>`)`. Mirrors `World.seed` (see `world_history.md`). Empty-string seed is supported (sub-stream draws are still deterministic) |
 | `Galaxy.ts` | Runtime galaxy entity. Carries `solarSystems: SolarSystem[]` reference list + baked layout fields (`cx`, `cy`, `radius`, `spread`, `shape: 'spiral' | 'oval'`). No `Map`/`Set` of its own but lives next to entities that have them, so it stays inside the worker too |
-| `SolarSystem.ts` | System entity: composition (`'ROCK' \| 'GAS'`), star list, planet list, parent universe id |
-| `Star.ts` | Star entity: composition (`'MATTER' \| 'ANTIMATTER'`), radius, brightness, parent system id |
+| `SolarSystem.ts` | System entity: composition (`'ROCK' \| 'GAS'`), `kind: SystemKind` (taxonomic archetype — see "System Kinds" below), star list, planet list, parent universe id |
+| `Star.ts` | Star entity: composition (`'MATTER' \| 'ANTIMATTER'`), `subtype: StarSubtype` (per-body type tag), radius, brightness, parent system id |
+| `SystemKind.ts` | `SystemKind` taxonomy: 10 planetary kinds + 6 standalone (planetless) kinds. Exports `PlanetaryStarKind`, `StandaloneBodyKind`, `StarSubtype` unions and `isStandaloneKind` |
+| `SystemKindInfo.ts` | `SYSTEM_KIND_INFO` metadata table — per-kind display name, description, weight, star count range, radius/brightness ranges, renderer palette, optional naming prefix. Exports `pickSystemKind` (weighted roll) and `STAR_SUBTYPE_HUE` (per-body palette table used by the renderer) |
 | `Planet.ts` | Planet entity: composition (`'ROCK' \| 'GAS'`), 13 fine-grained subtypes (`PlanetSubtype` = `RockPlanetSubtype` ∪ `GasPlanetSubtype`), radius, orbit, life flag, optional `biome: PlanetBiome` (only for ROCK + life), satellites, parent system id. Exports the `PLANET_SUBTYPE_COMPOSITION` enforcement table — every subtype belongs to exactly one composition |
 | `Satellite.ts` | Satellite entity: composition (`'ICE' \| 'ROCK'`), 10 fine-grained subtypes (`SatelliteSubtype` = `IceSatelliteSubtype` ∪ `RockSatelliteSubtype`), radius, life flag, optional biome (only for ROCK + life), parent planet id. Exports the `SATELLITE_SUBTYPE_COMPOSITION` enforcement table |
 | `UniverseGenerator.ts` | Top-level orchestrator + galaxy grouping. Generates `numSolarSystems` solar systems (defaulting to `rndSize(rng, 5, 1)` when no override is supplied), then chunks them into galaxies (≤100 → 1 galaxy; >100 → `ceil(N/100)` chunks), names them, assigns each a morphology shape (`spiral` or `oval`) via an isolated sub-stream, lays them out via `layoutGalaxies`, and names the universe (single galaxy → reuse galaxy name; multi-galaxy → `generateUniverseName`) |
-| `SolarSystemGenerator.ts` | Per-system generator: rolls composition (50/50 ROCK/GAS), generates `rndSize(rng, 3, 1)` stars, sets the system's name from the **primary star** (no separate RNG draw), then generates `stars.length * 2 + floor(rng() * 15)` planets |
-| `StarGenerator.ts` | Per-star: rolls radius (400 000–900 000), brightness (100–999), composition (50/50). Names via `generateStarName` (isolated sub-stream) |
+| `SolarSystemGenerator.ts` | Per-system generator: rolls composition (50/50 ROCK/GAS), then rolls `SystemKind` on an isolated sub-stream (`${seed}_systemkind_${id}`) via `pickSystemKind`. Star count comes from `SYSTEM_KIND_INFO[kind].starCount` (binary forces 2, standalone forces 1). Sets the system's name from the **primary star** (no separate RNG draw); planet generation runs only when `!isStandaloneKind(kind)` (gated by the standalone vs planetary distinction) |
+| `StarGenerator.ts` | Per-star: rolls radius / brightness using the `SYSTEM_KIND_INFO[subtype].radiusRange` + `brightnessRange` (same number of `rng()` draws as the legacy version), composition (50/50). `star.subtype` is set from the system kind (or, for `binary_star`, from a precomputed pair on the kind sub-stream). Names via `generateStarName(seed, id, used, kind)` — kind drives the optional catalog prefix override |
 | `PlanetGenerator.ts` | Per-planet: rolls radius (1 000–31 000), orbit (monotonic in insertion index — read **before** push), composition driven by orbit (`rockProbability`: <10 → 100% rock, >20 → 100% gas, linear in between), life flag (10%), biome (only ROCK + life, 7 weighted profiles), subtype via isolated sub-stream `${seed}_planetsubtype_${planet.id}`, then `rndSize(rng, 15, -5)` satellites |
 | `SatelliteGenerator.ts` | Per-satellite: rolls radius (relative to parent planet), composition (50/50 ICE/ROCK), life (10%), biome (ROCK + life only), subtype via isolated sub-stream `${seed}_satsubtype_${satellite.id}` (parent-orbit aware: inner → volcanic/iron_rich/sulfur_ice; outer → cratered/methane_ice) |
 | `galaxyLayout.ts` | Random rejection-sampling layout for multi-galaxy universes. Bakes per-galaxy `cx`, `cy`, `radius`, `spread` in **normalized world units** so the renderer can apply a single viewport-fit factor at draw time. Enforces a minimum centre-to-centre distance of `MIN_CENTER_DIST = 10` world units; container radius scales as `10 × √N` so density stays roughly constant as galaxy count grows. RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams. Also exports `computeLayoutExtent(galaxies)` for the renderer's viewport fit |
@@ -55,6 +57,31 @@ Subtype rolls run on **isolated sub-streams** keyed on `(universe.seed, entity.i
 - `${universe.seed}_satsubtype_${satellite.id}` (in `SatelliteGenerator.ts`)
 
 This means **adding new subtypes does not perturb existing seeds** — a new subtype landing in `pickPlanetSubtype` only changes the output for runs that draw under the new probability bucket; every other entity in the universe stays byte-identical. Same convention as the world-map terrain profiles' "additive shifts default to 0.0 = no-op" rule (see `world_map.md`).
+
+## System Kinds
+
+Every `SolarSystem` carries a `kind: SystemKind` rolled on an isolated sub-stream `${universe.seed}_systemkind_${solarSystem.id}` so kind rolls never perturb the main physics RNG for the *kind decision itself*. (Standalone kinds still skip planet generation, which shifts the main RNG's downstream draws — universe seeds may therefore land on a different set of bodies than before this feature shipped. The universe pipeline is not covered by the sweep harness, so this is acceptable.)
+
+**Planetary kinds (10)** — host planets:
+
+```
+main_sequence, red_dwarf, blue_giant, red_giant, white_dwarf, brown_dwarf,
+neutron_star, pulsar, binary_star, stellar_black_hole
+```
+
+`binary_star` is the only kind with `starCount === 2`; both component subtypes are rolled on the kind sub-stream so the main RNG draws stay identical to single-star kinds. Other planetary kinds use `[1, n]` ranges (most are `[1, 1]` for compact remnants).
+
+**Standalone kinds (6)** — no planets, single central body:
+
+```
+supermassive_black_hole, white_hole, magnetar, quark_star, boson_star, quasar
+```
+
+`isStandaloneKind(kind)` returns true for these six. The `SolarSystemGenerator` skips the entire planet-generation loop when this returns true. The "Generate World" affordance in the popup is structurally unreachable for standalone systems because it only renders on planet/satellite popups, which don't exist for them.
+
+Each `Star.subtype` equals the system kind (for binaries, each star gets one of the regular planetary subtypes — main_sequence, red_dwarf, white_dwarf, etc.). The renderer's `starFill` branches on `Star.subtype` first (with antimatter overriding everything for backwards visual compatibility); exotic subtypes (`stellar_black_hole`, `supermassive_black_hole`, `pulsar`, `white_hole`, `magnetar`, `quasar`, `quark_star`, `boson_star`) use dedicated `drawStarBody` helpers in `renderer.ts` instead of the cached glow-canvas + solid-core path.
+
+Catalog prefixes (`SYSTEM_KIND_INFO[kind].namingPrefix`) override the random HD/HIP/GJ/KOI catalog roll for exotic kinds — pulsars become `PSR-XXXX`, supermassive black holes `SMBH-XXXX`, magnetars `MGT-XXXX`, etc. The prefix override draws from the same `${seed}_starname_${star.id}` sub-stream as the rest of star naming, so kinds without a prefix produce byte-identical names to before.
 
 ### Planet subtypes (13)
 
@@ -224,6 +251,8 @@ Single star: solid circle at canvas center. Multi-star binary: stars orbit a tig
 
 - **Universe class instances stay inside `universegen.worker.ts`.** `Universe`, `Galaxy`, `SolarSystem`, `Star`, `Planet`, `Satellite` use `Map<string, …>` indexes which are NOT structured-clone safe. Same pitfall as the `World` model — flatten to `UniverseData` / `GalaxyData` / etc. before `postMessage`.
 - **Subtype rolls MUST use isolated sub-streams.** `${universe.seed}_planetsubtype_${planet.id}` and `${universe.seed}_satsubtype_${satellite.id}` keep subtype additions from perturbing existing seeds. **Do NOT roll subtypes off the main `rng` parameter** — adding a subtype would shift every subsequent entity's draws.
+- **System kind is rolled on `${universe.seed}_systemkind_${solarSystem.id}` (isolated).** For `binary_star`, both component subtypes are also rolled from this same sub-stream so the main RNG draws stay identical across kinds. The only deliberate exception: standalone kinds skip the entire planet-generation block, which changes which `rng()` draws subsequent systems consume. Universe seeds may therefore land on a different set of bodies than before this feature shipped — the universe pipeline is not sweep-locked, so this is acceptable.
+- **Standalone kinds have no planets.** `isStandaloneKind(kind)` is the gate. The "Generate World" affordance lives on planet/satellite popups only, so it is structurally unreachable for standalone systems. Don't add a separate guard at the system level — keep the empty-planets invariant the single source of truth.
 - **Naming RNG is also isolated** (`${universe.seed}_<tier>name_<entityId>`). Same rule: never let name generation read from the main physics RNG. Generators in this package generate the entity's physics fields first, then the names — the order matters because the entity id (which is rolled from the main RNG) is part of the name sub-stream key.
 - **`Star` / `Planet` / `Satellite` IDs come from `IdUtil.id` with a `rngHex(rng)` payload.** That `rngHex` call DOES draw from the main RNG (3 hex draws per id). This is intentional — the id is part of the entity's "physics" identity and seed-stable across runs of the same universe.
 - **`Planet.orbit` is monotonic in insertion index** — `PlanetGenerator` reads `solarSystem.planets.length` BEFORE pushing the new planet so `orbit` increases through the planet list. Same convention for `moonIndex` in `SatelliteGenerator`. **Do NOT reorder these reads** — orbit values would scramble and the renderer's spiral / orbit animations would break.

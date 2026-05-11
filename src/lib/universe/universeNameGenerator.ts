@@ -13,6 +13,8 @@
  */
 
 import { seededPRNG } from '../terrain/noise';
+import type { SystemKind } from './SystemKind';
+import { SYSTEM_KIND_INFO } from './SystemKindInfo';
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -160,14 +162,26 @@ export function generateStarName(
   seed: string,
   starId: string,
   usedNames: Set<string>,
+  kind?: SystemKind,
 ): { human: string; scientific: string } {
   const rng = seededPRNG(`${seed}_starname_${starId}`);
-  const scientific = makeStarScientificName(rng);
+  // Always consume the same baseline draws so the human-name sub-stream
+  // position is stable across kinds with and without a prefix override.
+  const baseScientific = makeStarScientificName(rng);
   let human = makeStarHumanName(rng);
   for (let i = 0; i < 9 && usedNames.has(human); i++) {
     human = makeStarHumanName(rng);
   }
   usedNames.add(human);
+
+  // If the kind defines a catalog prefix, derive XXXX from the SAME sub-stream
+  // (drawn after baseline so unaffected kinds stay byte-identical).
+  const prefix = kind ? SYSTEM_KIND_INFO[kind].namingPrefix : undefined;
+  let scientific = baseScientific;
+  if (prefix) {
+    const hex = Math.floor(rng() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+    scientific = `${prefix}-${hex}`;
+  }
   return { human, scientific };
 }
 

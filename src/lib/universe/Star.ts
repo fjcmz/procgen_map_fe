@@ -6,6 +6,8 @@ function rngHex(rng: () => number): string {
   ).join('');
 }
 
+import type { StarSubtype } from './SystemKind';
+
 export type StarComposition = 'MATTER' | 'ANTIMATTER';
 
 export class Star {
@@ -15,6 +17,8 @@ export class Star {
   radius: number = 0;
   brightness: number = 0;
   composition: StarComposition = 'MATTER';
+  /** Per-body type tag — drives renderer palette + popup labelling. */
+  subtype: StarSubtype = 'main_sequence';
   // Transient
   solarSystemId: string = '';
 

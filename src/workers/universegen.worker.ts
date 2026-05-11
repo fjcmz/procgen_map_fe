@@ -26,6 +26,7 @@ function serializeUniverse(universe: Universe): UniverseData {
     humanName: ss.humanName,
     scientificName: ss.scientificName,
     composition: ss.composition,
+    kind: ss.kind,
     sectorId: ss.sectorId,
     stars: ss.stars.map(star => ({
       id: star.id,
@@ -34,6 +35,7 @@ function serializeUniverse(universe: Universe): UniverseData {
       radius: star.radius,
       brightness: star.brightness,
       composition: star.composition,
+      subtype: star.subtype,
     })),
     planets: ss.planets.map(planet => ({
       id: planet.id,
