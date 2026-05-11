@@ -49,6 +49,36 @@ const PLANET_MIN_PX = 1;
 const PLANET_MAX_PX = 6;
 const STAR_MIN_PX = 5;
 const STAR_MAX_PX = 16;
+
+// Absolute screen-pixel cap for the outermost geometry of an exotic standalone
+// body at galaxy view. The exotic draw helpers (drawQuasar's jet, drawWhiteHole's
+// halo, drawPulsar's beams, …) extend the input radius by up to 6×, so without
+// a cap a single quasar can dwarf the entire arm. We clamp the input r per
+// subtype so the drawn extent never exceeds STANDALONE_CAP_PX screen pixels.
+const STANDALONE_CAP_PX = 11;
+
+// Galaxy on-screen radius at which body sizes hit their "natural" range
+// (regular stars 4–14 px, exotic standalones ≤ 11 px). Below this, body
+// sizes scale linearly with the galaxy's screen radius so a small embedded
+// galaxy in the multi-galaxy universe view shows correspondingly tiny dots
+// instead of disc-sized fixed-px bodies that visually swallow the spiral.
+const REFERENCE_GALAXY_RADIUS_PX = 250;
+
+// Absolute radius bounds spanning ALL star subtypes in `SystemKindInfo.ts`.
+// Per-subtype radii vary by 3 orders of magnitude:
+//   stellar_black_hole [5, 20]   pulsar / neutron / magnetar [10, 25]
+//   white_dwarf [40, 90]         brown_dwarf [80, 200]
+//   red_dwarf [150, 380]         main_sequence [400, 900]
+//   blue_giant [1200, 2400]      red_giant [1500, 3000]
+//   supermassive_black_hole [3000, 9000]   quasar [4000, 10000]
+// The galaxy-view spiral uses per-galaxy min/max for `scaleMap` so the
+// largest star in any galaxy fills the size range. That makes red dwarfs in
+// a red-dwarf-dominated galaxy render as a 14-px disc — visually identical
+// to a supergiant in a mixed galaxy. In universe mode we instead use these
+// absolute bounds so a body's screen size correlates to its actual radius:
+// red dwarfs are always tiny dots, supergiants and quasars are properly big.
+const UNIVERSE_ABS_RADIUS_MIN = 5;
+const UNIVERSE_ABS_RADIUS_MAX = 10000;
 // Absolute generation bounds for star radius (StarGenerator: [400, 900]).
 // Used for size mapping so visual disk size is proportional to actual radius
 // regardless of which other stars share the system.
@@ -690,6 +720,25 @@ function drawCompactGlow(
 }
 
 /**
+ * Maximum outer-extent multiplier the exotic draw helpers apply to their
+ * input `r`. Mirrors the actual constants in drawBlackHole / drawNeutronStar /
+ * drawPulsar / drawWhiteHole / drawMagnetar / drawQuasar / drawCompactGlow.
+ * Used at galaxy-view call sites to clamp `r` so the rendered extent never
+ * exceeds `STANDALONE_CAP_PX` screen pixels.
+ */
+const EXOTIC_MAX_EXTENT_MULT: Partial<Record<StarSubtype, number>> = {
+  stellar_black_hole: 2.6,        // accretion ring outerR = r * 2.6
+  supermassive_black_hole: 2.6,
+  pulsar: 5.5,                    // beam length r * 5.5
+  neutron_star: 2.0,              // halo r * 2.0
+  white_hole: 3.2,                // halo r * 3.2 + rays at haloR * 0.95
+  magnetar: 4.2,                  // outer ring r * (1.5 + 3 * 0.9)
+  quasar: 6.0,                    // jet length r * 6 (accretion ring r * 2.6 is smaller)
+  quark_star: 2.4,                // compact glow halo r * 2.4
+  boson_star: 2.4,
+};
+
+/**
  * Branch a star draw on subtype. Falls back to the standard glow-canvas +
  * solid core for ordinary star subtypes (main sequence, dwarfs, giants).
  */
@@ -1056,12 +1105,14 @@ export function drawGalaxyScene(
       const spreadPx = Math.min(vw, vh) * 0.7;
       const rotOff = galaxyRotationOffset(focus.id);
       const crossDirs = buildCrossGalaxyDirections(data, focus.id);
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors, crossDirs) };
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors, 'galaxy', crossDirs) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
 
   // Single-galaxy legacy path: byte-identical to pre-grouping rendering.
+  // A single-galaxy universe IS conceptually the galaxy view — sectors and
+  // intra-galaxy wormholes stay visible.
   if (data.galaxies.length <= 1) {
     const cx = vw / 2;
     const cy = vh / 2;
@@ -1073,7 +1124,7 @@ export function drawGalaxyScene(
     // Cross-galaxy stubs are a no-op here (single-galaxy universes can't have
     // cross-galaxy wormholes) but the helper handles that case cleanly.
     const crossDirs = buildCrossGalaxyDirections(data, singleId);
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors, crossDirs) };
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors, 'galaxy', crossDirs) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -1148,7 +1199,7 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id, galaxy.sectors);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id, galaxy.sectors, 'universe');
       ctx.restore();
       hit.push(...subHit);
     }
@@ -1281,7 +1332,11 @@ function drawCrossGalaxyWormholeLines(
   }
 
   ctx.save();
-  ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+  // Dash pattern scaled by 1/viewScale so dash spacing stays constant in
+  // screen pixels at every zoom (matches the line width).
+  const dashUnit = WORMHOLE_CONNECTION_DASH[0] / viewScale;
+  ctx.setLineDash([dashUnit, dashUnit]);
+  ctx.lineDashOffset = 0;
   ctx.lineWidth = 1 / viewScale;
   // Draw faintest first so brighter tiers paint on top (matters where lines
   // overlap or share a galaxy endpoint).
@@ -1359,6 +1414,18 @@ function getOrBuildLayout(
  * galaxy's shape. Extracted from `drawGalaxyScene` so it can be reused for
  * the single-galaxy legacy path, focus mode, and each above-LOD galaxy in
  * the multi-galaxy view. Returns hit circles in canvas coordinates.
+ *
+ * `mode` discriminates the two callers:
+ *   - 'galaxy'   — focus mode + single-galaxy legacy: draw sectors and intra-
+ *                  galaxy wormhole connection lines; per-system hits are
+ *                  pushed with `kind: 'system'` so the system popup opens.
+ *   - 'universe' — embedded spiral in the multi-galaxy overview: skip sectors
+ *                  and intra-galaxy wormhole lines (only inter-galaxy lines
+ *                  are drawn, separately by drawCrossGalaxyWormholeLines).
+ *                  Per-system hits are pushed with `kind: 'galaxy'` and the
+ *                  parent galaxyId so clicks resolve to the galaxy popup —
+ *                  the user must explicitly enter the galaxy view to inspect
+ *                  individual systems.
  */
 function drawGalaxySpiral(
   ctx: CanvasRenderingContext2D,
@@ -1374,6 +1441,7 @@ function drawGalaxySpiral(
   shape: 'spiral' | 'oval' = 'spiral',
   galaxyId: string = '',
   sectors: SectorData[] = [],
+  mode: 'universe' | 'galaxy' = 'galaxy',
   /**
    * Optional: when the renderer wants to surface cross-galaxy wormhole links
    * inside a focused single-galaxy view, this map provides — per wormhole id
@@ -1396,20 +1464,50 @@ function drawGalaxySpiral(
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
 
   // Sector mesh sits between glow halo and star dots — thin Voronoi edges
-  // only, no fill or glow. LOD fade is inherited from the caller's
-  // globalAlpha (systemsAlpha in the multi-galaxy path), so sectors fade in
-  // lockstep with star dots.
-  const mesh = buildOrGetSectorMesh(sectors, cx, cy, spread, shape, galaxyId);
-  drawGalaxySectors(ctx, mesh, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
+  // only, no fill or glow. Only drawn in the dedicated galaxy view; the
+  // multi-galaxy universe overview suppresses sectors so the embedded
+  // spirals read as galaxy outlines, not subdivided maps.
+  if (mode === 'galaxy') {
+    const mesh = buildOrGetSectorMesh(sectors, cx, cy, spread, shape, galaxyId);
+    drawGalaxySectors(ctx, mesh, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
+  }
 
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
 
+  // Body sizes are normally clamped to a fixed screen-px range (4–14) which
+  // makes systems stay readable at any zoom. In the multi-galaxy universe
+  // view the galaxy itself only occupies ~35–60 px on screen, so a fixed
+  // 8-px body looks proportionally HUGE relative to the galaxy. Scale all
+  // bodies down by `bodyScaleFactor` once the galaxy on-screen radius drops
+  // below the reference value. In the focused galaxy view the galaxy fills
+  // the canvas (~290 px radius), the factor saturates at 1, and the body
+  // sizes are unchanged.
+  //
+  // In universe mode we additionally cap the factor below 1 so bodies never
+  // reach their full galaxy-view size even when the user zooms in close on
+  // a single galaxy. A regular star's glow halo can extend to ~30 px and a
+  // pulsar's beam to STANDALONE_CAP_PX, which together visually swallow
+  // neighbouring systems in the embedded spiral. The hard ceiling keeps
+  // bodies compact in the universe view; the user has to enter the focused
+  // galaxy view to see them at full size.
+  const UNIVERSE_BODY_SCALE_CEILING = 0.45;
+  const galaxyScreenRadius = spread * 0.52 * viewScale;
+  const ceiling = mode === 'universe' ? UNIVERSE_BODY_SCALE_CEILING : 1;
+  const bodyScaleFactor = Math.min(ceiling, galaxyScreenRadius / REFERENCE_GALAXY_RADIUS_PX);
+
+  // In universe mode use ABSOLUTE radius bounds [5, 10000] so a body's size
+  // correlates to the actual star radius across subtypes. Per-galaxy bounds
+  // (used in galaxy mode) would map a red-dwarf-dominated galaxy's biggest
+  // dwarf to scaleMap=14 — the same size as a supergiant in a mixed galaxy.
+  const sMin = mode === 'universe' ? UNIVERSE_ABS_RADIUS_MIN : minR;
+  const sMax = mode === 'universe' ? UNIVERSE_ABS_RADIUS_MAX : maxR;
+
   // Conservative cull margin using the maximum possible sizePx (scaleMap
   // output is always ≤ 14) — lets us skip scaleMap (Math.sqrt) and the
   // rotation entirely for systems that can't be in view.
-  const maxSizePx = 14 * cameraScale / viewScale;
-  const cullMargin = maxSizePx * 1.5;
+  const maxSizePx = 14 * cameraScale * bodyScaleFactor / viewScale;
+  const cullMargin = Math.max(maxSizePx * 1.5, 4 / viewScale);
 
   // Maximum squared distance from galaxy centre that could ever be in view.
   // Rotation preserves distance from centre, so any system whose raw distance
@@ -1428,37 +1526,62 @@ function drawGalaxySpiral(
   }
 
   const hit: HitCircle[] = [];
-  // Map system id → rotated screen position. Reused below to draw dotted
-  // wormhole connection lines without re-running the rotation per pair.
-  // Only systems that survive the frustum cull are inserted.
-  const visibleSystemPos = new Map<string, { x: number; y: number }>();
+  // Map system id → rotated screen position for EVERY system in this galaxy
+  // (including culled ones). Wormhole connection lines need the partner
+  // endpoint even when that partner is offscreen — canvas clips the line
+  // naturally, but we still need a position to draw to.
+  const systemPos = new Map<string, { x: number; y: number }>();
   for (let i = 0; i < systems.length; i++) {
     const raw = rawPositions[i];
     const dx = raw.x - cx;
     const dy = raw.y - cy;
 
+    // Inline rotation — done unconditionally so wormhole partner lookups
+    // always find a position. Body drawing + hit pushing are still gated by
+    // the cull below.
+    const px = cx + dx * cosG - dy * sinG;
+    const py = cy + dx * sinG + dy * cosG;
+    systemPos.set(systems[i].id, { x: px, y: py });
+
     // Pre-cull by distance from centre — no rotation needed (rotation is
     // rigid-body, so distance from centre is invariant).
     if (viewBounds && dx * dx + dy * dy > maxViewDistSq) continue;
-
-    // Inline rotation.
-    const px = cx + dx * cosG - dy * sinG;
-    const py = cy + dx * sinG + dy * cosG;
 
     // Cull by viewport bounds using the conservative max margin.
     if (viewBounds && !circleIntersectsViewBounds(px, py, cullMargin, viewBounds)) continue;
 
     // Only compute exact sizePx (Math.sqrt inside scaleMap) for visible systems.
-    const sizePx = scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale / viewScale;
+    // `bodyScaleFactor` shrinks bodies when the galaxy is small on screen so
+    // they stay proportional to the galaxy itself. `sMin / sMax` are absolute
+    // radius bounds in universe mode (red dwarfs always tiny, quasars always
+    // big) and per-galaxy in galaxy mode (the largest star fills the range).
+    // Defensive clamp matches the cull margin and guards against future
+    // cameraScale > 1.
+    const sizePx = Math.min(
+      scaleMap(maxStarRadii[i], sMin, sMax, 4, 14, 'sqrt') * cameraScale * bodyScaleFactor / viewScale,
+      14 * bodyScaleFactor / viewScale,
+    );
 
-    hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
-    visibleSystemPos.set(systems[i].id, { x: px, y: py });
+    // In universe mode every embedded-system hit resolves to the parent
+    // galaxy popup — the only way to inspect a system is to enter the
+    // galaxy view first.
+    if (mode === 'galaxy') {
+      hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'system', id: systems[i].id });
+    } else {
+      hit.push({ x: px, y: py, r: Math.max(sizePx * 1.4, 8 / viewScale), kind: 'galaxy', id: galaxyId });
+    }
 
     const dominant = systems[i].stars[0] ?? null;
     if (dominant && isExoticSubtype(dominant.subtype)) {
       // Exotic systems use their dedicated visual at galaxy zoom too —
       // scaled down so they blend into the spiral but stay recognisable.
-      drawStarBody(ctx, px, py, sizePx * 0.6, dominant);
+      // Cap the input r so the outermost geometry (jet / halo / beams) never
+      // exceeds `STANDALONE_CAP_PX * bodyScaleFactor` screen pixels — the
+      // proportional cap matches the regular star scale-down so a quasar in
+      // the universe view never dwarfs a neighbouring main-sequence dot.
+      const mult = EXOTIC_MAX_EXTENT_MULT[dominant.subtype] ?? 6;
+      const exoticR = Math.min(sizePx * 0.6, STANDALONE_CAP_PX * bodyScaleFactor / (mult * viewScale));
+      drawStarBody(ctx, px, py, exoticR, dominant);
     } else {
       const palette = dominant ? starFill(dominant) : { core: '#fff', glowInner: 'rgba(255,255,255,0.8)', glowOuter: 'rgba(255,255,255,0)' };
       const outerR = sizePx * GLOW_OUTER_MULT;
@@ -1470,56 +1593,62 @@ function drawGalaxySpiral(
   // Same-galaxy wormhole connection lines. Dotted white, drawn after the
   // system dots so the line endpoints land cleanly on top of each visible
   // system. Pairs are deduplicated via a sorted id tuple so each connection
-  // is drawn exactly once even when both endpoints are visible.
-  const drawnPairs = new Set<string>();
-  let dashApplied = false;
-  for (const sys of systems) {
-    if (!sys.wormholes || sys.wormholes.length === 0) continue;
-    const here = visibleSystemPos.get(sys.id);
-    if (!here) continue;
-    for (const wormhole of sys.wormholes) {
-      if (!wormhole.partnerId) continue;
-      // Resolve the partner's parent system. Stored on each wormhole in
-      // `systemIdToWormhole`-style lookups — but the renderer doesn't carry
-      // a universe-wide index. Instead, we walk the galaxy's systems for
-      // an O(N · wormholes) match. N is tiny per galaxy (≤ 100 standalone
-      // systems in practice), and we already filtered to in-galaxy systems.
-      let partnerSystemId: string | null = null;
-      for (const candidate of systems) {
-        if (!candidate.wormholes) continue;
-        for (const cw of candidate.wormholes) {
-          if (cw.id === wormhole.partnerId) {
-            partnerSystemId = candidate.id;
-            break;
-          }
-        }
-        if (partnerSystemId) break;
+  // is drawn exactly once. Only drawn in the dedicated galaxy view; the
+  // multi-galaxy universe overview shows only inter-galaxy connections
+  // (rendered separately).
+  if (mode === 'galaxy') {
+    // wormholeId → parent systemId lookup, built once over `systems`. The
+    // partner search has to find a system whose wormholes contain the
+    // partnerId; iterating the full systems × wormholes nested loop per
+    // wormhole pair was O(N²·W) and brittle. This pre-built map makes the
+    // lookup O(1) and makes off-by-one bugs impossible to hide.
+    const wormholeToSystem = new Map<string, string>();
+    for (const sys of systems) {
+      if (!sys.wormholes) continue;
+      for (const w of sys.wormholes) {
+        wormholeToSystem.set(w.id, sys.id);
       }
-      if (!partnerSystemId) continue; // partner lives in another galaxy
-      const partnerPos = visibleSystemPos.get(partnerSystemId);
-      if (!partnerPos) continue; // partner system was culled
-
-      const a = wormhole.id < wormhole.partnerId ? wormhole.id : wormhole.partnerId;
-      const b = wormhole.id < wormhole.partnerId ? wormhole.partnerId : wormhole.id;
-      const key = `${a}|${b}`;
-      if (drawnPairs.has(key)) continue;
-      drawnPairs.add(key);
-
-      if (!dashApplied) {
-        ctx.save();
-        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
-        ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
-        ctx.lineWidth = 1 / viewScale;
-        dashApplied = true;
-      }
-      ctx.beginPath();
-      ctx.moveTo(here.x, here.y);
-      ctx.lineTo(partnerPos.x, partnerPos.y);
-      ctx.stroke();
     }
-  }
-  if (dashApplied) {
-    ctx.restore();
+
+    const drawnPairs = new Set<string>();
+    let dashApplied = false;
+    for (const sys of systems) {
+      if (!sys.wormholes || sys.wormholes.length === 0) continue;
+      const here = systemPos.get(sys.id);
+      if (!here) continue;
+      for (const wormhole of sys.wormholes) {
+        if (!wormhole.partnerId) continue;
+        const partnerSystemId = wormholeToSystem.get(wormhole.partnerId);
+        if (!partnerSystemId) continue; // partner lives in another galaxy
+        const partnerPos = systemPos.get(partnerSystemId);
+        if (!partnerPos) continue; // partner not in our position map (shouldn't happen)
+
+        const a = wormhole.id < wormhole.partnerId ? wormhole.id : wormhole.partnerId;
+        const b = wormhole.id < wormhole.partnerId ? wormhole.partnerId : wormhole.id;
+        const key = `${a}|${b}`;
+        if (drawnPairs.has(key)) continue;
+        drawnPairs.add(key);
+
+        if (!dashApplied) {
+          ctx.save();
+          // Dash pattern scaled by 1/viewScale so dash spacing stays constant
+          // in screen pixels at every zoom (matches the line width below).
+          const dashUnit = WORMHOLE_CONNECTION_DASH[0] / viewScale;
+          ctx.setLineDash([dashUnit, dashUnit]);
+          ctx.lineDashOffset = 0;
+          ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
+          ctx.lineWidth = 1 / viewScale;
+          dashApplied = true;
+        }
+        ctx.beginPath();
+        ctx.moveTo(here.x, here.y);
+        ctx.lineTo(partnerPos.x, partnerPos.y);
+        ctx.stroke();
+      }
+    }
+    if (dashApplied) {
+      ctx.restore();
+    }
   }
 
   // Cross-galaxy stubs. In focused single-galaxy view, surface wormholes
@@ -1528,21 +1657,25 @@ function drawGalaxySpiral(
   // terminating just past the visible rim so the user can read "this link
   // exits the galaxy in roughly that direction" without ever rendering the
   // destination. Skipped (null map) in the multi-galaxy embed path, which
-  // already draws full inter-galaxy lines between galaxy centres.
-  if (crossGalaxyDirections && crossGalaxyDirections.size > 0) {
+  // already draws full inter-galaxy lines between galaxy centres, and gated
+  // on the focused galaxy view (mode === 'galaxy') so the universe overview
+  // never doubles up on stubs + inter-galaxy lines.
+  if (mode === 'galaxy' && crossGalaxyDirections && crossGalaxyDirections.size > 0) {
     const stubLen = spread * 0.45;
     const tipMarkerR = 2.5 / viewScale;
+    const stubDashUnit = WORMHOLE_CONNECTION_DASH[0] / viewScale;
     let stubDashApplied = false;
     for (const sys of systems) {
       if (!sys.wormholes || sys.wormholes.length === 0) continue;
-      const pos = visibleSystemPos.get(sys.id);
+      const pos = systemPos.get(sys.id);
       if (!pos) continue;
       for (const wormhole of sys.wormholes) {
         const dir = crossGalaxyDirections.get(wormhole.id);
         if (!dir) continue;
         if (!stubDashApplied) {
           ctx.save();
-          ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+          ctx.setLineDash([stubDashUnit, stubDashUnit]);
+          ctx.lineDashOffset = 0;
           ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
           ctx.lineWidth = 1 / viewScale;
           stubDashApplied = true;
@@ -1560,7 +1693,7 @@ function drawGalaxySpiral(
         ctx.beginPath();
         ctx.arc(endX, endY, tipMarkerR, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+        ctx.setLineDash([stubDashUnit, stubDashUnit]);
       }
     }
     if (stubDashApplied) {
