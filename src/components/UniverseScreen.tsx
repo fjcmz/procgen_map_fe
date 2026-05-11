@@ -187,11 +187,9 @@ export function UniverseScreen({
 
   // Navigate one scene level up from the current view and close the popup.
   //
-  // Hierarchy for navigation purposes:
-  //   Universe → System → Planet
-  // Galaxy view is a side-branch lookup of the universe, NOT a hierarchy
-  // level between universe and system. So planet → system, system → universe,
-  // galaxy view (focused) → universe, universe → no-op.
+  // Hierarchy: Universe → Galaxy → System → Planet.
+  // planet → system (preserve galaxyId), system → its parent galaxy view,
+  // galaxy view → universe overview, universe → no-op.
   //
   // The popup decides WHETHER to show the Up button (only when this scene
   // parent equals the selected entity's parent scene). The action below is
@@ -203,11 +201,15 @@ export function UniverseScreen({
     if (s.scene === 'planet' && s.systemId) {
       canvasRef.current?.navigateTo('system', s.systemId);
     } else if (s.scene === 'system') {
-      canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
+      // Up from a system view → its parent galaxy view. galaxyId is
+      // preserved on the scene state when entering from galaxy view; fall
+      // back to lookup if it's somehow missing.
+      const galId = s.galaxyId ?? (s.systemId ? galaxyIdOfSystem(s.systemId) : null);
+      canvasRef.current?.navigateTo('galaxy', undefined, undefined, galId ?? undefined);
     } else if (s.scene === 'galaxy' && s.galaxyId) {
       canvasRef.current?.navigateTo('galaxy', undefined, undefined, undefined);
     }
-  }, [popupEntity, sceneState]);
+  }, [popupEntity, sceneState, galaxyIdOfSystem]);
 
   // Navigate into the entity's child scene and close the popup.
   const handlePopupNavigateDown = useCallback(() => {

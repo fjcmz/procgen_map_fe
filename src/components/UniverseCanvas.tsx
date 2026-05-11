@@ -167,11 +167,10 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
           if (prev.scene === 'system') {
             transitionRef.current = { start: performance.now() / 1000, from: 'system', to: 'galaxy' };
             transformRef.current = { scale: 1, tx: 0, ty: 0 };
-            // Back from system goes straight to the universe overview (clear
-            // galaxyId). Galaxy view is a side-branch lookup, not a hierarchy
-            // level — landing back there after exiting a system would be a
-            // noop. Mirrors the system popup's ↑ Universe behaviour.
-            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: null };
+            // Back from system view → its parent galaxy view (preserve
+            // galaxyId). The hierarchy is Universe → Galaxy → System → Planet
+            // so the next back press exits the galaxy view to the universe.
+            return { scene: 'galaxy', systemId: null, planetId: null, galaxyId: prev.galaxyId };
           }
           if (prev.scene === 'galaxy' && prev.galaxyId) {
             // Exit galaxy focus mode → multi-galaxy overview.
