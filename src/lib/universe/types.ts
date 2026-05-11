@@ -53,6 +53,25 @@ export interface SolarSystemData {
   composition: SolarSystemComposition;
   stars: StarData[];
   planets: PlanetData[];
+  sectorId: string;
+}
+
+/**
+ * A "sector" groups 2–4 stars within a galaxy via a balanced Voronoi
+ * partition. Sectors are generated at universe-generation time by
+ * `SectorGenerator` and stable across re-runs for a given galaxy id. `cx`/`cy`
+ * is the Voronoi site (also the centroid of the contained stars after Lloyd
+ * relaxation) in raw galaxy-frame coordinates, so the renderer can derive the
+ * visual mesh directly from `sectors[].cx/cy`.
+ *
+ * Sectors carry a scientific designation only — no human name.
+ */
+export interface SectorData {
+  id: string;
+  scientificName: string;
+  cx: number;
+  cy: number;
+  systemIds: string[];
 }
 
 /**
@@ -79,6 +98,7 @@ export interface GalaxyData {
   radius: number;
   spread: number;
   shape: 'spiral' | 'oval';
+  sectors: SectorData[];
 }
 
 export interface UniverseData {

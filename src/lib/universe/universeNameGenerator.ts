@@ -94,6 +94,22 @@ export function generateUniverseName(seed: string): { human: string; scientific:
   return { human: `${stem} ${suffix}`, scientific };
 }
 
+// ── Sector ────────────────────────────────────────────────────────────────
+
+/**
+ * Sector designation — scientific only (no human name per spec). Mirrors the
+ * galaxy `NGC-XXXX` catalog pattern: `SEC-XXXX` where XXXX is 4 uppercase hex
+ * digits derived from the sector id sub-stream.
+ *
+ * Sub-stream: `${seed}_sectorname_${sectorId}` — isolated, never perturbs
+ * physics or naming for other tiers.
+ */
+export function generateSectorName(seed: string, sectorId: string): { scientific: string } {
+  const rng = seededPRNG(`${seed}_sectorname_${sectorId}`);
+  const hex = Math.floor(rng() * 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+  return { scientific: `SEC-${hex}` };
+}
+
 // ── Star ──────────────────────────────────────────────────────────────────
 
 // Short, crisp, exotic 1–2 syllable names: Vega / Altair / Syrix / Kael feel.

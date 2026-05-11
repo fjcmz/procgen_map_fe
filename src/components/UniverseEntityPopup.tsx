@@ -1,6 +1,6 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData } from '../lib/universe/types';
 import type { PopupEntity } from './UniverseCanvas';
 
 interface Props {
@@ -43,6 +43,14 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
     const m = new Map<string, GalaxyData>();
     for (const g of data.galaxies) {
       for (const sid of g.systemIds) m.set(sid, g);
+    }
+    return m;
+  }, [data.galaxies]);
+
+  const sectorById = useMemo(() => {
+    const m = new Map<string, SectorData>();
+    for (const g of data.galaxies) {
+      for (const sec of g.sectors) m.set(sec.id, sec);
     }
     return m;
   }, [data.galaxies]);
@@ -150,6 +158,7 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
             <SystemDetails
               system={system}
               parentGalaxy={grouped ? galaxyBySystem.get(system.id) ?? null : null}
+              parentSector={sectorById.get(system.sectorId) ?? null}
             />
           )}
           {entity.kind === 'star' && star && system && (
@@ -261,15 +270,22 @@ function GalaxyDetails({
 }
 
 function SystemDetails({
-  system, parentGalaxy,
+  system, parentGalaxy, parentSector,
 }: {
   system: SolarSystemData;
   parentGalaxy: GalaxyData | null;
+  parentSector: SectorData | null;
 }) {
   return (
     <>
       <NameRow humanName={system.humanName} scientificName={system.scientificName} />
       <Row label="Type">{system.composition.toLowerCase()}</Row>
+      {parentSector && (
+        <Row label="Sector">
+          <span style={s.entityScientificName}>{parentSector.scientificName}</span>
+          <span style={s.dim}> ({parentSector.systemIds.length} systems)</span>
+        </Row>
+      )}
 
       {parentGalaxy && (
         <Section title="Parent Galaxy">

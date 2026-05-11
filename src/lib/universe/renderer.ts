@@ -9,7 +9,8 @@ import type {
 import type { PlanetSubtype, PlanetBiome } from './Planet';
 import type { SatelliteSubtype } from './Satellite';
 import { computeLayoutExtent } from './galaxyLayout';
-import { buildOrGetSectors, drawGalaxySectors } from './galaxySectors';
+import { buildOrGetSectorMesh, drawGalaxySectors } from './galaxySectors';
+import type { SectorData } from './types';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -706,7 +707,7 @@ export function drawGalaxyScene(
       const cy = vh / 2;
       const spreadPx = Math.min(vw, vh) * 0.7;
       const rotOff = galaxyRotationOffset(focus.id);
-      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id) };
+      return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, focus.shape, focus.id, focus.sectors) };
     }
     // Bogus focus id falls through to multi-galaxy view.
   }
@@ -719,7 +720,8 @@ export function drawGalaxyScene(
     const rotOff = data.galaxies.length === 1 ? galaxyRotationOffset(data.galaxies[0].id) : 0;
     const singleShape = data.galaxies[0]?.shape ?? 'spiral';
     const singleId = data.galaxies[0]?.id ?? '';
-    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId) };
+    const singleSectors = data.galaxies[0]?.sectors ?? [];
+    return { hit: drawGalaxySpiral(ctx, cx, cy, spreadPx, data.solarSystems, timeSec, viewScale, cameraScale, viewBounds, rotOff, singleShape, singleId, singleSectors) };
   }
 
   // Multi-galaxy: world layout with per-galaxy LOD.
@@ -780,7 +782,7 @@ export function drawGalaxyScene(
         .filter((s): s is SolarSystemData => !!s);
       ctx.save();
       ctx.globalAlpha = systemsAlpha;
-      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id);
+      const subHit = drawGalaxySpiral(ctx, gcx, gcy, gSpreadCanvas, systems, timeSec, viewScale, cameraScale, viewBounds, rotOff, galaxy.shape, galaxy.id, galaxy.sectors);
       ctx.restore();
       hit.push(...subHit);
     }
@@ -855,6 +857,7 @@ function drawGalaxySpiral(
   rotationOffset: number = 0,
   shape: 'spiral' | 'oval' = 'spiral',
   galaxyId: string = '',
+  sectors: SectorData[] = [],
 ): HitCircle[] {
   const { rawPositions, maxStarRadii, minR, maxR } = getOrBuildLayout(systems, cx, cy, spread, shape, galaxyId);
 
@@ -869,8 +872,8 @@ function drawGalaxySpiral(
   // only, no fill or glow. LOD fade is inherited from the caller's
   // globalAlpha (systemsAlpha in the multi-galaxy path), so sectors fade in
   // lockstep with star dots.
-  const sectors = buildOrGetSectors(rawPositions, cx, cy, spread, shape, galaxyId);
-  drawGalaxySectors(ctx, sectors, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
+  const mesh = buildOrGetSectorMesh(sectors, cx, cy, spread, shape, galaxyId);
+  drawGalaxySectors(ctx, mesh, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
 
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);

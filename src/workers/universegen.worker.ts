@@ -7,6 +7,7 @@ import type {
   UniverseWorkerMessage,
   SolarSystemData,
   GalaxyData,
+  SectorData,
 } from '../lib/universe/types';
 
 function post(msg: UniverseWorkerMessage): void {
@@ -25,6 +26,7 @@ function serializeUniverse(universe: Universe): UniverseData {
     humanName: ss.humanName,
     scientificName: ss.scientificName,
     composition: ss.composition,
+    sectorId: ss.sectorId,
     stars: ss.stars.map(star => ({
       id: star.id,
       humanName: star.humanName,
@@ -55,17 +57,27 @@ function serializeUniverse(universe: Universe): UniverseData {
       })),
     })),
   }));
-  const galaxies: GalaxyData[] = universe.galaxies.map(g => ({
-    id: g.id,
-    humanName: g.humanName,
-    scientificName: g.scientificName,
-    systemIds: g.solarSystems.map(ss => ss.id),
-    cx: g.cx,
-    cy: g.cy,
-    radius: g.radius,
-    spread: g.spread,
-    shape: g.shape,
-  }));
+  const galaxies: GalaxyData[] = universe.galaxies.map(g => {
+    const sectors: SectorData[] = g.sectors.map(sec => ({
+      id: sec.id,
+      scientificName: sec.scientificName,
+      cx: sec.cx,
+      cy: sec.cy,
+      systemIds: sec.solarSystems.map(ss => ss.id),
+    }));
+    return {
+      id: g.id,
+      humanName: g.humanName,
+      scientificName: g.scientificName,
+      systemIds: g.solarSystems.map(ss => ss.id),
+      cx: g.cx,
+      cy: g.cy,
+      radius: g.radius,
+      spread: g.spread,
+      shape: g.shape,
+      sectors,
+    };
+  });
   return {
     id: universe.id,
     humanName: universe.humanName,

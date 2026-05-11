@@ -1,6 +1,7 @@
 import { Universe } from './Universe';
 import { Galaxy } from './Galaxy';
 import { solarSystemGenerator } from './SolarSystemGenerator';
+import { sectorGenerator } from './SectorGenerator';
 import { rndSize } from './helpers';
 import { generateGalaxyName, generateUniverseName } from './universeNameGenerator';
 import { layoutGalaxies } from './galaxyLayout';
@@ -61,6 +62,14 @@ export class UniverseGenerator {
     }
 
     layoutGalaxies(universe.galaxies, seed);
+
+    // Sectors depend on the baked galaxy layout (cx/cy/spread/shape) — they
+    // group each galaxy's stars into balanced 2-4-star Voronoi cells. Run
+    // after layoutGalaxies so the star positions used for balancing match
+    // exactly what the renderer will draw.
+    for (const galaxy of universe.galaxies) {
+      sectorGenerator.generate(galaxy, seed);
+    }
 
     if (universe.galaxies.length === 1) {
       // Legacy single-galaxy case: name the universe with the same galaxy

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type {
   UniverseData,
   GalaxyData,
+  SectorData,
   SolarSystemData,
   StarData,
   PlanetData,
@@ -217,10 +218,11 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
                 onSelect={onSelect}
               />
             ))
-          : visibleSystems.map(system => (
-              <SystemNode
-                key={system.id}
-                system={system}
+          : buildSectorRows(data.galaxies[0]?.sectors ?? [], visibleSystems).map(({ sector, systems }) => (
+              <SectorNode
+                key={sector.id}
+                sector={sector}
+                visibleSystems={systems}
                 filters={filters}
                 expanded={expanded}
                 onToggle={toggle}
@@ -248,6 +250,8 @@ function GalaxyNode({
   const hasChildren = totalSystems > 0;
   const countLabel = formatCount(visibleSystems.length, totalSystems, 'system');
 
+  const sectorRows = buildSectorRows(galaxy.sectors, visibleSystems);
+
   return (
     <div style={s.node}>
       <div style={s.row}>
@@ -265,6 +269,74 @@ function GalaxyNode({
       </div>
       {isOpen && (
         <div style={s.children}>
+          {sectorRows.map(({ sector, systems }) => (
+            <SectorNode
+              key={sector.id}
+              sector={sector}
+              visibleSystems={systems}
+              filters={filters}
+              expanded={expanded}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))}
+          {sectorRows.length === 0 && (
+            <div style={s.emptyChild}>no matching systems</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Group a flat list of (already-filter-passed) systems by their sector,
+// preserving the sector order baked into `sectors`. Sectors with zero matching
+// systems are dropped so the tree doesn't show empty rows.
+function buildSectorRows(
+  sectors: SectorData[],
+  visibleSystems: SolarSystemData[],
+): Array<{ sector: SectorData; systems: SolarSystemData[] }> {
+  const bySector = new Map<string, SolarSystemData[]>();
+  for (const sys of visibleSystems) {
+    const list = bySector.get(sys.sectorId);
+    if (list) list.push(sys);
+    else bySector.set(sys.sectorId, [sys]);
+  }
+  const rows: Array<{ sector: SectorData; systems: SolarSystemData[] }> = [];
+  for (const sector of sectors) {
+    const systems = bySector.get(sector.id);
+    if (systems && systems.length > 0) rows.push({ sector, systems });
+  }
+  return rows;
+}
+
+function SectorNode({
+  sector, visibleSystems, filters, expanded, onToggle, onSelect,
+}: {
+  sector: SectorData;
+  visibleSystems: SolarSystemData[];
+  filters: Filters;
+  expanded: Set<string>;
+  onToggle: (key: string) => void;
+  onSelect: (entity: PopupEntity) => void;
+}) {
+  const key = `sec:${sector.id}`;
+  const isOpen = expanded.has(key);
+  const total = sector.systemIds.length;
+  const countLabel = formatCount(visibleSystems.length, total, 'system');
+
+  return (
+    <div style={s.node}>
+      <div style={s.row}>
+        <Caret open={isOpen} hasChildren={total > 0} onClick={total > 0 ? () => onToggle(key) : undefined} />
+        <div style={s.sectorLabel}>
+          <span style={s.icon}>◇</span>
+          <span style={s.sci}>{sector.scientificName}</span>
+          <span style={s.dim}> — {countLabel}</span>
+        </div>
+      </div>
+      {isOpen && (
+        <div style={s.children}>
           {visibleSystems.map(system => (
             <SystemNode
               key={system.id}
@@ -275,9 +347,6 @@ function GalaxyNode({
               onSelect={onSelect}
             />
           ))}
-          {visibleSystems.length === 0 && (
-            <div style={s.emptyChild}>no matching systems</div>
-          )}
         </div>
       )}
     </div>
@@ -667,6 +736,18 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'baseline',
     flexWrap: 'wrap',
     borderRadius: 3,
+  },
+  sectorLabel: {
+    flex: 1,
+    minWidth: 0,
+    padding: '2px 4px',
+    fontFamily: 'Georgia, serif',
+    fontSize: 12,
+    color: '#a0a8d0',
+    textAlign: 'left',
+    display: 'flex',
+    alignItems: 'baseline',
+    flexWrap: 'wrap',
   },
   icon: {
     color: '#c8d0ff',
