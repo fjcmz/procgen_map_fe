@@ -331,6 +331,16 @@ const WORMHOLE_RING_ALPHA = 0.55;
 // `drawSystemScene` — so wormholes scale with the system view automatically.
 const WORMHOLE_OFFSET_MIN_SIDE_FACTOR = 1;
 const WORMHOLE_CONNECTION_STROKE = 'rgba(240,245,255,0.58)';
+// Universe-view hover-tier strokes for cross-galaxy lines. The base alpha
+// is the same as `WORMHOLE_CONNECTION_STROKE` (0.58); tiers scale that.
+//   Tier 1 — line incident to hovered galaxy: full brightness (== base).
+//   Tier 2 — line whose at-least-one endpoint is a wormhole neighbour of the
+//            hovered galaxy: ~30% of base.
+//   Tier 3 — every other inter-galaxy line: ~10% of base.
+// When no galaxy is hovered, every line falls back to tier 2 (30%).
+const WORMHOLE_LINE_TIER_FULL = 'rgba(240,245,255,0.58)';
+const WORMHOLE_LINE_TIER_DIM = 'rgba(240,245,255,0.17)';     // ≈ 0.58 × 0.3
+const WORMHOLE_LINE_TIER_FAINT = 'rgba(240,245,255,0.06)';   // ≈ 0.58 × 0.1
 const WORMHOLE_CONNECTION_DASH: [number, number] = [4, 4];
 
 function drawWormholeBody(
@@ -1018,6 +1028,14 @@ export function drawGalaxyScene(
   timeSec: number = 0,
   focusGalaxyId: string | null = null,
   viewBounds?: ViewBounds,
+  /**
+   * Universe-view hover state. When set to a galaxy id, the cross-galaxy
+   * wormhole lines drawn in the multi-galaxy path classify each line into
+   * three brightness tiers (incident / neighbour / unrelated). When null,
+   * every line renders at the default dim (30%) tier. Has no effect in the
+   * focus or single-galaxy paths.
+   */
+  hoveredGalaxyId: string | null = null,
 ): GalaxyDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
 
@@ -1141,7 +1159,7 @@ export function drawGalaxyScene(
   // between the two galaxy centres (deduplicated per galaxy pair so multiple
   // wormhole connections between the same two galaxies render as a single
   // line). Drawn last so it sits on top of glyphs and embedded spirals.
-  drawCrossGalaxyWormholeLines(ctx, data, galaxyCanvasPos, viewScale);
+  drawCrossGalaxyWormholeLines(ctx, data, galaxyCanvasPos, viewScale, hoveredGalaxyId);
 
   return { hit };
 }
@@ -1200,6 +1218,7 @@ function drawCrossGalaxyWormholeLines(
   data: UniverseData,
   galaxyCanvasPos: Map<string, { x: number; y: number }>,
   viewScale: number,
+  hoveredGalaxyId: string | null,
 ): void {
   // wormholeId → galaxyId, built lazily from `data.solarSystems` so this
   // helper has no dependency on the worker-side `Universe.mapWormholes`.
@@ -1211,41 +1230,80 @@ function drawCrossGalaxyWormholeLines(
     }
   }
 
-  const drawnPairs = new Set<string>();
-  let dashApplied = false;
+  // Collect each unique galaxy-pair link once (sorted-tuple dedup), since
+  // multiple wormholes between the same two galaxies render as a single line.
+  const pairs: Array<{ a: string; b: string }> = [];
+  const seen = new Set<string>();
   for (const sys of data.solarSystems) {
     if (!sys.wormholes || sys.wormholes.length === 0) continue;
     for (const w of sys.wormholes) {
       if (!w.partnerId) continue;
       const partnerGalaxy = wormholeGalaxy.get(w.partnerId);
-      if (!partnerGalaxy || partnerGalaxy === w.galaxyId) continue; // same galaxy → handled inside drawGalaxySpiral
-
+      if (!partnerGalaxy || partnerGalaxy === w.galaxyId) continue;
       const a = w.galaxyId < partnerGalaxy ? w.galaxyId : partnerGalaxy;
       const b = w.galaxyId < partnerGalaxy ? partnerGalaxy : w.galaxyId;
       const key = `${a}|${b}`;
-      if (drawnPairs.has(key)) continue;
-      drawnPairs.add(key);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({ a, b });
+    }
+  }
+  if (pairs.length === 0) return;
 
-      const here = galaxyCanvasPos.get(w.galaxyId);
-      const there = galaxyCanvasPos.get(partnerGalaxy);
+  // Neighbour set for the hovered galaxy — every galaxy connected to it via
+  // at least one cross-galaxy wormhole. Empty when no galaxy is hovered.
+  const neighbours = new Set<string>();
+  if (hoveredGalaxyId) {
+    for (const { a, b } of pairs) {
+      if (a === hoveredGalaxyId) neighbours.add(b);
+      else if (b === hoveredGalaxyId) neighbours.add(a);
+    }
+  }
+
+  // Classify every pair into one of three tiers. Tier draws are batched so
+  // we only call setLineDash / set strokeStyle a handful of times.
+  const tier1: Array<{ a: string; b: string }> = [];
+  const tier2: Array<{ a: string; b: string }> = [];
+  const tier3: Array<{ a: string; b: string }> = [];
+  for (const p of pairs) {
+    if (!hoveredGalaxyId) {
+      // Default state: every line at the dim (30%) tier.
+      tier2.push(p);
+      continue;
+    }
+    if (p.a === hoveredGalaxyId || p.b === hoveredGalaxyId) {
+      tier1.push(p);
+    } else if (neighbours.has(p.a) || neighbours.has(p.b)) {
+      tier2.push(p);
+    } else {
+      tier3.push(p);
+    }
+  }
+
+  ctx.save();
+  ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
+  ctx.lineWidth = 1 / viewScale;
+  // Draw faintest first so brighter tiers paint on top (matters where lines
+  // overlap or share a galaxy endpoint).
+  const tiers: Array<[Array<{ a: string; b: string }>, string]> = [
+    [tier3, WORMHOLE_LINE_TIER_FAINT],
+    [tier2, WORMHOLE_LINE_TIER_DIM],
+    [tier1, WORMHOLE_LINE_TIER_FULL],
+  ];
+  for (const [lines, stroke] of tiers) {
+    if (lines.length === 0) continue;
+    ctx.strokeStyle = stroke;
+    for (const { a, b } of lines) {
+      const here = galaxyCanvasPos.get(a);
+      const there = galaxyCanvasPos.get(b);
       if (!here || !there) continue;
-
-      if (!dashApplied) {
-        ctx.save();
-        ctx.setLineDash(WORMHOLE_CONNECTION_DASH);
-        ctx.strokeStyle = WORMHOLE_CONNECTION_STROKE;
-        ctx.lineWidth = 1 / viewScale;
-        dashApplied = true;
-      }
       ctx.beginPath();
       ctx.moveTo(here.x, here.y);
       ctx.lineTo(there.x, there.y);
       ctx.stroke();
     }
   }
-  if (dashApplied) {
-    ctx.restore();
-  }
+  ctx.restore();
 }
 
 function galaxyRotationOffset(galaxyId: string): number {

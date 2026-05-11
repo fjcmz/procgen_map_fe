@@ -121,6 +121,12 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     const isMouseDraggingRef = useRef(false);
     const lastMouseRef = useRef({ x: 0, y: 0 });
     const hasDraggedRef = useRef(false);
+    // Current mouse position over the canvas, or null when the mouse is
+    // outside. Used by the RAF loop to resolve which galaxy (if any) the
+    // pointer is over so the cross-galaxy wormhole renderer can dim/brighten
+    // lines accordingly. Touch input never sets this — hover-only feature.
+    const mousePosRef = useRef<{ x: number; y: number } | null>(null);
+    const hoveredGalaxyIdRef = useRef<string | null>(null);
 
     // Keep the latest onEntityClick callback in a ref so the click handler
     // effect doesn't need to re-register on every render.
@@ -258,9 +264,30 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         ctx.save();
         ctx.setTransform(scale, 0, 0, scale, tx, ty);
 
+        // Resolve hovered galaxy from the prior frame's hit list. The galaxy
+        // scene is the only path that emits 'galaxy' hits, so this is a
+        // no-op everywhere else. Mouse-position is tracked in screen space,
+        // matching the post-transform hit positions in `lastHitRef`.
+        let hoveredGalaxyId: string | null = null;
+        const mp = mousePosRef.current;
+        if (mp && state.scene === 'galaxy' && !state.galaxyId) {
+          const hits = lastHitRef.current;
+          for (let i = hits.length - 1; i >= 0; i--) {
+            const h = hits[i];
+            if (h.kind !== 'galaxy') continue;
+            const dx = h.x - mp.x;
+            const dy = h.y - mp.y;
+            if (dx * dx + dy * dy <= h.r * h.r) {
+              hoveredGalaxyId = h.id;
+              break;
+            }
+          }
+        }
+        hoveredGalaxyIdRef.current = hoveredGalaxyId;
+
         let rawHit: HitCircle[] = [];
         if (state.scene === 'galaxy') {
-          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId, viewBounds).hit;
+          rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId, viewBounds, hoveredGalaxyId).hit;
         } else if (state.scene === 'system' && system) {
           rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
         } else if (state.scene === 'planet' && planet) {
@@ -470,6 +497,30 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         canvas.removeEventListener('mousedown', onMouseDown);
         window.removeEventListener('mousemove', onMouseMove);
         window.removeEventListener('mouseup', onMouseUp);
+      };
+    }, []);
+
+    // ── Hover tracking (universe-view wormhole line highlighting) ─────────────
+    // Pointer position in canvas-relative coordinates, refreshed on every
+    // mousemove and cleared on mouseleave. The RAF render loop resolves it
+    // against the prior frame's hit list to decide which galaxy (if any) is
+    // currently hovered. Decoupled from the drag/click listeners above so
+    // hover updates fire whether or not the user is mid-drag.
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const onPointerMove = (e: MouseEvent) => {
+        const rect = canvas.getBoundingClientRect();
+        mousePosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      };
+      const onPointerLeave = () => {
+        mousePosRef.current = null;
+      };
+      canvas.addEventListener('mousemove', onPointerMove);
+      canvas.addEventListener('mouseleave', onPointerLeave);
+      return () => {
+        canvas.removeEventListener('mousemove', onPointerMove);
+        canvas.removeEventListener('mouseleave', onPointerLeave);
       };
     }, []);
 
