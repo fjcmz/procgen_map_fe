@@ -1349,10 +1349,20 @@ function drawGalaxySpiral(
   // 8-px body looks proportionally HUGE relative to the galaxy. Scale all
   // bodies down by `bodyScaleFactor` once the galaxy on-screen radius drops
   // below the reference value. In the focused galaxy view the galaxy fills
-  // the canvas (~290 px radius), the factor stays 1, and the body sizes are
-  // unchanged.
+  // the canvas (~290 px radius), the factor saturates at 1, and the body
+  // sizes are unchanged.
+  //
+  // In universe mode we additionally cap the factor below 1 so bodies never
+  // reach their full galaxy-view size even when the user zooms in close on
+  // a single galaxy. A regular star's glow halo can extend to ~30 px and a
+  // pulsar's beam to STANDALONE_CAP_PX, which together visually swallow
+  // neighbouring systems in the embedded spiral. The hard ceiling keeps
+  // bodies compact in the universe view; the user has to enter the focused
+  // galaxy view to see them at full size.
+  const UNIVERSE_BODY_SCALE_CEILING = 0.55;
   const galaxyScreenRadius = spread * 0.52 * viewScale;
-  const bodyScaleFactor = Math.min(1, galaxyScreenRadius / REFERENCE_GALAXY_RADIUS_PX);
+  const ceiling = mode === 'universe' ? UNIVERSE_BODY_SCALE_CEILING : 1;
+  const bodyScaleFactor = Math.min(ceiling, galaxyScreenRadius / REFERENCE_GALAXY_RADIUS_PX);
 
   // Conservative cull margin using the maximum possible sizePx (scaleMap
   // output is always ≤ 14) — lets us skip scaleMap (Math.sqrt) and the
