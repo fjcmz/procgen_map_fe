@@ -231,6 +231,7 @@ export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavig
               galaxy={galaxy}
               data={data}
               onSelectSystem={onSelectEntity ? (sid) => onSelectEntity({ kind: 'system', systemId: sid }) : undefined}
+              onSelectGalaxy={onSelectEntity ? (gid) => onSelectEntity({ kind: 'galaxy', galaxyId: gid }) : undefined}
             />
           )}
           {entity.kind === 'system' && system && (
@@ -305,11 +306,12 @@ export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavig
 // ── Sub-components ────────────────────────────────────────────────────────
 
 function GalaxyDetails({
-  galaxy, data, onSelectSystem,
+  galaxy, data, onSelectSystem, onSelectGalaxy,
 }: {
   galaxy: GalaxyData;
   data: UniverseData;
   onSelectSystem?: (systemId: string) => void;
+  onSelectGalaxy?: (galaxyId: string) => void;
 }) {
   const systems = galaxy.systemIds
     .map(id => data.solarSystems.find(s => s.id === id))
@@ -327,6 +329,78 @@ function GalaxyDetails({
     else matterCount += 1;
   }
   const avgStars = systems.length ? (totalStars / systems.length).toFixed(1) : '0';
+
+  // Wormhole reachability — BFS over the cross-galaxy adjacency graph. Build
+  // once per popup mount via useMemo; the result groups every reachable
+  // galaxy by hop count from this one. Lazy: only runs when the user opens
+  // a galaxy popup, so even huge universes don't pay for unread sections.
+  const galaxyById = useMemo(() => {
+    const m = new Map<string, GalaxyData>();
+    for (const g of data.galaxies) m.set(g.id, g);
+    return m;
+  }, [data.galaxies]);
+
+  const reach = useMemo(() => {
+    // Adjacency: galaxyId → set of cross-galaxy neighbours via wormholes.
+    const wormholeGalaxy = new Map<string, string>();
+    for (const sys of data.solarSystems) {
+      if (!sys.wormholes) continue;
+      for (const w of sys.wormholes) wormholeGalaxy.set(w.id, w.galaxyId);
+    }
+    const adj = new Map<string, Set<string>>();
+    const link = (a: string, b: string) => {
+      if (a === b) return;
+      let s = adj.get(a);
+      if (!s) { s = new Set<string>(); adj.set(a, s); }
+      s.add(b);
+    };
+    for (const sys of data.solarSystems) {
+      if (!sys.wormholes) continue;
+      for (const w of sys.wormholes) {
+        if (!w.partnerId) continue;
+        const partnerGalaxy = wormholeGalaxy.get(w.partnerId);
+        if (!partnerGalaxy) continue;
+        link(w.galaxyId, partnerGalaxy);
+        link(partnerGalaxy, w.galaxyId);
+      }
+    }
+    // BFS from the focused galaxy.
+    const dist = new Map<string, number>();
+    dist.set(galaxy.id, 0);
+    let frontier = [galaxy.id];
+    let d = 0;
+    while (frontier.length > 0) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        const neighbours = adj.get(id);
+        if (!neighbours) continue;
+        for (const n of neighbours) {
+          if (!dist.has(n)) {
+            dist.set(n, d + 1);
+            next.push(n);
+          }
+        }
+      }
+      frontier = next;
+      d++;
+    }
+    const tier1: GalaxyData[] = [];
+    const tier2: GalaxyData[] = [];
+    const tier3: GalaxyData[] = [];
+    // Stable insertion order: walk `data.galaxies` and push only the
+    // reachable ones into their tier so the rendered list matches the
+    // canonical generation order, independent of BFS traversal order.
+    for (const g of data.galaxies) {
+      const hop = dist.get(g.id);
+      if (hop === undefined || hop === 0) continue;
+      if (hop === 1) tier1.push(g);
+      else if (hop === 2) tier2.push(g);
+      else tier3.push(g);
+    }
+    return { tier1, tier2, tier3 };
+  }, [data.solarSystems, data.galaxies, galaxy.id]);
+
+  const totalReachable = reach.tier1.length + reach.tier2.length + reach.tier3.length;
 
   return (
     <>
@@ -362,7 +436,64 @@ function GalaxyDetails({
         ))}
         {systems.length === 0 && <Item><span style={s.dim}>none</span></Item>}
       </CollapsibleSection>
+
+      {totalReachable > 0 && (
+        <>
+          {reach.tier1.length > 0 && (
+            <CollapsibleSection title="Reachable via wormhole — 1 hop" count={reach.tier1.length}>
+              {reach.tier1.map(g => (
+                <ReachableGalaxyRow key={g.id} galaxy={g} galaxyById={galaxyById} onSelectGalaxy={onSelectGalaxy} />
+              ))}
+            </CollapsibleSection>
+          )}
+          {reach.tier2.length > 0 && (
+            <CollapsibleSection title="Reachable via wormhole — 2 hops" count={reach.tier2.length}>
+              {reach.tier2.map(g => (
+                <ReachableGalaxyRow key={g.id} galaxy={g} galaxyById={galaxyById} onSelectGalaxy={onSelectGalaxy} />
+              ))}
+            </CollapsibleSection>
+          )}
+          {reach.tier3.length > 0 && (
+            <CollapsibleSection title="Reachable via wormhole — 3+ hops" count={reach.tier3.length}>
+              {reach.tier3.map(g => (
+                <ReachableGalaxyRow key={g.id} galaxy={g} galaxyById={galaxyById} onSelectGalaxy={onSelectGalaxy} />
+              ))}
+            </CollapsibleSection>
+          )}
+        </>
+      )}
     </>
+  );
+}
+
+function ReachableGalaxyRow({
+  galaxy, galaxyById, onSelectGalaxy,
+}: {
+  galaxy: GalaxyData;
+  galaxyById: Map<string, GalaxyData>;
+  onSelectGalaxy?: (galaxyId: string) => void;
+}) {
+  // `galaxyById` is included for future expansion (e.g. surfacing the
+  // intermediate hop count or path) and to keep the row API symmetric with
+  // the system rows above; unused for now but stable across renders.
+  void galaxyById;
+  const systemCount = galaxy.systemIds.length;
+  return (
+    <Item>
+      {onSelectGalaxy ? (
+        <button
+          type="button"
+          style={s.linkBtn}
+          onClick={() => onSelectGalaxy(galaxy.id)}
+          title="Open galaxy"
+        >
+          <EntityLabel humanName={galaxy.humanName} scientificName={galaxy.scientificName} />
+        </button>
+      ) : (
+        <EntityLabel humanName={galaxy.humanName} scientificName={galaxy.scientificName} />
+      )}
+      <span style={s.dim}> — {systemCount} system{systemCount === 1 ? '' : 's'}</span>
+    </Item>
   );
 }
 
