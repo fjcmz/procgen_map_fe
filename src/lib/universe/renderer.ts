@@ -63,6 +63,22 @@ const STANDALONE_CAP_PX = 11;
 // galaxy in the multi-galaxy universe view shows correspondingly tiny dots
 // instead of disc-sized fixed-px bodies that visually swallow the spiral.
 const REFERENCE_GALAXY_RADIUS_PX = 250;
+
+// Absolute radius bounds spanning ALL star subtypes in `SystemKindInfo.ts`.
+// Per-subtype radii vary by 3 orders of magnitude:
+//   stellar_black_hole [5, 20]   pulsar / neutron / magnetar [10, 25]
+//   white_dwarf [40, 90]         brown_dwarf [80, 200]
+//   red_dwarf [150, 380]         main_sequence [400, 900]
+//   blue_giant [1200, 2400]      red_giant [1500, 3000]
+//   supermassive_black_hole [3000, 9000]   quasar [4000, 10000]
+// The galaxy-view spiral uses per-galaxy min/max for `scaleMap` so the
+// largest star in any galaxy fills the size range. That makes red dwarfs in
+// a red-dwarf-dominated galaxy render as a 14-px disc — visually identical
+// to a supergiant in a mixed galaxy. In universe mode we instead use these
+// absolute bounds so a body's screen size correlates to its actual radius:
+// red dwarfs are always tiny dots, supergiants and quasars are properly big.
+const UNIVERSE_ABS_RADIUS_MIN = 5;
+const UNIVERSE_ABS_RADIUS_MAX = 10000;
 // Absolute generation bounds for star radius (StarGenerator: [400, 900]).
 // Used for size mapping so visual disk size is proportional to actual radius
 // regardless of which other stars share the system.
@@ -1359,10 +1375,17 @@ function drawGalaxySpiral(
   // neighbouring systems in the embedded spiral. The hard ceiling keeps
   // bodies compact in the universe view; the user has to enter the focused
   // galaxy view to see them at full size.
-  const UNIVERSE_BODY_SCALE_CEILING = 0.55;
+  const UNIVERSE_BODY_SCALE_CEILING = 0.45;
   const galaxyScreenRadius = spread * 0.52 * viewScale;
   const ceiling = mode === 'universe' ? UNIVERSE_BODY_SCALE_CEILING : 1;
   const bodyScaleFactor = Math.min(ceiling, galaxyScreenRadius / REFERENCE_GALAXY_RADIUS_PX);
+
+  // In universe mode use ABSOLUTE radius bounds [5, 10000] so a body's size
+  // correlates to the actual star radius across subtypes. Per-galaxy bounds
+  // (used in galaxy mode) would map a red-dwarf-dominated galaxy's biggest
+  // dwarf to scaleMap=14 — the same size as a supergiant in a mixed galaxy.
+  const sMin = mode === 'universe' ? UNIVERSE_ABS_RADIUS_MIN : minR;
+  const sMax = mode === 'universe' ? UNIVERSE_ABS_RADIUS_MAX : maxR;
 
   // Conservative cull margin using the maximum possible sizePx (scaleMap
   // output is always ≤ 14) — lets us skip scaleMap (Math.sqrt) and the
@@ -1413,10 +1436,13 @@ function drawGalaxySpiral(
 
     // Only compute exact sizePx (Math.sqrt inside scaleMap) for visible systems.
     // `bodyScaleFactor` shrinks bodies when the galaxy is small on screen so
-    // they stay proportional to the galaxy itself. Defensive clamp matches
-    // the cull margin and guards against future cameraScale > 1.
+    // they stay proportional to the galaxy itself. `sMin / sMax` are absolute
+    // radius bounds in universe mode (red dwarfs always tiny, quasars always
+    // big) and per-galaxy in galaxy mode (the largest star fills the range).
+    // Defensive clamp matches the cull margin and guards against future
+    // cameraScale > 1.
     const sizePx = Math.min(
-      scaleMap(maxStarRadii[i], minR, maxR, 4, 14, 'sqrt') * cameraScale * bodyScaleFactor / viewScale,
+      scaleMap(maxStarRadii[i], sMin, sMax, 4, 14, 'sqrt') * cameraScale * bodyScaleFactor / viewScale,
       14 * bodyScaleFactor / viewScale,
     );
 
