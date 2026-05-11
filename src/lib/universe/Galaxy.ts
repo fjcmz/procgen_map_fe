@@ -1,5 +1,6 @@
 import { IdUtil } from '../history/IdUtil';
 import type { SolarSystem } from './SolarSystem';
+import type { Sector } from './Sector';
 
 /**
  * Runtime galaxy entity. Lives only inside the worker — like `Universe`,
@@ -16,6 +17,7 @@ export class Galaxy {
   humanName: string = '';
   scientificName: string = '';
   solarSystems: SolarSystem[] = [];
+  sectors: Sector[] = [];
   cx: number = 0;
   cy: number = 0;
   radius: number = 0;

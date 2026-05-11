@@ -17,6 +17,7 @@ export class SolarSystem {
   composition: SolarSystemComposition = 'ROCK';
   stars: Star[] = [];
   planets: Planet[] = [];
+  sectorId: string = '';
   // Transient
   universeId: string = '';
 
