@@ -701,13 +701,13 @@ function drawCompactGlow(
  * exceeds `STANDALONE_CAP_PX` screen pixels.
  */
 const EXOTIC_MAX_EXTENT_MULT: Partial<Record<StarSubtype, number>> = {
-  stellar_black_hole: 1.2,        // photon ring at r * 1.10
-  supermassive_black_hole: 1.2,
+  stellar_black_hole: 2.6,        // accretion ring outerR = r * 2.6
+  supermassive_black_hole: 2.6,
   pulsar: 5.5,                    // beam length r * 5.5
   neutron_star: 2.0,              // halo r * 2.0
   white_hole: 3.2,                // halo r * 3.2 + rays at haloR * 0.95
   magnetar: 4.2,                  // outer ring r * (1.5 + 3 * 0.9)
-  quasar: 6.0,                    // jet length r * 6
+  quasar: 6.0,                    // jet length r * 6 (accretion ring r * 2.6 is smaller)
   quark_star: 2.4,                // compact glow halo r * 2.4
   boson_star: 2.4,
 };
