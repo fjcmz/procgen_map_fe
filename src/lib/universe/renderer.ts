@@ -1301,13 +1301,32 @@ function drawCrossGalaxyWormholeLines(
   }
   if (pairs.length === 0) return;
 
-  // Neighbour set for the hovered galaxy — every galaxy connected to it via
-  // at least one cross-galaxy wormhole. Empty when no galaxy is hovered.
-  const neighbours = new Set<string>();
+  // Reachability set for the hovered galaxy — every galaxy in its connected
+  // component (any hop distance) via cross-galaxy wormholes. Empty when no
+  // galaxy is hovered. Used so tier 2 covers the whole "reachable from
+  // hovered" graph, not just direct neighbours: a line whose both endpoints
+  // lie in this set is part of the hovered galaxy's wormhole network and
+  // should render at the secondary brightness regardless of hop distance.
+  const reachable = new Set<string>();
   if (hoveredGalaxyId) {
+    const adj = new Map<string, string[]>();
     for (const { a, b } of pairs) {
-      if (a === hoveredGalaxyId) neighbours.add(b);
-      else if (b === hoveredGalaxyId) neighbours.add(a);
+      let la = adj.get(a); if (!la) { la = []; adj.set(a, la); } la.push(b);
+      let lb = adj.get(b); if (!lb) { lb = []; adj.set(b, lb); } lb.push(a);
+    }
+    reachable.add(hoveredGalaxyId);
+    const queue: string[] = [hoveredGalaxyId];
+    let head = 0;
+    while (head < queue.length) {
+      const id = queue[head++];
+      const neighbours = adj.get(id);
+      if (!neighbours) continue;
+      for (const n of neighbours) {
+        if (!reachable.has(n)) {
+          reachable.add(n);
+          queue.push(n);
+        }
+      }
     }
   }
 
@@ -1318,13 +1337,16 @@ function drawCrossGalaxyWormholeLines(
   const tier3: Array<{ a: string; b: string }> = [];
   for (const p of pairs) {
     if (!hoveredGalaxyId) {
-      // Default state: every line at the dim (30%) tier.
+      // Default state: every line at the dim (50%) tier.
       tier2.push(p);
       continue;
     }
     if (p.a === hoveredGalaxyId || p.b === hoveredGalaxyId) {
       tier1.push(p);
-    } else if (neighbours.has(p.a) || neighbours.has(p.b)) {
+    } else if (reachable.has(p.a) || reachable.has(p.b)) {
+      // Wormhole adjacency is symmetric and reachability is closed under it,
+      // so testing either endpoint suffices — if one is in the component the
+      // other is too (the line is what put it there).
       tier2.push(p);
     } else {
       tier3.push(p);
