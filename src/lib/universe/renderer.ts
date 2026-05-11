@@ -865,11 +865,12 @@ function drawGalaxySpiral(
 
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
 
-  // Sector backdrop sits between glow halo and star dots. LOD fade is
-  // inherited from the caller's globalAlpha (systemsAlpha in the multi-galaxy
-  // path), so sectors fade in lockstep with star dots.
-  const sectors = buildOrGetSectors(rawPositions, cx, cy, spread, shape, galaxyId, sampleStar?.composition);
-  drawGalaxySectors(ctx, sectors, cx, cy, spread, shape, galaxyId, galaxyAngle);
+  // Sector mesh sits between glow halo and star dots — thin Voronoi edges
+  // only, no fill or glow. LOD fade is inherited from the caller's
+  // globalAlpha (systemsAlpha in the multi-galaxy path), so sectors fade in
+  // lockstep with star dots.
+  const sectors = buildOrGetSectors(rawPositions, cx, cy, spread, shape, galaxyId);
+  drawGalaxySectors(ctx, sectors, cx, cy, spread, shape, galaxyId, galaxyAngle, viewScale);
 
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
