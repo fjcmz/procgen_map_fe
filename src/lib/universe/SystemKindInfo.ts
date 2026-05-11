@@ -5,9 +5,9 @@
  *
  * Weights are integer relative frequencies used by `pickSystemKind`. They are
  * tuned so:
- *  - main_sequence dominates (≈ 55%)
+ *  - main_sequence dominates (≈ 47%)
  *  - exotic planetary kinds are visible but rare (1–5% each)
- *  - standalone kinds combined sit under ~5%
+ *  - standalone kinds combined sit at ~15% (≈2–4% each)
  *
  * The 'binary_star' kind forces a 2-star system. Standalone kinds always have
  * exactly 1 central body and no planets.
@@ -255,7 +255,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [400, 1500],
     hue: STAR_SUBTYPE_HUE.supermassive_black_hole!,
     namingPrefix: 'SMBH',
-    weight: 1.0,
+    weight: 4.5,
   },
   white_hole: {
     displayName: 'White hole',
@@ -267,7 +267,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [800, 2000],
     hue: STAR_SUBTYPE_HUE.white_hole!,
     namingPrefix: 'WH',
-    weight: 0.6,
+    weight: 2.5,
   },
   magnetar: {
     displayName: 'Magnetar',
@@ -279,7 +279,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [200, 600],
     hue: STAR_SUBTYPE_HUE.magnetar!,
     namingPrefix: 'MGT',
-    weight: 0.8,
+    weight: 3.5,
   },
   quark_star: {
     displayName: 'Quark star',
@@ -291,7 +291,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [80, 320],
     hue: STAR_SUBTYPE_HUE.quark_star!,
     namingPrefix: 'QS',
-    weight: 0.6,
+    weight: 2.5,
   },
   boson_star: {
     displayName: 'Boson star',
@@ -303,7 +303,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [40, 200],
     hue: STAR_SUBTYPE_HUE.boson_star!,
     namingPrefix: 'BS',
-    weight: 0.5,
+    weight: 2.0,
   },
   quasar: {
     displayName: 'Quasar',
@@ -315,7 +315,7 @@ export const SYSTEM_KIND_INFO: Record<SystemKind, SystemKindInfo> = {
     brightnessRange: [1200, 3000],
     hue: STAR_SUBTYPE_HUE.quasar!,
     namingPrefix: 'QSO',
-    weight: 0.5,
+    weight: 2.0,
   },
 };
 
