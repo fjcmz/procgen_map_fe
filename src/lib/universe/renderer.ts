@@ -9,6 +9,7 @@ import type {
 import type { PlanetSubtype, PlanetBiome } from './Planet';
 import type { SatelliteSubtype } from './Satellite';
 import { computeLayoutExtent } from './galaxyLayout';
+import { buildOrGetSectors, drawGalaxySectors } from './galaxySectors';
 
 /**
  * Universe canvas-2D renderer. Three scenes (galaxy / system / planet),
@@ -60,7 +61,7 @@ const PLANET_ORBIT_SCALE = 5;
 // ── FNV-1a hash for deterministic per-galaxy variability ─────────────────
 // Produces a uint32 from a string id so the same galaxy always gets the
 // same jitter / rotation offset, independent of generation order.
-function hashId(id: string): number {
+export function hashId(id: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < id.length; i++) {
     h ^= id.charCodeAt(i);
@@ -70,7 +71,7 @@ function hashId(id: string): number {
 }
 
 // ── Tiny seeded LCG used only for the static background star field ─────
-function lcg(seed: number): () => number {
+export function lcg(seed: number): () => number {
   let s = seed | 0;
   return () => {
     s = Math.imul(s, 1664525) + 1013904223 | 0;
@@ -863,6 +864,13 @@ function drawGalaxySpiral(
   drawGalaxyGlow(ctx, cx, cy, spread * 0.52, shape, galaxyId, glowRgb, 0.13);
 
   const galaxyAngle = timeSec * GALAXY_SPIN_SPEED + rotationOffset;
+
+  // Sector backdrop sits between glow halo and star dots. LOD fade is
+  // inherited from the caller's globalAlpha (systemsAlpha in the multi-galaxy
+  // path), so sectors fade in lockstep with star dots.
+  const sectors = buildOrGetSectors(rawPositions, cx, cy, spread, shape, galaxyId, sampleStar?.composition);
+  drawGalaxySectors(ctx, sectors, cx, cy, spread, shape, galaxyId, galaxyAngle);
+
   const cosG = Math.cos(galaxyAngle);
   const sinG = Math.sin(galaxyAngle);
 
