@@ -3,7 +3,35 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData } from '../lib/universe/types';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { StarSubtype } from '../lib/universe/SystemKind';
-import type { PopupEntity } from './UniverseCanvas';
+import type { PopupEntity, UniverseSceneState } from './UniverseCanvas';
+
+// Scene-level parent of the user's current view. Galaxy view is treated as a
+// side-branch of the universe, NOT a hierarchy level between universe and
+// system. Returns null when the current view has no parent (universe overview).
+type ParentScene = 'universe' | 'system' | null;
+function viewParentScene(s: UniverseSceneState): ParentScene {
+  if (s.scene === 'planet') return 'system';
+  if (s.scene === 'system') return 'universe';
+  if (s.scene === 'galaxy' && s.galaxyId) return 'universe';
+  return null;
+}
+
+// Scene-level parent of a selected entity (its containing scene).
+function entityParentScene(entity: PopupEntity): ParentScene {
+  if (entity.kind === 'galaxy') return 'universe';
+  if (entity.kind === 'system') return 'universe';
+  if (entity.kind === 'star') return 'system';
+  if (entity.kind === 'planet') return 'system';
+  if (entity.kind === 'wormhole') return 'system';
+  // satellite's parent is the planet scene; no universe/system equivalent
+  // covers it, so return null (no Up affordance).
+  return null;
+}
+
+const PARENT_SCENE_LABEL: Record<Exclude<ParentScene, null>, string> = {
+  universe: 'Universe',
+  system: 'System',
+};
 
 const STAR_SUBTYPE_LABEL: Record<StarSubtype, string> = {
   main_sequence: 'Main-sequence star',
@@ -26,6 +54,7 @@ const STAR_SUBTYPE_LABEL: Record<StarSubtype, string> = {
 interface Props {
   entity: PopupEntity;
   data: UniverseData;
+  sceneState: UniverseSceneState;
   onClose: () => void;
   onNavigateUp: () => void;
   onNavigateDown?: () => void;
@@ -48,7 +77,7 @@ interface Props {
   onSelectEntity?: (entity: PopupEntity) => void;
 }
 
-export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
+export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -120,13 +149,16 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
   };
 
   const grouped = data.galaxies.length > 1;
-  const upLabel =
-    entity.kind === 'galaxy' ? '↑ Universe' :
-    entity.kind === 'system' ? '↑ Universe' :
-    entity.kind === 'star' ? '↑ System' :
-    entity.kind === 'planet' ? '↑ System' :
-    entity.kind === 'wormhole' ? '↑ System' :
-    '↑ Planet';
+  // Up button only appears when the current view's parent scene matches the
+  // selected entity's parent scene — that way the button means the same
+  // thing as the Gen-tab Back button (one scene level up) AND lands the user
+  // on a scene the selected entity makes sense in. When they disagree (e.g.
+  // planet popup at system view: scene up = universe, planet's parent =
+  // system) the button is hidden and the user falls back to Close + Back.
+  const viewParent = viewParentScene(sceneState);
+  const entityParent = entityParentScene(entity);
+  const showUp = viewParent !== null && viewParent === entityParent;
+  const upLabel = showUp && viewParent ? `↑ ${PARENT_SCENE_LABEL[viewParent]}` : null;
 
   // For wormholes, the "down" button jumps to the partner's parent system
   // (the wormhole's only navigation affordance besides closing). Only
@@ -236,7 +268,9 @@ export function UniverseEntityPopup({ entity, data, onClose, onNavigateUp, onNav
         </div>
 
         <div style={s.navRow}>
-          <button style={s.navBtn} onClick={onNavigateUp}>{upLabel}</button>
+          {upLabel && (
+            <button style={s.navBtn} onClick={onNavigateUp}>{upLabel}</button>
+          )}
           {canGenerateWorld && planet && (
             <button
               style={{ ...s.navBtn, ...planetGenerateStyle }}
