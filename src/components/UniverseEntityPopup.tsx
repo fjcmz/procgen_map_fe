@@ -5,13 +5,13 @@ import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindIn
 import type { StarSubtype } from '../lib/universe/SystemKind';
 import type { PopupEntity, UniverseSceneState } from './UniverseCanvas';
 
-// Scene-level parent of the user's current view. Galaxy view is treated as a
-// side-branch of the universe, NOT a hierarchy level between universe and
-// system. Returns null when the current view has no parent (universe overview).
-type ParentScene = 'universe' | 'system' | null;
+// Scene-level parent of the user's current view. Follows the hierarchy
+// Universe → Galaxy → System → Planet. Returns null when the current view
+// has no parent (universe overview).
+type ParentScene = 'universe' | 'galaxy' | 'system' | 'planet' | null;
 function viewParentScene(s: UniverseSceneState): ParentScene {
   if (s.scene === 'planet') return 'system';
-  if (s.scene === 'system') return 'universe';
+  if (s.scene === 'system') return 'galaxy';
   if (s.scene === 'galaxy' && s.galaxyId) return 'universe';
   return null;
 }
@@ -19,18 +19,19 @@ function viewParentScene(s: UniverseSceneState): ParentScene {
 // Scene-level parent of a selected entity (its containing scene).
 function entityParentScene(entity: PopupEntity): ParentScene {
   if (entity.kind === 'galaxy') return 'universe';
-  if (entity.kind === 'system') return 'universe';
+  if (entity.kind === 'system') return 'galaxy';
   if (entity.kind === 'star') return 'system';
   if (entity.kind === 'planet') return 'system';
   if (entity.kind === 'wormhole') return 'system';
-  // satellite's parent is the planet scene; no universe/system equivalent
-  // covers it, so return null (no Up affordance).
+  if (entity.kind === 'satellite') return 'planet';
   return null;
 }
 
 const PARENT_SCENE_LABEL: Record<Exclude<ParentScene, null>, string> = {
   universe: 'Universe',
+  galaxy: 'Galaxy',
   system: 'System',
+  planet: 'Planet',
 };
 
 const STAR_SUBTYPE_LABEL: Record<StarSubtype, string> = {
