@@ -12,6 +12,7 @@ import type { StarComposition } from '../lib/universe/Star';
 import type { PlanetComposition, PlanetBiome } from '../lib/universe/Planet';
 import type { SatelliteComposition } from '../lib/universe/Satellite';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
+import type { SystemKind } from '../lib/universe/SystemKind';
 import type { PopupEntity } from './UniverseCanvas';
 
 interface UniverseTreeTabProps {
@@ -23,8 +24,10 @@ type StarFilter = 'any' | StarComposition;
 type PlanetFilter = 'any' | PlanetComposition;
 type SatelliteFilter = 'any' | SatelliteComposition;
 type BiomeFilter = 'any' | PlanetBiome;
+type KindFilter = 'any' | 'planetary' | 'standalone' | SystemKind;
 
 interface Filters {
+  kind: KindFilter;
   star: StarFilter;
   planet: PlanetFilter;
   satellite: SatelliteFilter;
@@ -33,6 +36,7 @@ interface Filters {
 }
 
 const DEFAULT_FILTERS: Filters = {
+  kind: 'any',
   star: 'any',
   planet: 'any',
   satellite: 'any',
@@ -49,6 +53,16 @@ const BIOME_OPTIONS: ReadonlyArray<readonly [BiomeFilter, string]> = [
   ['swamp', 'Swamp'],
   ['mountains', 'Mountains'],
   ['ocean', 'Ocean'],
+];
+
+// Per-kind chip list, sorted so planetary kinds come first then standalone.
+const KIND_OPTIONS: ReadonlyArray<readonly [KindFilter, string]> = [
+  ['any', 'Any'],
+  ['planetary', 'Planetary'],
+  ['standalone', 'Standalone'],
+  ...(Object.entries(SYSTEM_KIND_INFO) as Array<[SystemKind, typeof SYSTEM_KIND_INFO[SystemKind]]>)
+    .sort(([, a], [, b]) => Number(a.isStandalone) - Number(b.isStandalone))
+    .map(([k, info]) => [k, info.displayName] as const),
 ];
 
 function pluralize(n: number, singular: string): string {
@@ -98,7 +112,15 @@ function planetPasses(planet: PlanetData, f: Filters): boolean {
   return true;
 }
 
+function kindMatches(system: SolarSystemData, f: Filters): boolean {
+  if (f.kind === 'any') return true;
+  if (f.kind === 'planetary') return !isStandaloneKind(system.kind);
+  if (f.kind === 'standalone') return isStandaloneKind(system.kind);
+  return system.kind === f.kind;
+}
+
 function systemPasses(system: SolarSystemData, f: Filters): boolean {
+  if (!kindMatches(system, f)) return false;
   if (system.stars.some(s => starMatches(s, f))) return true;
   if (!isStandaloneKind(system.kind) && system.planets.some(p => planetPasses(p, f))) return true;
   return false;
@@ -151,6 +173,12 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
       {/* Filters */}
       <div style={s.filterBlock}>
         <div style={s.filterTitle}>Filters</div>
+        <FilterRow
+          label="Kind"
+          value={filters.kind}
+          options={KIND_OPTIONS}
+          onChange={v => setFilter('kind', v as KindFilter)}
+        />
         <FilterRow
           label="Star"
           value={filters.star}
