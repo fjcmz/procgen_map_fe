@@ -140,6 +140,37 @@ export interface UniverseData {
   seed: string;
   solarSystems: SolarSystemData[];
   galaxies: GalaxyData[];
+  /**
+   * Optional universe history — present only when the generation request
+   * carried `generateHistory: true`. Each step represents one million years.
+   */
+  history?: UniverseHistoryData;
+}
+
+/**
+ * A single event in the universe-history log. For now the only event type
+ * is "life appeared on a body". Modeled as a discriminated union via the
+ * `type` field so future event types (e.g. extinctions, civilizations) can
+ * extend it without breaking existing readers.
+ */
+export interface UniverseLifeEvent {
+  type: 'LIFE_APPEARED';
+  step: number;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+}
+
+export type UniverseHistoryEvent = UniverseLifeEvent;
+
+export interface UniverseHistoryData {
+  numSteps: number;
+  events: UniverseHistoryEvent[];
+  /**
+   * bodyId → step at which life first appeared on that body. Only contains
+   * bodies that ever developed life. `isAliveAtStep(bodyId, step)` is a
+   * single map lookup + comparison.
+   */
+  lifeAppearedAtStep: Record<string, number>;
 }
 
 /** Worker request — universe pipeline mirrors the planet `WorkerMessage` schema. */
@@ -147,6 +178,14 @@ export interface UniverseGenerateRequest {
   type: 'GENERATE';
   seed: string;
   numSolarSystems: number;
+  /**
+   * When true, run the universe-history simulation after generating the
+   * universe. The static 10% life roll on planets/satellites is skipped —
+   * life is derived from the timeline instead. Defaults to false.
+   */
+  generateHistory?: boolean;
+  /** Steps to simulate (each = 1 million years). 1–5000, default 5000. */
+  numHistorySteps?: number;
 }
 
 export type UniverseWorkerMessage =

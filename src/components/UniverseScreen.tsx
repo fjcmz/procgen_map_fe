@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UniverseCanvas } from './UniverseCanvas';
 import type { UniverseCanvasHandle, UniverseSceneState, PopupEntity } from './UniverseCanvas';
 import { UniverseOverlay } from './UniverseOverlay';
 import { UniverseEntityPopup } from './UniverseEntityPopup';
+import { UniverseTimeline } from './UniverseTimeline';
+import { isAliveAtStep } from '../lib/universe/habitability';
 import type {
   UniverseData,
   PlanetData,
@@ -14,6 +16,7 @@ import type {
 
 const DEFAULT_SEED = 'cosmos';
 const DEFAULT_SOLAR_SYSTEMS = 500;
+const DEFAULT_NUM_HISTORY_STEPS = 5000;
 
 interface UniverseScreenProps {
   /** Lifted to App so the universe survives a round-trip through the planet flow. */
@@ -26,11 +29,16 @@ interface UniverseScreenProps {
   returnTo?: { systemId: string; planetId?: string } | null;
   /** Called once after `returnTo` has been consumed by canvas navigation. */
   onReturnToConsumed?: () => void;
-  /** Called when the user presses "Generate World" in a planet popup. */
+  /**
+   * Called when the user presses "Generate World" in a planet popup.
+   * `isAlive` is the step-derived life flag at the time of click: when the
+   * universe carries history this overrides the body's static `life` field.
+   */
   onGenerateWorldFromPlanet?: (
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
+    isAlive: boolean,
   ) => void;
   /** Called when the user presses "Generate World" in a satellite popup. */
   onGenerateWorldFromSatellite?: (
@@ -38,6 +46,7 @@ interface UniverseScreenProps {
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
+    isAlive: boolean,
   ) => void;
 }
 
@@ -62,6 +71,12 @@ export function UniverseScreen({
 }: UniverseScreenProps) {
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [numSolarSystems, setNumSolarSystems] = useState(DEFAULT_SOLAR_SYSTEMS);
+  const [generateHistory, setGenerateHistory] = useState(false);
+  const [numHistorySteps, setNumHistorySteps] = useState(DEFAULT_NUM_HISTORY_STEPS);
+  // `selectedStep` is only meaningful when `data.history` exists. We default
+  // to the end-of-time (numSteps - 1) after each generation so the user lands
+  // on the "final state" universe — re-scrub backwards to watch life appear.
+  const [selectedStep, setSelectedStep] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState<{ step: string; pct: number } | null>(null);
   const [sceneState, setSceneState] = useState<UniverseSceneState>({
@@ -112,6 +127,10 @@ export function UniverseScreen({
         setProgress({ step: msg.step, pct: msg.pct });
       } else if (msg.type === 'DONE') {
         onDataChange(msg.data);
+        // Snap the timeline to end-of-time so the user sees the "final"
+        // universe by default. Clamp to 0 when history is off.
+        const finalStep = msg.data.history ? Math.max(0, msg.data.history.numSteps - 1) : 0;
+        setSelectedStep(finalStep);
         setGenerating(false);
         setProgress(null);
         worker.terminate();
@@ -129,9 +148,11 @@ export function UniverseScreen({
       type: 'GENERATE',
       seed,
       numSolarSystems,
+      generateHistory,
+      numHistorySteps,
     };
     worker.postMessage(req);
-  }, [generating, seed, numSolarSystems, onDataChange]);
+  }, [generating, seed, numSolarSystems, generateHistory, numHistorySteps, onDataChange]);
 
   /**
    * Bridge from the planet popup's "Generate World" button to App's
@@ -144,9 +165,10 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromPlanet) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      onGenerateWorldFromPlanet(planet, system, data);
+      const isAlive = isAliveAtStep(planet.id, planet.life, selectedStep, data.history);
+      onGenerateWorldFromPlanet(planet, system, data, isAlive);
     },
-    [data, onGenerateWorldFromPlanet],
+    [data, onGenerateWorldFromPlanet, selectedStep],
   );
 
   const handleGenerateSatelliteWorldFromPopup = useCallback(
@@ -154,9 +176,10 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromSatellite) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      onGenerateWorldFromSatellite(satellite, planet, system, data);
+      const isAlive = isAliveAtStep(satellite.id, satellite.life, selectedStep, data.history);
+      onGenerateWorldFromSatellite(satellite, planet, system, data, isAlive);
     },
-    [data, onGenerateWorldFromSatellite],
+    [data, onGenerateWorldFromSatellite, selectedStep],
   );
 
   const handleBack = useCallback(() => {
@@ -255,6 +278,20 @@ export function UniverseScreen({
     // star + satellite are leaves — no down navigation
   }, [popupEntity, data]);
 
+  // Step-derived "alive" body ids — single allocation per (history, step)
+  // change, consumed by both the canvas (passed as a Set into the renderer)
+  // and the popup (via `isAliveAtStep`). Empty/null when history is off so
+  // legacy renders stay byte-identical.
+  const liveLifeIds = useMemo<Set<string> | null>(() => {
+    const history = data?.history;
+    if (!history) return null;
+    const set = new Set<string>();
+    for (const id in history.lifeAppearedAtStep) {
+      if (selectedStep >= history.lifeAppearedAtStep[id]) set.add(id);
+    }
+    return set;
+  }, [data?.history, selectedStep]);
+
   // Tree / popup entity selection: navigate the canvas to the scene that
   // displays the entity, then open the details popup. Galaxy → galaxy focus
   // (or overview when single), system → its parent galaxy view (focus when
@@ -285,6 +322,7 @@ export function UniverseScreen({
         data={data}
         onSceneChange={setSceneState}
         onEntityClick={handleEntityClick}
+        liveLifeIds={liveLifeIds}
       />
       {/* Zoom controls — bottom-right, space-themed to match the dark UI */}
       <div style={styles.zoomWrap}>
@@ -297,6 +335,11 @@ export function UniverseScreen({
         onSeedChange={setSeed}
         numSolarSystems={numSolarSystems}
         onNumSolarSystemsChange={setNumSolarSystems}
+        generateHistory={generateHistory}
+        onGenerateHistoryChange={setGenerateHistory}
+        numHistorySteps={numHistorySteps}
+        onNumHistoryStepsChange={setNumHistorySteps}
+        selectedStep={selectedStep}
         onGenerate={handleGenerate}
         generating={generating}
         progress={progress}
@@ -305,11 +348,19 @@ export function UniverseScreen({
         onBack={handleBack}
         onTreeEntitySelect={handleTreeEntitySelect}
       />
+      {data?.history && (
+        <UniverseTimeline
+          history={data.history}
+          selectedStep={selectedStep}
+          onStepChange={setSelectedStep}
+        />
+      )}
       {popupEntity && data && (
         <UniverseEntityPopup
           entity={popupEntity}
           data={data}
           sceneState={sceneState}
+          selectedStep={selectedStep}
           onClose={handlePopupClose}
           onNavigateUp={handlePopupNavigateUp}
           onNavigateDown={

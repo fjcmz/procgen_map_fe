@@ -49,6 +49,14 @@ interface UniverseCanvasProps {
   data: UniverseData | null;
   onSceneChange?: (state: UniverseSceneState) => void;
   onEntityClick?: (entity: PopupEntity) => void;
+  /**
+   * Optional step-derived "alive" id set, recomputed by the parent each time
+   * `selectedStep` (or `data.history`) changes. Null/undefined means use the
+   * body's static `.life` flag (legacy behaviour when history is off). The
+   * canvas reads the set via a ref so step-scrubbing doesn't reset the RAF
+   * loop on every change.
+   */
+  liveLifeIds?: Set<string> | null;
 }
 
 // ── Zoom/pan transform helpers ────────────────────────────────────────────────
@@ -90,7 +98,7 @@ function ease(t: number): number {
 }
 
 export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasProps>(
-  function UniverseCanvas({ data, onSceneChange, onEntityClick }, ref) {
+  function UniverseCanvas({ data, onSceneChange, onEntityClick, liveLifeIds }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [sceneState, setSceneState] = useState<UniverseSceneState>({
       scene: 'galaxy',
@@ -132,6 +140,10 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     // effect doesn't need to re-register on every render.
     const onEntityClickRef = useRef(onEntityClick);
     onEntityClickRef.current = onEntityClick;
+    // Step-derived life lookup — read inside the RAF tick via a ref so
+    // scrubbing the universe timeline doesn't restart the animation loop.
+    const liveLifeIdsRef = useRef<Set<string> | null | undefined>(liveLifeIds);
+    liveLifeIdsRef.current = liveLifeIds;
 
     useEffect(() => {
       onSceneChange?.(sceneState);
@@ -290,9 +302,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         if (state.scene === 'galaxy') {
           rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId, viewBounds, hoveredGalaxyId).hit;
         } else if (state.scene === 'system' && system) {
-          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale).hit;
+          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale, liveLifeIdsRef.current).hit;
         } else if (state.scene === 'planet' && planet) {
-          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true, scale).hit;
+          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true, scale, liveLifeIdsRef.current).hit;
         }
 
         ctx.restore();

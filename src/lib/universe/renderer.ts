@@ -917,13 +917,22 @@ const BIOME_PALETTES: Record<PlanetBiome, BodyPalette> = {
   mountains: { base: '#8a8478', accent: '#c0baa8', shadow: '#403830' },
 };
 
-function planetPalette(p: PlanetData): BodyPalette {
-  if (p.life && p.biome && p.composition === 'ROCK') return BIOME_PALETTES[p.biome];
+/**
+ * `liveOverride` lets callers force the body's "is alive" state at draw time
+ * — the universe-history scrubber uses this to colour bodies according to the
+ * selected step regardless of their static `.life` flag (which is the
+ * end-of-time value when history is on). Undefined → fall back to body.life
+ * (byte-identical to pre-history-feature behaviour).
+ */
+function planetPalette(p: PlanetData, liveOverride?: boolean): BodyPalette {
+  const life = liveOverride ?? p.life;
+  if (life && p.biome && p.composition === 'ROCK') return BIOME_PALETTES[p.biome];
   return PLANET_PALETTES[p.subtype] ?? PLANET_PALETTES.terrestrial;
 }
 
-function satellitePalette(s: SatelliteData): BodyPalette {
-  if (s.life && s.biome && s.composition === 'ROCK') return BIOME_PALETTES[s.biome];
+function satellitePalette(s: SatelliteData, liveOverride?: boolean): BodyPalette {
+  const life = liveOverride ?? s.life;
+  if (life && s.biome && s.composition === 'ROCK') return BIOME_PALETTES[s.biome];
   return SATELLITE_PALETTES[s.subtype] ?? SATELLITE_PALETTES.terrestrial;
 }
 
@@ -1026,16 +1035,16 @@ function drawBodyDisk(
 
 function drawPlanetBody(
   ctx: CanvasRenderingContext2D, x: number, y: number, r: number, p: PlanetData,
-  viewScale: number = 1,
+  viewScale: number = 1, liveOverride?: boolean,
 ): void {
-  drawBodyDisk(ctx, x, y, r, planetPalette(p), viewScale);
+  drawBodyDisk(ctx, x, y, r, planetPalette(p, liveOverride), viewScale);
 }
 
 function drawSatelliteBody(
   ctx: CanvasRenderingContext2D, x: number, y: number, r: number, s: SatelliteData,
-  viewScale: number = 1,
+  viewScale: number = 1, liveOverride?: boolean,
 ): void {
-  drawBodyDisk(ctx, x, y, r, satellitePalette(s), viewScale);
+  drawBodyDisk(ctx, x, y, r, satellitePalette(s, liveOverride), viewScale);
 }
 
 // Re-export legacy fills so any external module pulling them keeps compiling.
@@ -1798,6 +1807,7 @@ export function drawSystemScene(
   timeSec: number,
   skipBg: boolean = false,
   viewScale: number = 1,
+  liveLifeIds?: Set<string> | null,
 ): SystemDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -1925,8 +1935,9 @@ export function drawSystemScene(
     // Divide by viewScale so the disk stays at a constant screen-pixel size
     // regardless of zoom level (orbit radii still scale, only the body shrinks).
     const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
-    drawPlanetBody(ctx, px, py, sizePx, planet, viewScale);
-    if (planet.life) {
+    const planetAlive = liveLifeIds ? liveLifeIds.has(planet.id) : planet.life;
+    drawPlanetBody(ctx, px, py, sizePx, planet, viewScale, planetAlive);
+    if (planetAlive) {
       ctx.beginPath();
       ctx.arc(px, py, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(120,255,150,0.55)';
@@ -1977,6 +1988,7 @@ export function drawPlanetScene(
   timeSec: number,
   skipBg: boolean = false,
   viewScale: number = 1,
+  liveLifeIds?: Set<string> | null,
 ): PlanetDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -1989,9 +2001,11 @@ export function drawPlanetScene(
   // planetPx is the visual disk radius, kept constant in screen pixels.
   const planetPx = minSide * 0.06 / viewScale;
 
+  const planetAlive = liveLifeIds ? liveLifeIds.has(planet.id) : planet.life;
+
   // Hero planet — constant-size disk with composition-driven texture
-  drawPlanetBody(ctx, cx, cy, planetPx, planet, viewScale);
-  if (planet.life) {
+  drawPlanetBody(ctx, cx, cy, planetPx, planet, viewScale, planetAlive);
+  if (planetAlive) {
     ctx.beginPath();
     ctx.arc(cx, cy, planetPx + 6 / viewScale, 0, Math.PI * 2);
     ctx.strokeStyle = 'rgba(120,255,150,0.5)';
@@ -2033,8 +2047,9 @@ export function drawPlanetScene(
     const sx = cx + slx * cosST - sly * sinST;
     const sy = cy + slx * sinST + sly * cosST;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
-    drawSatelliteBody(ctx, sx, sy, sizePx, sat, viewScale);
-    if (sat.life) {
+    const satAlive = liveLifeIds ? liveLifeIds.has(sat.id) : sat.life;
+    drawSatelliteBody(ctx, sx, sy, sizePx, sat, viewScale, satAlive);
+    if (satAlive) {
       ctx.beginPath();
       ctx.arc(sx, sy, sizePx + 1.5 / viewScale, 0, Math.PI * 2);
       ctx.strokeStyle = 'rgba(120,255,150,0.55)';
