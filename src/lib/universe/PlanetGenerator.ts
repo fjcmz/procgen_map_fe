@@ -106,7 +106,7 @@ function pickPlanetSubtype(
 }
 
 export class PlanetGenerator {
-  generate(solarSystem: SolarSystem, rng: () => number, universe: Universe): Planet {
+  generate(solarSystem: SolarSystem, rng: () => number, universe: Universe, generateHistory: boolean = false): Planet {
     const planet = new Planet(rng);
     planet.solarSystemId = solarSystem.id;
     planet.radius = (Math.floor(rng() * 30000) + 1000) / 1000;
@@ -116,15 +116,25 @@ export class PlanetGenerator {
       (Math.floor(rng() * 20000000) + orbitIndex * 20000000) / 10000000;
     // Composition driven by orbit distance: inner planets rock, outer gas.
     planet.composition = rng() < rockProbability(planet.orbit) ? 'ROCK' : 'GAS';
-    planet.life = rng() < 0.1;
-    if (planet.composition === 'ROCK' && planet.life) {
-      planet.biome = pickBiome(rng);
+    // Always consume the life + (conditional) biome draws so the main rng
+    // stays byte-aligned between history-on and history-off for the same
+    // seed. When history is on the result is discarded —
+    // UniverseHistoryGenerator owns life/biome instead.
+    const lifeRoll = rng() < 0.1;
+    const wouldHaveBiome = planet.composition === 'ROCK' && lifeRoll;
+    const biomeRoll: PlanetBiome | undefined = wouldHaveBiome ? pickBiome(rng) : undefined;
+    if (!generateHistory) {
+      planet.life = lifeRoll;
+      if (biomeRoll) planet.biome = biomeRoll;
     }
     // Subtype draws from an isolated sub-stream so adding subtypes does not
     // perturb existing seeds (mirrors the generatePlanetName convention).
+    // Pass the would-be life/biome so subtype assignment is also byte-stable
+    // across history-on / history-off — UniverseHistoryGenerator may later
+    // flip planet.life=true and the subtype will already match that outcome.
     const subRng = seededPRNG(`${universe.seed}_planetsubtype_${planet.id}`);
     planet.subtype = pickPlanetSubtype(
-      planet.composition, planet.orbit, planet.life, planet.biome, subRng,
+      planet.composition, planet.orbit, lifeRoll, biomeRoll, subRng,
     );
     solarSystem.planets.push(planet);
     universe.mapPlanets.set(planet.id, planet);
@@ -139,7 +149,7 @@ export class PlanetGenerator {
 
     const satelliteCount = rndSize(rng, 15, -5);
     for (let i = 0; i < satelliteCount; i++) {
-      satelliteGenerator.generate(planet, rng, universe);
+      satelliteGenerator.generate(planet, rng, universe, generateHistory);
     }
     return planet;
   }

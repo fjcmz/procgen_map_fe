@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData } from '../lib/universe/types';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { StarSubtype } from '../lib/universe/SystemKind';
+import { isAliveAtStep } from '../lib/universe/habitability';
 import type { PopupEntity, UniverseSceneState } from './UniverseCanvas';
 
 // Scene-level parent of the user's current view. Follows the hierarchy
@@ -56,6 +57,13 @@ interface Props {
   entity: PopupEntity;
   data: UniverseData;
   sceneState: UniverseSceneState;
+  /**
+   * Current universe-history step. When `data.history` is set, every "is alive"
+   * decision (life row, life icons, "Generate World" styling) keys off this
+   * step via `isAliveAtStep`. When history is absent, falls back to the body's
+   * static `.life` flag.
+   */
+  selectedStep: number;
   onClose: () => void;
   onNavigateUp: () => void;
   onNavigateDown?: () => void;
@@ -78,7 +86,15 @@ interface Props {
   onSelectEntity?: (entity: PopupEntity) => void;
 }
 
-export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
+export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
+  // Single source of truth for "is this body alive right now?". Used to drive
+  // life rows in details panels, the "★life" badges in listings, and the
+  // green/blue Generate-World button styling. Memoized so each render builds
+  // it once and the inline closures below stay light.
+  const isAlive = useMemo(() => {
+    const history = data.history;
+    return (id: string, staticLife: boolean) => isAliveAtStep(id, staticLife, selectedStep, history);
+  }, [data.history, selectedStep]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -189,12 +205,14 @@ export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavig
     !!satellite &&
     !!planet;
 
-  const planetGenerateStyle = planet?.life ? s.navBtnGenerate : s.navBtnGenerateNoLife;
-  const satelliteGenerateStyle = satellite?.life ? s.navBtnGenerate : s.navBtnGenerateNoLife;
-  const planetGenerateTitle = planet?.life
+  const planetAlive = planet ? isAlive(planet.id, planet.life) : false;
+  const satelliteAlive = satellite ? isAlive(satellite.id, satellite.life) : false;
+  const planetGenerateStyle = planetAlive ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const satelliteGenerateStyle = satelliteAlive ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const planetGenerateTitle = planetAlive
     ? 'Open the world generator with parameters derived from this planet'
     : 'Open the world generator (physical map only — no civilizational history)';
-  const satelliteGenerateTitle = satellite?.life
+  const satelliteGenerateTitle = satelliteAlive
     ? 'Open the world generator with parameters derived from this moon'
     : 'Open the world generator (physical map only — no civilizational history)';
 
@@ -240,16 +258,17 @@ export function UniverseEntityPopup({ entity, data, sceneState, onClose, onNavig
               system={system}
               parentGalaxy={grouped ? galaxyBySystem.get(system.id) ?? null : null}
               parentSector={sectorById.get(system.sectorId) ?? null}
+              isAlive={isAlive}
             />
           )}
           {entity.kind === 'star' && star && system && (
             <StarDetails star={star} parentSystem={system} />
           )}
           {entity.kind === 'planet' && planet && system && (
-            <PlanetDetails planet={planet} parentSystem={system} />
+            <PlanetDetails planet={planet} parentSystem={system} isAlive={isAlive} />
           )}
           {entity.kind === 'satellite' && satellite && planet && system && (
-            <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} />
+            <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} isAlive={isAlive} />
           )}
           {entity.kind === 'wormhole' && wormhole && system && (
             <WormholeDetails
@@ -499,11 +518,12 @@ function ReachableGalaxyRow({
 }
 
 function SystemDetails({
-  system, parentGalaxy, parentSector,
+  system, parentGalaxy, parentSector, isAlive,
 }: {
   system: SolarSystemData;
   parentGalaxy: GalaxyData | null;
   parentSector: SectorData | null;
+  isAlive: (id: string, staticLife: boolean) => boolean;
 }) {
   const info = SYSTEM_KIND_INFO[system.kind];
   const standalone = isStandaloneKind(system.kind);
@@ -552,17 +572,20 @@ function SystemDetails({
         </Section>
       ) : (
         <CollapsibleSection title="Planets" count={system.planets.length}>
-          {system.planets.map(planet => (
-            <Item key={planet.id}>
-              <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
-              <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
-              {planet.life && <span style={s.life}> ★life</span>}
-              {planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
-              {planet.satellites.length > 0 && (
-                <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
-              )}
-            </Item>
-          ))}
+          {system.planets.map(planet => {
+            const planetAlive = isAlive(planet.id, planet.life);
+            return (
+              <Item key={planet.id}>
+                <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
+                <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
+                {planetAlive && <span style={s.life}> ★life</span>}
+                {planetAlive && planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
+                {planet.satellites.length > 0 && (
+                  <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
+                )}
+              </Item>
+            );
+          })}
           {system.planets.length === 0 && <Item><span style={s.dim}>none</span></Item>}
         </CollapsibleSection>
       )}
@@ -600,13 +623,20 @@ function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: Sol
   );
 }
 
-function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSystem: SolarSystemData }) {
+function PlanetDetails({
+  planet, parentSystem, isAlive,
+}: {
+  planet: PlanetData;
+  parentSystem: SolarSystemData;
+  isAlive: (id: string, staticLife: boolean) => boolean;
+}) {
+  const planetAlive = isAlive(planet.id, planet.life);
   return (
     <>
       <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
       <Row label="Composition">{planet.composition.toLowerCase()} ({planet.subtype.replace(/_/g, ' ')})</Row>
-      <Row label="Life">{planet.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
-      {planet.biome && (
+      <Row label="Life">{planetAlive ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {planetAlive && planet.biome && (
         <Row label="Biome"><span style={s.biome}>{planet.biome}</span></Row>
       )}
       <Row label="Radius">{planet.radius.toFixed(2)}</Row>
@@ -620,14 +650,17 @@ function PlanetDetails({ planet, parentSystem }: { planet: PlanetData; parentSys
       </Section>
 
       <CollapsibleSection title="Satellites" count={planet.satellites.length}>
-        {planet.satellites.map(sat => (
-          <Item key={sat.id}>
-            <EntityLabel humanName={sat.humanName} scientificName={sat.scientificName} />
-            <span style={s.dim}> — {sat.composition.toLowerCase()}, r={sat.radius.toFixed(2)}</span>
-            {sat.life && <span style={s.life}> ★life</span>}
-            {sat.biome && <span style={s.biome}> [{sat.biome}]</span>}
-          </Item>
-        ))}
+        {planet.satellites.map(sat => {
+          const satAlive = isAlive(sat.id, sat.life);
+          return (
+            <Item key={sat.id}>
+              <EntityLabel humanName={sat.humanName} scientificName={sat.scientificName} />
+              <span style={s.dim}> — {sat.composition.toLowerCase()}, r={sat.radius.toFixed(2)}</span>
+              {satAlive && <span style={s.life}> ★life</span>}
+              {satAlive && sat.biome && <span style={s.biome}> [{sat.biome}]</span>}
+            </Item>
+          );
+        })}
         {planet.satellites.length === 0 && <Item><span style={s.dim}>none</span></Item>}
       </CollapsibleSection>
     </>
@@ -700,18 +733,21 @@ function WormholeDetails({
 }
 
 function SatelliteDetails({
-  satellite, parentPlanet, parentSystem,
+  satellite, parentPlanet, parentSystem, isAlive,
 }: {
   satellite: SatelliteData;
   parentPlanet: PlanetData;
   parentSystem: SolarSystemData;
+  isAlive: (id: string, staticLife: boolean) => boolean;
 }) {
+  const satAlive = isAlive(satellite.id, satellite.life);
+  const parentAlive = isAlive(parentPlanet.id, parentPlanet.life);
   return (
     <>
       <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
       <Row label="Composition">{satellite.composition.toLowerCase()} ({satellite.subtype.replace(/_/g, ' ')})</Row>
-      <Row label="Life">{satellite.life ? <span style={s.life}>yes ★</span> : 'no'}</Row>
-      {satellite.biome && (
+      <Row label="Life">{satAlive ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {satAlive && satellite.biome && (
         <Row label="Biome"><span style={s.biome}>{satellite.biome}</span></Row>
       )}
       <Row label="Radius">{satellite.radius.toFixed(2)}</Row>
@@ -720,8 +756,8 @@ function SatelliteDetails({
         <Item>
           <EntityLabel humanName={parentPlanet.humanName} scientificName={parentPlanet.scientificName} />
           <span style={s.dim}> — {parentPlanet.composition.toLowerCase()}</span>
-          {parentPlanet.life && <span style={s.life}> ★life</span>}
-          {parentPlanet.biome && <span style={s.biome}> [{parentPlanet.biome}]</span>}
+          {parentAlive && <span style={s.life}> ★life</span>}
+          {parentAlive && parentPlanet.biome && <span style={s.biome}> [{parentPlanet.biome}]</span>}
         </Item>
       </Section>
 

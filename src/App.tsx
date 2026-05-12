@@ -478,7 +478,7 @@ export default function App() {
    * just sets up the form.
    */
   const handleGenerateWorldFromPlanet = useCallback(
-    (planet: PlanetData, system: SolarSystemData, universe: UniverseData) => {
+    (planet: PlanetData, system: SolarSystemData, universe: UniverseData, isAlive: boolean) => {
       // Tear down any previous world state so the new screen starts clean.
       workerRef.current?.terminate();
       workerRef.current = null;
@@ -492,7 +492,14 @@ export default function App() {
       // Isolated PRNG sub-stream — same convention as the existing
       // `_racebias_<id>` / `_chars_<cellIndex>` streams in the codebase.
       const planetSeed = `${universe.seed}_${planet.id}`;
-      const spec = planetToGenSpec(planet);
+      // Body's serialized `.life` reflects end-of-time when history is on,
+      // but the user may scrubbed back to before life appeared — pass a
+      // patched view so `planetToGenSpec` picks the rocky-no-life branch
+      // (and the world-map handoff disables history) at early steps.
+      const stepBody: PlanetData = isAlive === planet.life
+        ? planet
+        : { ...planet, life: isAlive, biome: isAlive ? planet.biome : undefined };
+      const spec = planetToGenSpec(stepBody);
 
       setSeed(planetSeed);
       setNumCells(cellCountForPlanetRadius(planet.radius));
@@ -515,7 +522,7 @@ export default function App() {
         planetName: planet.humanName,
         bodyKind: spec.bodyKind,
         disableHistory: spec.disableHistory,
-        isLifeBody: planet.life,
+        isLifeBody: isAlive,
       });
       // Remember which system to land on when the user clicks "Back".
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
@@ -525,7 +532,7 @@ export default function App() {
   );
 
   const handleGenerateWorldFromSatellite = useCallback(
-    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData) => {
+    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData, isAlive: boolean) => {
       workerRef.current?.terminate();
       workerRef.current = null;
       setMapData(null);
@@ -536,7 +543,10 @@ export default function App() {
       setGenerating(false);
 
       const satelliteSeed = `${universe.seed}_${satellite.id}`;
-      const spec = satelliteToGenSpec(satellite);
+      const stepSat: SatelliteData = isAlive === satellite.life
+        ? satellite
+        : { ...satellite, life: isAlive, biome: isAlive ? satellite.biome : undefined };
+      const spec = satelliteToGenSpec(stepSat);
 
       setSeed(satelliteSeed);
       setNumCells(cellCountForPlanetRadius(satellite.radius));
@@ -557,7 +567,7 @@ export default function App() {
         planetName: `${planet.humanName} / ${satellite.humanName}`,
         bodyKind: spec.bodyKind,
         disableHistory: spec.disableHistory,
-        isLifeBody: satellite.life,
+        isLifeBody: isAlive,
       });
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
       setScreen('planet');

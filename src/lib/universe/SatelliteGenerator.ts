@@ -59,19 +59,26 @@ function pickSatelliteSubtype(
 }
 
 export class SatelliteGenerator {
-  generate(planet: Planet, rng: () => number, universe: Universe): Satellite {
+  generate(planet: Planet, rng: () => number, universe: Universe, generateHistory: boolean = false): Satellite {
     const satellite = new Satellite(rng);
     satellite.planetId = planet.id;
     const parentRadius = planet.radius * 10;
     satellite.radius = (Math.floor(rng() * Math.floor(parentRadius)) + parentRadius / 5) / 1000;
     satellite.composition = rng() > 0.5 ? 'ICE' : 'ROCK';
-    satellite.life = rng() < 0.1;
-    if (satellite.composition === 'ROCK' && satellite.life) {
-      satellite.biome = pickBiome(rng);
+    // Same byte-stability pattern as PlanetGenerator: always consume the life
+    // + (conditional) biome draws so the main rng stays aligned regardless of
+    // history mode. When history is on the result is discarded — life and
+    // biome are owned by UniverseHistoryGenerator.
+    const lifeRoll = rng() < 0.1;
+    const wouldHaveBiome = satellite.composition === 'ROCK' && lifeRoll;
+    const biomeRoll: PlanetBiome | undefined = wouldHaveBiome ? pickBiome(rng) : undefined;
+    if (!generateHistory) {
+      satellite.life = lifeRoll;
+      if (biomeRoll) satellite.biome = biomeRoll;
     }
     const subRng = seededPRNG(`${universe.seed}_satsubtype_${satellite.id}`);
     satellite.subtype = pickSatelliteSubtype(
-      satellite.composition, planet.orbit, satellite.life, satellite.biome, subRng,
+      satellite.composition, planet.orbit, lifeRoll, biomeRoll, subRng,
     );
     // Read moon index BEFORE pushing — same convention as PlanetGenerator for orbit.
     const moonIndex = planet.satellites.length;

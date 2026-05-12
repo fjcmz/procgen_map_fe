@@ -3,12 +3,18 @@ import { Draggable } from './Draggable';
 import type { UniverseData } from '../lib/universe/types';
 import type { UniverseSceneState, PopupEntity } from './UniverseCanvas';
 import { UniverseTreeTab } from './UniverseTreeTab';
+import { UniverseEventsTab } from './UniverseEventsTab';
 
 interface UniverseOverlayProps {
   seed: string;
   onSeedChange: (s: string) => void;
   numSolarSystems: number;
   onNumSolarSystemsChange: (n: number) => void;
+  generateHistory: boolean;
+  onGenerateHistoryChange: (v: boolean) => void;
+  numHistorySteps: number;
+  onNumHistoryStepsChange: (n: number) => void;
+  selectedStep: number;
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
@@ -18,20 +24,23 @@ interface UniverseOverlayProps {
   onTreeEntitySelect: (entity: PopupEntity) => void;
 }
 
-type OverlayTab = 'generation' | 'tree';
+type OverlayTab = 'generation' | 'tree' | 'events';
 
 const TAB_LABELS: Record<OverlayTab, string> = {
   generation: 'Gen',
   tree: 'Tree',
+  events: 'Events',
 };
 
-const VALID_TABS: readonly OverlayTab[] = ['generation', 'tree'];
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'tree', 'events'];
 
 const TAB_WIDTHS: Record<OverlayTab, number> = {
   generation: 320,
   tree: 360,
+  events: 360,
 };
 const SYSTEM_OPTIONS = [500, 1000, 5000, 10000];
+const HISTORY_STEP_OPTIONS = [1, 10, 100, 1000, 5000];
 
 // ── Focus-ring injection ──────────────────────────────────────────────────
 // Mirrors the world generation overlay (`UnifiedOverlay`) — :focus-visible
@@ -50,6 +59,9 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
   const {
     seed, onSeedChange,
     numSolarSystems, onNumSolarSystemsChange,
+    generateHistory, onGenerateHistoryChange,
+    numHistorySteps, onNumHistoryStepsChange,
+    selectedStep,
     onGenerate, generating, progress,
     data, sceneState, onBack,
     onTreeEntitySelect,
@@ -58,13 +70,17 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<OverlayTab>('generation');
   const treeEnabled = !!data;
-  const effectiveTab: OverlayTab = activeTab === 'tree' && !treeEnabled ? 'generation' : activeTab;
+  const eventsEnabled = !!data?.history;
+  const fallbackTab = (t: OverlayTab): OverlayTab =>
+    (t === 'tree' && !treeEnabled) || (t === 'events' && !eventsEnabled) ? 'generation' : t;
+  const effectiveTab: OverlayTab = fallbackTab(activeTab);
 
   useEffect(ensureFocusStyle, []);
 
   const tabEnabled: Record<OverlayTab, boolean> = {
     generation: true,
     tree: treeEnabled,
+    events: eventsEnabled,
   };
 
   return (
@@ -127,6 +143,10 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
                 onSeedChange={onSeedChange}
                 numSolarSystems={numSolarSystems}
                 onNumSolarSystemsChange={onNumSolarSystemsChange}
+                generateHistory={generateHistory}
+                onGenerateHistoryChange={onGenerateHistoryChange}
+                numHistorySteps={numHistorySteps}
+                onNumHistoryStepsChange={onNumHistoryStepsChange}
                 onGenerate={onGenerate}
                 generating={generating}
                 progress={progress}
@@ -137,6 +157,13 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
             )}
             {effectiveTab === 'tree' && data && (
               <UniverseTreeTab data={data} onSelect={onTreeEntitySelect} />
+            )}
+            {effectiveTab === 'events' && data && data.history && (
+              <UniverseEventsTab
+                data={data}
+                selectedStep={selectedStep}
+                onSelectBody={onTreeEntitySelect}
+              />
             )}
           </div>
         </>
@@ -150,6 +177,10 @@ interface GenerationTabBodyProps {
   onSeedChange: (s: string) => void;
   numSolarSystems: number;
   onNumSolarSystemsChange: (n: number) => void;
+  generateHistory: boolean;
+  onGenerateHistoryChange: (v: boolean) => void;
+  numHistorySteps: number;
+  onNumHistoryStepsChange: (n: number) => void;
   onGenerate: () => void;
   generating: boolean;
   progress: { step: string; pct: number } | null;
@@ -161,6 +192,8 @@ interface GenerationTabBodyProps {
 function GenerationTabBody({
   seed, onSeedChange,
   numSolarSystems, onNumSolarSystemsChange,
+  generateHistory, onGenerateHistoryChange,
+  numHistorySteps, onNumHistoryStepsChange,
   onGenerate, generating, progress,
   data, sceneState, onBack,
 }: GenerationTabBodyProps) {
@@ -225,6 +258,45 @@ function GenerationTabBody({
           style={styles.slider}
         />
       </label>
+
+      <label style={styles.checkboxLabel}>
+        <input
+          type="checkbox"
+          checked={generateHistory}
+          onChange={(e) => onGenerateHistoryChange(e.target.checked)}
+          style={styles.checkbox}
+        />
+        <span>Generate History</span>
+      </label>
+
+      {generateHistory && (
+        <label style={styles.label}>
+          History steps: {numHistorySteps} (My)
+          <div style={styles.cellBtns}>
+            {HISTORY_STEP_OPTIONS.map(n => (
+              <button
+                key={n}
+                style={{
+                  ...styles.cellBtn,
+                  ...(n === numHistorySteps ? styles.cellBtnActive : {}),
+                }}
+                onClick={() => onNumHistoryStepsChange(n)}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={5000}
+            step={1}
+            value={numHistorySteps}
+            onChange={(e) => onNumHistoryStepsChange(Number(e.target.value))}
+            style={styles.slider}
+          />
+        </label>
+      )}
 
       <button
         style={{ ...styles.generateBtn, ...(generating ? styles.generateBtnDisabled : {}) }}
@@ -401,6 +473,20 @@ const styles: Record<string, React.CSSProperties> = {
   },
   slider: {
     width: '100%',
+    accentColor: '#7a88c8',
+    cursor: 'pointer',
+  },
+  checkboxLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontFamily: 'Georgia, serif',
+    fontSize: 12,
+    color: '#dde0ff',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  checkbox: {
     accentColor: '#7a88c8',
     cursor: 'pointer',
   },

@@ -23,6 +23,15 @@ export interface UniverseGenerateOptions {
    * progress bar without coupling the generator to `postMessage`.
    */
   onProgress?: (fraction: number) => void;
+  /**
+   * When true, planet/satellite generators consume the same rng draws as the
+   * default path but discard the `life` + biome roll — those fields are
+   * owned by `UniverseHistoryGenerator` (run by the worker after this
+   * pipeline completes). Keeping the draws preserves byte-stable orbits /
+   * subtypes / composition between history-on and history-off for the same
+   * seed.
+   */
+  generateHistory?: boolean;
 }
 
 /**
@@ -39,8 +48,9 @@ export class UniverseGenerator {
   generate(rng: () => number, seed: string = '', opts: UniverseGenerateOptions = {}): Universe {
     const universe = new Universe(rng, seed);
     const solarSystemCount = opts.numSolarSystems ?? rndSize(rng, 5, 1);
+    const generateHistory = !!opts.generateHistory;
     for (let i = 0; i < solarSystemCount; i++) {
-      solarSystemGenerator.generate(universe, rng);
+      solarSystemGenerator.generate(universe, rng, generateHistory);
       if (opts.onProgress && solarSystemCount > 0) {
         opts.onProgress((i + 1) / solarSystemCount);
       }

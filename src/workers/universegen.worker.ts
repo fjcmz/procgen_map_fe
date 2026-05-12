@@ -1,5 +1,6 @@
 import { seededPRNG } from '../lib/terrain';
 import { universeGenerator } from '../lib/universe/UniverseGenerator';
+import { universeHistoryGenerator } from '../lib/universe/UniverseHistoryGenerator';
 import type { Universe } from '../lib/universe/Universe';
 import type {
   UniverseData,
@@ -9,7 +10,12 @@ import type {
   GalaxyData,
   SectorData,
   WormholeData,
+  UniverseHistoryData,
 } from '../lib/universe/types';
+
+const DEFAULT_NUM_HISTORY_STEPS = 5000;
+const MIN_HISTORY_STEPS = 1;
+const MAX_HISTORY_STEPS = 5000;
 
 function post(msg: UniverseWorkerMessage): void {
   self.postMessage(msg);
@@ -21,7 +27,7 @@ function post(msg: UniverseWorkerMessage): void {
  * serializes `World` into `RegionData[]` / `ContinentData[]` before
  * postMessage.
  */
-function serializeUniverse(universe: Universe): UniverseData {
+function serializeUniverse(universe: Universe, history: UniverseHistoryData | undefined): UniverseData {
   const solarSystems: SolarSystemData[] = universe.solarSystems.map(ss => ({
     id: ss.id,
     humanName: ss.humanName,
@@ -97,6 +103,7 @@ function serializeUniverse(universe: Universe): UniverseData {
     seed: universe.seed,
     solarSystems,
     galaxies,
+    history,
   };
 }
 
@@ -106,6 +113,8 @@ self.onmessage = (e: MessageEvent<UniverseGenerateRequest>) => {
 
 function handleGenerate(req: UniverseGenerateRequest): void {
   const { seed, numSolarSystems } = req;
+  const generateHistory = !!req.generateHistory;
+  const numHistorySteps = clampSteps(req.numHistorySteps ?? DEFAULT_NUM_HISTORY_STEPS);
 
   try {
     post({ type: 'PROGRESS', step: 'Seeding RNG…', pct: 5 });
@@ -113,12 +122,15 @@ function handleGenerate(req: UniverseGenerateRequest): void {
 
     post({ type: 'PROGRESS', step: 'Building solar systems…', pct: 15 });
     let lastReportedPct = 15;
+    const physicsCeil = generateHistory ? 80 : 85;
     const universe = universeGenerator.generate(rng, seed, {
       numSolarSystems,
+      generateHistory,
       onProgress: (fraction) => {
-        // Map [0, 1] generator progress onto [15, 85] of the bar; throttle
-        // to whole-percent steps to avoid postMessage spam on large counts.
-        const pct = 15 + Math.floor(fraction * 70);
+        // Map [0, 1] generator progress onto [15, physicsCeil] of the bar;
+        // shorten the physics span when history is on so the universe-history
+        // pass has room to report progress before serialization.
+        const pct = 15 + Math.floor(fraction * (physicsCeil - 15));
         if (pct > lastReportedPct) {
           lastReportedPct = pct;
           post({ type: 'PROGRESS', step: 'Building solar systems…', pct });
@@ -126,12 +138,23 @@ function handleGenerate(req: UniverseGenerateRequest): void {
       },
     });
 
+    let history: UniverseHistoryData | undefined;
+    if (generateHistory) {
+      post({ type: 'PROGRESS', step: 'Simulating universe history…', pct: 85 });
+      history = universeHistoryGenerator.generate(universe, seed, numHistorySteps);
+    }
+
     post({ type: 'PROGRESS', step: 'Serializing…', pct: 90 });
-    const data = serializeUniverse(universe);
+    const data = serializeUniverse(universe, history);
 
     post({ type: 'PROGRESS', step: 'Done', pct: 100 });
     post({ type: 'DONE', data });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });
   }
+}
+
+function clampSteps(n: number): number {
+  if (!Number.isFinite(n)) return DEFAULT_NUM_HISTORY_STEPS;
+  return Math.max(MIN_HISTORY_STEPS, Math.min(MAX_HISTORY_STEPS, Math.floor(n)));
 }

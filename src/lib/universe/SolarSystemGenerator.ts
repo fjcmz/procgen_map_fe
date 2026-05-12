@@ -27,7 +27,7 @@ function pickFrom<T>(arr: ReadonlyArray<T>, rng: () => number): T {
 }
 
 export class SolarSystemGenerator {
-  generate(universe: Universe, rng: () => number): SolarSystem {
+  generate(universe: Universe, rng: () => number, generateHistory: boolean = false): SolarSystem {
     const solarSystem = new SolarSystem(rng);
     solarSystem.universeId = universe.id;
     solarSystem.composition = rng() < 0.5 ? 'ROCK' : 'GAS';
@@ -77,7 +77,7 @@ export class SolarSystemGenerator {
     if (!isStandaloneKind(kind)) {
       const planetCount = solarSystem.stars.length * 2 + Math.floor(rng() * 15);
       for (let i = 0; i < planetCount; i++) {
-        planetGenerator.generate(solarSystem, rng, universe);
+        planetGenerator.generate(solarSystem, rng, universe, generateHistory);
       }
     }
 
