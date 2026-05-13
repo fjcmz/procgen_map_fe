@@ -5,12 +5,12 @@ import type { UniverseHistoryData, UniverseHistoryEvent } from './types';
 import { isPlanetHabitable, isSatelliteHabitable } from './habitability';
 import { seededPRNG } from '../terrain/noise';
 
-const LIFE_CHANCE_PER_STEP = 0.005;
+const LIFE_CHANCE_PER_STEP = 0.00005;
 
 /**
  * Universe-history simulation. Runs after `universeGenerator.generate(...)`
  * when the request carries `generateHistory: true`. For every body in the
- * habitable zone, walks `numSteps` 1 million-year ticks and rolls a 0.5%
+ * habitable zone, walks `numSteps` 1 million-year ticks and rolls a 0.005%
  * chance per step for life to appear. First success records the step,
  * picks a biome, and mutates the underlying entity so the serializer
  * downstream sees `life=true` + the right biome.
