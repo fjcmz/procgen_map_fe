@@ -242,6 +242,33 @@ export const POLYGON_COUNTS: Record<CitySize, number> = {
 const CANVAS_SIZE = 1000;
 const LLOYD_ROUNDS = 2;
 
+// Edge buffer: polygons whose Voronoi site sits within this fraction of the
+// canvas edge are excluded from the city footprint, walls, landmarks,
+// quarters, districts, and outside-wall sprawl. Background terrain (water,
+// mountains, river entry, sea-island flooding) still extends through the
+// buffer to the canvas edge — only city-placed content is gated.
+const EDGE_BUFFER_FRACTION = 0.10;
+
+function computeEdgeBufferPolygonIds(
+  polygons: CityPolygon[],
+  canvasSize: number,
+): Set<number> {
+  const threshold = canvasSize * EDGE_BUFFER_FRACTION;
+  const out = new Set<number>();
+  for (const p of polygons) {
+    const [x, y] = p.site;
+    if (
+      x < threshold ||
+      y < threshold ||
+      x > canvasSize - threshold ||
+      y > canvasSize - threshold
+    ) {
+      out.add(p.id);
+    }
+  }
+  return out;
+}
+
 // Spec: "limit where a landmark can be set to no more than 5 polygons away
 // from the city." BFS hop limit from any city interior polygon.
 const MOUNTAIN_LANDMARK_MAX_DISTANCE = 5;
@@ -559,13 +586,23 @@ export function generateCityMapV2(
     ? new Set<number>()
     : generateMountainPolygons(seed, cityName, env, polygons, CANVAS_SIZE, waterPolygonIds);
 
+  // Edge buffer (10% canvas inset). Polygons whose site lands inside the
+  // buffer are excluded from every city-placed feature: footprint, walls,
+  // road network, candidate pool (landmarks/quarters), districts, blocks,
+  // and outside-walls sprawl. Background terrain (water, mountain, river)
+  // still extends through the buffer up to the canvas edge — buffer is a
+  // "no city content" zone, not a "no rendering" zone.
+  const bufferPolygonIds = computeEdgeBufferPolygonIds(polygons, CANVAS_SIZE);
+
   // Combined obstacle set — used by shape / walls / network / openSpaces /
   // river. These modules treat water and mountain identically: "not
   // buildable, not traversable". Blocks and the data payload keep the two
   // sets distinct because blocks can absorb mountains (not water) and the
-  // renderer styles them differently.
+  // renderer styles them differently. The edge buffer is merged in here so
+  // shape / walls / network avoid it as well.
   const obstaclePolygonIds = new Set<number>(waterPolygonIds);
   for (const id of mountainPolygonIds) obstaclePolygonIds.add(id);
+  for (const id of bufferPolygonIds) obstaclePolygonIds.add(id);
 
   // City footprint allocation.
   //
@@ -711,6 +748,7 @@ export function generateCityMapV2(
   const candidatePool = buildCandidatePool(wall, polygons, edgeGraph, {
     waterPolygonIds,
     mountainPolygonIds,
+    bufferPolygonIds,
   });
   const landmarksNew = placeUnifiedLandmarks({
     seed,
@@ -743,6 +781,7 @@ export function generateCityMapV2(
     river,
     CANVAS_SIZE,
     cityPolygonCount,
+    bufferPolygonIds,
   );
 
   // Build coarse block clusters from the district classifier output. Groups
@@ -760,6 +799,7 @@ export function generateCityMapV2(
     mountainPolygonIds,
     env.size,
     landmarksNew,
+    bufferPolygonIds,
   );
 
   // Spec: "if a landmark is set on mountains, there must be a street from
