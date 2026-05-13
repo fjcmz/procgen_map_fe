@@ -57,7 +57,7 @@ export function UniverseTimeline({ history, selectedStep, onStepChange }: Univer
     }
   }, [selectedStep, maxStep, onStepChange]);
 
-  const lifeBodyCount = Object.keys(history.lifeAppearedAtStep).length;
+  const lifeBodyCount = Object.keys(history.lifeAdvancesByBody).length;
   const eventsSoFar = history.events.reduce((n, e) => (e.step <= selectedStep ? n + 1 : n), 0);
 
   return (

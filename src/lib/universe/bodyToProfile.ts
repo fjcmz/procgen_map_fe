@@ -81,15 +81,18 @@ export function gasPaletteFor(subtype: GasPlanetSubtype): Record<string, string>
  * will flag any future addition.
  */
 function rockPlanetSpec(planet: PlanetData): BodyGenSpec {
-  // Life-bearing rocky bodies → existing biome-driven flow (byte-identical).
+  // World-history only unlocks once the body's biosphere has reached
+  // `intelligent_animals` — primitive life biomes still render with the
+  // life-bearing biome palette but skip the civilizational simulation.
   if (planet.life) {
     const biome = planet.biome ?? 'default';
+    const intelligent = planet.lifeLevel === 'intelligent_animals';
     return {
       profileName: biome,
       shapeName: 'default',
       waterRatio: PROFILE_WATER_RATIOS[biome] ?? 0.40,
       bodyKind: 'rocky-life',
-      disableHistory: false,
+      disableHistory: !intelligent,
     };
   }
   return rockSpecForSubtype(planet.subtype);
@@ -141,15 +144,17 @@ export function planetToGenSpec(planet: PlanetData): BodyGenSpec {
 }
 
 export function satelliteToGenSpec(satellite: SatelliteData): BodyGenSpec {
-  // Life-bearing rocky satellites → existing biome flow.
+  // Life-bearing rocky satellites → existing biome flow. World-history only
+  // unlocks once the moon reaches `intelligent_animals`.
   if (satellite.life && satellite.composition === 'ROCK') {
     const biome = satellite.biome ?? 'default';
+    const intelligent = satellite.lifeLevel === 'intelligent_animals';
     return {
       profileName: biome,
       shapeName: 'default',
       waterRatio: PROFILE_WATER_RATIOS[biome] ?? 0.40,
       bodyKind: 'rocky-life',
-      disableHistory: false,
+      disableHistory: !intelligent,
     };
   }
   // ICE composition — use the per-subtype ice profile.

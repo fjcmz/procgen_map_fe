@@ -4,12 +4,13 @@ import type { UniverseCanvasHandle, UniverseSceneState, PopupEntity } from './Un
 import { UniverseOverlay } from './UniverseOverlay';
 import { UniverseEntityPopup } from './UniverseEntityPopup';
 import { UniverseTimeline } from './UniverseTimeline';
-import { isAliveAtStep } from '../lib/universe/habitability';
+import { getLifeLevelAtStep } from '../lib/universe/habitability';
 import type {
   UniverseData,
   PlanetData,
   SatelliteData,
   SolarSystemData,
+  LifeLevel,
   UniverseGenerateRequest,
   UniverseWorkerMessage,
 } from '../lib/universe/types';
@@ -31,14 +32,16 @@ interface UniverseScreenProps {
   onReturnToConsumed?: () => void;
   /**
    * Called when the user presses "Generate World" in a planet popup.
-   * `isAlive` is the step-derived life flag at the time of click: when the
-   * universe carries history this overrides the body's static `life` field.
+   * `lifeLevelAtStep` is the step-derived biosphere stage at the time of
+   * click: when the universe carries history this overrides the body's
+   * static `.lifeLevel` field. `undefined` means "no life present yet at
+   * this step" (universe handoff should disable history).
    */
   onGenerateWorldFromPlanet?: (
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
-    isAlive: boolean,
+    lifeLevelAtStep: LifeLevel | undefined,
   ) => void;
   /** Called when the user presses "Generate World" in a satellite popup. */
   onGenerateWorldFromSatellite?: (
@@ -46,7 +49,7 @@ interface UniverseScreenProps {
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
-    isAlive: boolean,
+    lifeLevelAtStep: LifeLevel | undefined,
   ) => void;
 }
 
@@ -165,8 +168,8 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromPlanet) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      const isAlive = isAliveAtStep(planet.id, planet.life, selectedStep, data.history);
-      onGenerateWorldFromPlanet(planet, system, data, isAlive);
+      const level = getLifeLevelAtStep(planet.id, planet.lifeLevel, selectedStep, data.history);
+      onGenerateWorldFromPlanet(planet, system, data, level);
     },
     [data, onGenerateWorldFromPlanet, selectedStep],
   );
@@ -176,8 +179,8 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromSatellite) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      const isAlive = isAliveAtStep(satellite.id, satellite.life, selectedStep, data.history);
-      onGenerateWorldFromSatellite(satellite, planet, system, data, isAlive);
+      const level = getLifeLevelAtStep(satellite.id, satellite.lifeLevel, selectedStep, data.history);
+      onGenerateWorldFromSatellite(satellite, planet, system, data, level);
     },
     [data, onGenerateWorldFromSatellite, selectedStep],
   );
@@ -278,18 +281,24 @@ export function UniverseScreen({
     // star + satellite are leaves — no down navigation
   }, [popupEntity, data]);
 
-  // Step-derived "alive" body ids — single allocation per (history, step)
-  // change, consumed by both the canvas (passed as a Set into the renderer)
-  // and the popup (via `isAliveAtStep`). Empty/null when history is off so
-  // legacy renders stay byte-identical.
-  const liveLifeIds = useMemo<Set<string> | null>(() => {
+  // Step-derived life-level lookup — single allocation per (history, step)
+  // change, consumed by both the canvas (passed into the renderer to gate
+  // green halos + intelligent-life rings) and by future popup helpers.
+  // Null when history is off so legacy renders stay byte-identical.
+  const liveLifeLevels = useMemo<Map<string, LifeLevel> | null>(() => {
     const history = data?.history;
     if (!history) return null;
-    const set = new Set<string>();
-    for (const id in history.lifeAppearedAtStep) {
-      if (selectedStep >= history.lifeAppearedAtStep[id]) set.add(id);
+    const m = new Map<string, LifeLevel>();
+    for (const id in history.lifeAdvancesByBody) {
+      const entries = history.lifeAdvancesByBody[id];
+      let current: LifeLevel | undefined;
+      for (const entry of entries) {
+        if (entry.step > selectedStep) break;
+        current = entry.level;
+      }
+      if (current !== undefined) m.set(id, current);
     }
-    return set;
+    return m;
   }, [data?.history, selectedStep]);
 
   // Tree / popup entity selection: navigate the canvas to the scene that
@@ -322,7 +331,7 @@ export function UniverseScreen({
         data={data}
         onSceneChange={setSceneState}
         onEntityClick={handleEntityClick}
-        liveLifeIds={liveLifeIds}
+        liveLifeLevels={liveLifeLevels}
       />
       {/* Zoom controls — bottom-right, space-themed to match the dark UI */}
       <div style={styles.zoomWrap}>

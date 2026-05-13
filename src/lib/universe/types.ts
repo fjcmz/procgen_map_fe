@@ -14,6 +14,29 @@ import type { SystemKind, StarSubtype } from './SystemKind';
  * internally for generation and flattens to these plain shapes before
  * postMessage.
  */
+/**
+ * Five-stage life evolution. Bodies always start at `unicellular` when life
+ * first appears in the universe-history simulation; each subsequent stage is
+ * a roll of `LIFE_ADVANCE_CHANCE_PER_STEP` (0.5%) in
+ * `UniverseHistoryGenerator`. Only `intelligent_animals` unlocks the
+ * world-history hand-off — see `bodyToProfile.ts`.
+ */
+export type LifeLevel =
+  | 'unicellular'
+  | 'vegetation'
+  | 'small_animals'
+  | 'large_animals'
+  | 'intelligent_animals';
+
+/** Ordered progression — index in this array is the level's "tier" (0..4). */
+export const LIFE_LEVELS: LifeLevel[] = [
+  'unicellular',
+  'vegetation',
+  'small_animals',
+  'large_animals',
+  'intelligent_animals',
+];
+
 export interface SatelliteData {
   id: string;
   humanName: string;
@@ -22,6 +45,13 @@ export interface SatelliteData {
   composition: SatelliteComposition;
   subtype: SatelliteSubtype;
   life: boolean;
+  /**
+   * Current life evolution stage. Present iff `life === true`. In static
+   * (no-history) mode, life=true bodies are always seeded with
+   * `intelligent_animals` so world-history generation is reachable without
+   * enabling the universe timeline.
+   */
+  lifeLevel?: LifeLevel;
   biome?: PlanetBiome;
 }
 
@@ -32,6 +62,8 @@ export interface PlanetData {
   radius: number;
   orbit: number;
   life: boolean;
+  /** See `SatelliteData.lifeLevel`. */
+  lifeLevel?: LifeLevel;
   composition: PlanetComposition;
   subtype: PlanetSubtype;
   biome?: PlanetBiome;
@@ -148,29 +180,51 @@ export interface UniverseData {
 }
 
 /**
- * A single event in the universe-history log. For now the only event type
- * is "life appeared on a body". Modeled as a discriminated union via the
- * `type` field so future event types (e.g. extinctions, civilizations) can
- * extend it without breaking existing readers.
+ * Universe-history event log entries. Discriminated union via `type`.
+ *
+ * - `LIFE_APPEARED` fires once per body, the first time life arises. The
+ *   level is always `'unicellular'` — kept as a field so future spawn-tier
+ *   tweaks don't require a separate event type.
+ * - `LIFE_ADVANCED` fires each time a body's biosphere clears the 0.5%
+ *   advancement roll and steps one tier up.
  */
-export interface UniverseLifeEvent {
+export interface UniverseLifeAppearedEvent {
   type: 'LIFE_APPEARED';
   step: number;
   bodyKind: 'planet' | 'satellite';
   bodyId: string;
+  level: 'unicellular';
 }
 
-export type UniverseHistoryEvent = UniverseLifeEvent;
+export interface UniverseLifeAdvancedEvent {
+  type: 'LIFE_ADVANCED';
+  step: number;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+  fromLevel: LifeLevel;
+  toLevel: LifeLevel;
+}
+
+export type UniverseHistoryEvent =
+  | UniverseLifeAppearedEvent
+  | UniverseLifeAdvancedEvent;
+
+/**
+ * Chronological per-body progression: `lifeAdvancesByBody[bodyId]` is the
+ * ordered list of (step, level) entries — first entry is always the
+ * `unicellular` spawn step, subsequent entries are advancements. At most 5
+ * entries per body. `getLifeLevelAtStep` walks this array.
+ */
+export interface LifeAdvanceEntry {
+  step: number;
+  level: LifeLevel;
+}
 
 export interface UniverseHistoryData {
   numSteps: number;
   events: UniverseHistoryEvent[];
-  /**
-   * bodyId → step at which life first appeared on that body. Only contains
-   * bodies that ever developed life. `isAliveAtStep(bodyId, step)` is a
-   * single map lookup + comparison.
-   */
-  lifeAppearedAtStep: Record<string, number>;
+  /** bodyId → chronological list of life-stage entries. */
+  lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]>;
 }
 
 /** Worker request — universe pipeline mirrors the planet `WorkerMessage` schema. */

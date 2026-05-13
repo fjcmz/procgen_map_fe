@@ -1,5 +1,6 @@
 import { IdUtil } from '../history/IdUtil';
 import type { PlanetBiome } from './Planet';
+import type { LifeLevel } from './types';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -33,6 +34,8 @@ export class Satellite {
   composition: SatelliteComposition = 'ROCK';
   subtype: SatelliteSubtype = 'terrestrial';
   life: boolean = false;
+  /** Present iff `life === true`. See `LifeLevel` in `./types`. */
+  lifeLevel?: LifeLevel;
   biome?: PlanetBiome;
   // Transient
   planetId: string = '';

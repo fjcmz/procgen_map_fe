@@ -7,6 +7,7 @@ import type {
   SolarSystemData,
 } from '../lib/universe/types';
 import type { PopupEntity } from './UniverseCanvas';
+import { LIFE_LEVEL_LABEL } from './UniverseEntityPopup';
 
 interface UniverseEventsTabProps {
   data: UniverseData;
@@ -20,9 +21,11 @@ interface BodyLookup {
 }
 
 /**
- * Universe-history events feed. Mirrors the world-map `EventsTab` shape (per-event
- * row, click-to-focus). Today there's only one event type (`LIFE_APPEARED`); the
- * structure leaves room for future categories without restructuring.
+ * Universe-history events feed. Mirrors the world-map `EventsTab` shape
+ * (per-event row, click-to-focus). Today the feed surfaces life-evolution
+ * milestones — `LIFE_APPEARED` (unicellular spawn) and `LIFE_ADVANCED`
+ * (each life-tier promotion). Future event categories can extend the
+ * discriminated union without restructuring this component.
  *
  * Click handler navigates the canvas to the body's parent scene + opens its
  * details popup via the same `onTreeEntitySelect` path used by `UniverseTreeTab`.
@@ -103,6 +106,7 @@ function EventRow({
     entity = { kind: 'satellite', systemId: system.id, planetId: planet.id, satelliteId: satellite.id };
   }
   const click = entity ? () => onSelectBody(entity) : undefined;
+  const { icon, text } = formatEvent(event, label);
   return (
     <button
       type="button"
@@ -112,12 +116,36 @@ function EventRow({
       title={click ? 'Focus this body on the canvas' : 'Body no longer present'}
     >
       <span style={styles.rowStep}>{event.step} My</span>
-      <span style={styles.rowIcon}>🌱</span>
-      <span style={styles.rowText}>
-        Life appears on <strong>{label}</strong>
-      </span>
+      <span style={styles.rowIcon}>{icon}</span>
+      <span style={styles.rowText}>{text}</span>
     </button>
   );
+}
+
+function formatEvent(
+  event: UniverseHistoryEvent,
+  bodyLabel: string,
+): { icon: string; text: React.ReactNode } {
+  if (event.type === 'LIFE_APPEARED') {
+    return {
+      icon: '🌱',
+      text: (
+        <>
+          Unicellular life appears on <strong>{bodyLabel}</strong>
+        </>
+      ),
+    };
+  }
+  // LIFE_ADVANCED
+  return {
+    icon: '🧬',
+    text: (
+      <>
+        <strong>{bodyLabel}</strong> evolves to{' '}
+        <strong>{LIFE_LEVEL_LABEL[event.toLevel]}</strong>
+      </>
+    ),
+  };
 }
 
 const styles: Record<string, React.CSSProperties> = {
