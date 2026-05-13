@@ -158,7 +158,13 @@ export function buildBlocksFromDistricts(
   mountainPolygonIds: Set<number>,
   citySize: CitySize,
   landmarksNew: LandmarkV2[] = [],
-  bufferPolygonIds: Set<number> = new Set(),
+  /**
+   * Polygons whose agri/slum tag was thinned away by the outskirt fade in
+   * `assignDistricts`. They sit at the sentinel district but must NOT be
+   * absorbed into a neighbouring block — the fade is what produces the
+   * sporadic-patches look at the canvas edge.
+   */
+  fadedOutPolygonIds: Set<number> = new Set(),
 ): CityBlockNewV2[] {
   if (polygons.length < 4 || districtsNew.length === 0) return [];
 
@@ -183,7 +189,7 @@ export function buildBlocksFromDistricts(
     if (
       waterPolygonIds.has(startId) ||
       mountainPolygonIds.has(startId) ||
-      bufferPolygonIds.has(startId)
+      fadedOutPolygonIds.has(startId)
     ) {
       visited.add(startId);
       continue;
@@ -213,7 +219,7 @@ export function buildBlocksFromDistricts(
         if (
           waterPolygonIds.has(nb) ||
           mountainPolygonIds.has(nb) ||
-          bufferPolygonIds.has(nb)
+          fadedOutPolygonIds.has(nb)
         ) {
           visited.add(nb);
           continue;
