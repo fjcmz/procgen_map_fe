@@ -98,21 +98,23 @@ export function placeSlumClusters(
   waterPolygonIds: Set<number>,
   mountainPolygonIds: Set<number>,
   canvasSize: number,
-  bufferPolygonIds: Set<number> = new Set(),
 ): Set<number> {
   const interior = wall.interiorPolygonIds;
 
   // [Voronoi-polygon] Eligible exterior set: not interior, not water, not
-  // mountain, not in the canvas-edge buffer. Polygons with no eligible
-  // neighbors will end up as singleton clusters and naturally fail the
-  // "non-trivial slum" filter through their tiny diameter, but we keep them
-  // in the pool so they can still be picked for tiny-fringe cities.
+  // mountain. Polygons with no eligible neighbors will end up as singleton
+  // clusters and naturally fail the "non-trivial slum" filter through their
+  // tiny diameter, but we keep them in the pool so they can still be picked
+  // for tiny-fringe cities. Canvas-edge buffer polygons remain eligible —
+  // the post-assignment fade pass in `assignDistricts` thins both
+  // agricultural and slum tags into sporadic patches in the buffer / far
+  // exterior, so slum clusters that overlap the buffer naturally read as
+  // scattered rather than solid.
   const exterior = new Set<number>();
   for (const p of polygons) {
     if (interior.has(p.id)) continue;
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
-    if (bufferPolygonIds.has(p.id)) continue;
     exterior.add(p.id);
   }
   if (exterior.size === 0) return new Set<number>();
@@ -240,6 +242,72 @@ const WEALTH_W_CENTER = 0.15;
 // Falloff "reach" in polygon hops for proximity terms. Beyond this distance
 // the contribution clamps to 0.
 const WEALTH_REACH_HOPS = 8;
+
+// ─── Outskirt fade tuning ───────────────────────────────────────────────────
+// Once an exterior agricultural or slum polygon is more than this many hops
+// from the city interior (or sits inside the canvas-edge buffer), the
+// district tag stops being applied to every polygon and instead survives
+// only at a falling probability — producing patchy, fading farmland and
+// shantytowns at the canvas fringe instead of a solid carpet.
+const FADE_THRESHOLD_HOPS = 20;
+// Hops over which the keep probability decays from FADE_PROB_NEAR down to
+// FADE_PROB_FAR. Polygons beyond `THRESHOLD + DECAY` clamp to FADE_PROB_FAR.
+const FADE_DECAY_HOPS = 30;
+const FADE_PROB_NEAR = 0.5;
+const FADE_PROB_FAR = 0.05;
+
+/**
+ * Multi-source BFS over `polygon.neighbors` from every interior polygon.
+ * Returns the hop distance to the nearest interior polygon for every
+ * polygon; interior polygons themselves get distance 0, polygons that have
+ * no interior-side neighbor chain get `Infinity`.
+ */
+function computeInteriorHopDistance(
+  polygons: CityPolygon[],
+  interior: Set<number>,
+): number[] {
+  const n = polygons.length;
+  const dist = new Array<number>(n).fill(Infinity);
+  const queue: number[] = [];
+  for (const pid of interior) {
+    if (pid >= 0 && pid < n) {
+      dist[pid] = 0;
+      queue.push(pid);
+    }
+  }
+  let head = 0;
+  while (head < queue.length) {
+    const pid = queue[head++];
+    const d = dist[pid];
+    for (const nb of polygons[pid].neighbors) {
+      if (dist[nb] !== Infinity) continue;
+      dist[nb] = d + 1;
+      queue.push(nb);
+    }
+  }
+  return dist;
+}
+
+/**
+ * Keep probability for an outskirt agricultural / slum polygon. Returns 1.0
+ * inside the dense zone (not buffer, hop distance < `FADE_THRESHOLD_HOPS`),
+ * then linearly fades from `FADE_PROB_NEAR` down to `FADE_PROB_FAR` as the
+ * polygon's hop distance grows past the threshold. Buffer polygons close
+ * to the city use the threshold as a floor so they always read as sparse.
+ */
+function computeFadeKeepProb(hopDist: number, isBuffer: boolean): number {
+  if (!isBuffer && hopDist < FADE_THRESHOLD_HOPS) return 1.0;
+  const ref = isBuffer ? Math.max(hopDist, FADE_THRESHOLD_HOPS) : hopDist;
+  const t = Math.min(1, (ref - FADE_THRESHOLD_HOPS) / FADE_DECAY_HOPS);
+  return FADE_PROB_NEAR + (FADE_PROB_FAR - FADE_PROB_NEAR) * t;
+}
+
+/** Returned alongside the district array; consumed by `buildBlocksFromDistricts`. */
+export interface AssignDistrictsResult {
+  districts: DistrictType[];
+  /** Polygons whose agri/slum tag was thinned away by the outskirt fade. */
+  fadedOutPolygonIds: Set<number>;
+}
 
 // ─── Landmark-kind → district-type mapping ──────────────────────────────────
 /**
@@ -399,7 +467,7 @@ export function assignDistricts(
   canvasSize: number,
   _cityPolygonCount: number,
   bufferPolygonIds: Set<number> = new Set(),
-): DistrictType[] {
+): AssignDistrictsResult {
   const n = polygons.length;
   const out = new Array<DistrictType>(n).fill('residential_medium');
   const assigned = new Array<boolean>(n).fill(false);
@@ -407,13 +475,14 @@ export function assignDistricts(
   const interior = wall.interiorPolygonIds;
 
   // ── Step 3: exterior agricultural ───────────────────────────────────────
-  // Buffer polygons are skipped here so the canvas-edge inset stays free of
-  // any district assignment — they keep the sentinel value but remain
-  // unassigned, which means blocks / buildings / sprawl never pick them up.
+  // Every non-water / non-mountain polygon outside the city interior is
+  // tagged agricultural, INCLUDING canvas-edge buffer polygons. The fade
+  // pass (step 4.5) then thins polygons far from the city border down to
+  // sporadic patches so the outskirts read as scattered farmsteads rather
+  // than a solid carpet running all the way to the canvas edge.
   for (const p of polygons) {
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
-    if (bufferPolygonIds.has(p.id)) continue;
     if (interior.has(p.id)) continue;
     out[p.id] = 'agricultural';
     assigned[p.id] = true;
@@ -423,11 +492,36 @@ export function assignDistricts(
   const slumPolygonIds = placeSlumClusters(
     seed, cityName, env, polygons, wall,
     waterPolygonIds, mountainPolygonIds, canvasSize,
-    bufferPolygonIds,
   );
   for (const pid of slumPolygonIds) {
     out[pid] = 'slum';
     assigned[pid] = true;
+  }
+
+  // ── Step 4.5: outskirt fade for agri / slum ─────────────────────────────
+  // Polygons more than `FADE_THRESHOLD_HOPS` hops from the city interior, OR
+  // any polygon inside the canvas-edge buffer, keep their agri/slum tag at
+  // a falling probability (see `computeFadeKeepProb`). Polygons that don't
+  // survive the roll revert to the sentinel district and are tracked in
+  // `fadedOutPolygonIds` so `buildBlocksFromDistricts` can skip them — they
+  // render as plain canvas background, producing visible patches/fading.
+  const fadedOutPolygonIds = new Set<number>();
+  if (bufferPolygonIds.size > 0 || interior.size > 0) {
+    const fadeRng = seededPRNG(`${seed}_city_${cityName}_districts_fade`);
+    const interiorHop = computeInteriorHopDistance(polygons, interior);
+    for (let pid = 0; pid < n; pid++) {
+      const role = out[pid];
+      if (role !== 'agricultural' && role !== 'slum') continue;
+      const isBuffer = bufferPolygonIds.has(pid);
+      const hopDist = interiorHop[pid];
+      if (!isBuffer && hopDist < FADE_THRESHOLD_HOPS) continue;
+      const keepProb = computeFadeKeepProb(hopDist, isBuffer);
+      if (fadeRng() >= keepProb) {
+        out[pid] = 'residential_medium';
+        assigned[pid] = false;
+        fadedOutPolygonIds.add(pid);
+      }
+    }
   }
 
   // ── Step 5: dock pass (probability-rolled per city size) ────────────────
@@ -564,6 +658,7 @@ export function assignDistricts(
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
     if (bufferPolygonIds.has(p.id)) continue;
+    if (fadedOutPolygonIds.has(p.id)) continue;
     const [x, y] = p.site;
     const a = proximityFalloff(distPositive[p.id]);
     const b = proximityFalloff(distNegative[p.id]);
@@ -595,7 +690,7 @@ export function assignDistricts(
     }
   }
 
-  return out;
+  return { districts: out, fadedOutPolygonIds };
 }
 
 // ─── Internal helpers ───────────────────────────────────────────────────────

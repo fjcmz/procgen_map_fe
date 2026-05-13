@@ -769,7 +769,7 @@ export function generateCityMapV2(
   // RNG sub-stream — `_districts_slums` lives inside `cityMapDistricts.ts`.
   // wiring cannot perturb any pre-existing seed-stable output (walls, river,
   // roads, streets, blocks, landmarks, buildings, sprawl).
-  const districtsNew = assignDistricts(
+  const { districts: districtsNew, fadedOutPolygonIds } = assignDistricts(
     seed,
     cityName,
     env,
@@ -799,7 +799,7 @@ export function generateCityMapV2(
     mountainPolygonIds,
     env.size,
     landmarksNew,
-    bufferPolygonIds,
+    fadedOutPolygonIds,
   );
 
   // Spec: "if a landmark is set on mountains, there must be a street from
