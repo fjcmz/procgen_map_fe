@@ -75,6 +75,10 @@ export class SatelliteGenerator {
     if (!generateHistory) {
       satellite.life = lifeRoll;
       if (biomeRoll) satellite.biome = biomeRoll;
+      // Static-mode life is seeded at the terminal stage so world-history
+      // hand-off (gated on `intelligent_animals`) remains reachable without
+      // enabling the universe timeline.
+      if (lifeRoll) satellite.lifeLevel = 'intelligent_animals';
     }
     const subRng = seededPRNG(`${universe.seed}_satsubtype_${satellite.id}`);
     satellite.subtype = pickSatelliteSubtype(

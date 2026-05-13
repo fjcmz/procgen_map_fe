@@ -126,6 +126,11 @@ export class PlanetGenerator {
     if (!generateHistory) {
       planet.life = lifeRoll;
       if (biomeRoll) planet.biome = biomeRoll;
+      // Static-mode life is seeded at the terminal stage so world-history
+      // hand-off (gated on `intelligent_animals`) remains reachable without
+      // enabling the universe timeline. The timeline path owns its own
+      // life-level progression via UniverseHistoryGenerator.
+      if (lifeRoll) planet.lifeLevel = 'intelligent_animals';
     }
     // Subtype draws from an isolated sub-stream so adding subtypes does not
     // perturb existing seeds (mirrors the generatePlanetName convention).

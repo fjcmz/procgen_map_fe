@@ -1,9 +1,9 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData, LifeLevel } from '../lib/universe/types';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { StarSubtype } from '../lib/universe/SystemKind';
-import { isAliveAtStep } from '../lib/universe/habitability';
+import { getLifeLevelAtStep } from '../lib/universe/habitability';
 import type { PopupEntity, UniverseSceneState } from './UniverseCanvas';
 
 // Scene-level parent of the user's current view. Follows the hierarchy
@@ -35,6 +35,19 @@ const PARENT_SCENE_LABEL: Record<Exclude<ParentScene, null>, string> = {
   planet: 'Planet',
 };
 
+/**
+ * Human-readable label for a life-evolution stage. Used in popup detail rows
+ * and in the events tab. Kept in sync with `LIFE_LEVELS` in
+ * `src/lib/universe/types.ts`.
+ */
+export const LIFE_LEVEL_LABEL: Record<LifeLevel, string> = {
+  unicellular: 'Unicellular',
+  vegetation: 'Vegetation',
+  small_animals: 'Small animals',
+  large_animals: 'Large animals',
+  intelligent_animals: 'Intelligent animals',
+};
+
 const STAR_SUBTYPE_LABEL: Record<StarSubtype, string> = {
   main_sequence: 'Main-sequence star',
   red_dwarf: 'Red dwarf',
@@ -58,10 +71,10 @@ interface Props {
   data: UniverseData;
   sceneState: UniverseSceneState;
   /**
-   * Current universe-history step. When `data.history` is set, every "is alive"
-   * decision (life row, life icons, "Generate World" styling) keys off this
-   * step via `isAliveAtStep`. When history is absent, falls back to the body's
-   * static `.life` flag.
+   * Current universe-history step. When `data.history` is set, every life
+   * decision (life row, life icons, "Generate World" gating + styling)
+   * keys off this step via `getLifeLevelAtStep`. When history is absent,
+   * falls back to the body's static `.lifeLevel` field.
    */
   selectedStep: number;
   onClose: () => void;
@@ -87,13 +100,14 @@ interface Props {
 }
 
 export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, onClose, onNavigateUp, onNavigateDown, onGenerateWorld, onGenerateSatelliteWorld, onSelectEntity }: Props) {
-  // Single source of truth for "is this body alive right now?". Used to drive
-  // life rows in details panels, the "★life" badges in listings, and the
-  // green/blue Generate-World button styling. Memoized so each render builds
-  // it once and the inline closures below stay light.
-  const isAlive = useMemo(() => {
+  // Single source of truth for "what life stage is this body at right now?".
+  // Drives the Life + Life Level rows, the "★life" badges in listings, and
+  // the Generate-World gate (intelligent-animals only). Memoized so each
+  // render builds it once and the inline closures below stay light.
+  const lifeLevelOf = useMemo(() => {
     const history = data.history;
-    return (id: string, staticLife: boolean) => isAliveAtStep(id, staticLife, selectedStep, history);
+    return (id: string, staticLevel: LifeLevel | undefined) =>
+      getLifeLevelAtStep(id, staticLevel, selectedStep, history);
   }, [data.history, selectedStep]);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -191,9 +205,10 @@ export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, on
     entity.kind === 'wormhole' && wormholePartner ? '↳ Jump to Connected System' :
     null;
 
-  // Every planet and satellite gets a "Generate World" button. Life-bearing
-  // bodies render the button in green (existing visual); non-life bodies use
-  // a blue variant and produce a physical-only map (no civilizational history).
+  // Every planet and satellite gets a "Generate World" button. The
+  // civilizational-history flow only unlocks once the body has reached
+  // `intelligent_animals`; lower life stages (and lifeless bodies) still
+  // show the button but generate a terrain-only map.
   const canGenerateWorld =
     !!onGenerateWorld &&
     entity.kind === 'planet' &&
@@ -205,16 +220,18 @@ export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, on
     !!satellite &&
     !!planet;
 
-  const planetAlive = planet ? isAlive(planet.id, planet.life) : false;
-  const satelliteAlive = satellite ? isAlive(satellite.id, satellite.life) : false;
-  const planetGenerateStyle = planetAlive ? s.navBtnGenerate : s.navBtnGenerateNoLife;
-  const satelliteGenerateStyle = satelliteAlive ? s.navBtnGenerate : s.navBtnGenerateNoLife;
-  const planetGenerateTitle = planetAlive
-    ? 'Open the world generator with parameters derived from this planet'
-    : 'Open the world generator (physical map only — no civilizational history)';
-  const satelliteGenerateTitle = satelliteAlive
-    ? 'Open the world generator with parameters derived from this moon'
-    : 'Open the world generator (physical map only — no civilizational history)';
+  const planetLevel = planet ? lifeLevelOf(planet.id, planet.lifeLevel) : undefined;
+  const satelliteLevel = satellite ? lifeLevelOf(satellite.id, satellite.lifeLevel) : undefined;
+  const planetIntelligent = planetLevel === 'intelligent_animals';
+  const satelliteIntelligent = satelliteLevel === 'intelligent_animals';
+  const planetGenerateStyle = planetIntelligent ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const satelliteGenerateStyle = satelliteIntelligent ? s.navBtnGenerate : s.navBtnGenerateNoLife;
+  const planetGenerateTitle = planetIntelligent
+    ? 'Open the world generator with civilizational history derived from this planet'
+    : 'Open the world generator (terrain only — needs intelligent animals for civilizations)';
+  const satelliteGenerateTitle = satelliteIntelligent
+    ? 'Open the world generator with civilizational history derived from this moon'
+    : 'Open the world generator (terrain only — needs intelligent animals for civilizations)';
 
   const headerTitle =
     entity.kind === 'galaxy' && galaxy ? galaxy.humanName :
@@ -258,17 +275,17 @@ export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, on
               system={system}
               parentGalaxy={grouped ? galaxyBySystem.get(system.id) ?? null : null}
               parentSector={sectorById.get(system.sectorId) ?? null}
-              isAlive={isAlive}
+              lifeLevelOf={lifeLevelOf}
             />
           )}
           {entity.kind === 'star' && star && system && (
             <StarDetails star={star} parentSystem={system} />
           )}
           {entity.kind === 'planet' && planet && system && (
-            <PlanetDetails planet={planet} parentSystem={system} isAlive={isAlive} />
+            <PlanetDetails planet={planet} parentSystem={system} lifeLevelOf={lifeLevelOf} />
           )}
           {entity.kind === 'satellite' && satellite && planet && system && (
-            <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} isAlive={isAlive} />
+            <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} lifeLevelOf={lifeLevelOf} />
           )}
           {entity.kind === 'wormhole' && wormhole && system && (
             <WormholeDetails
@@ -518,12 +535,12 @@ function ReachableGalaxyRow({
 }
 
 function SystemDetails({
-  system, parentGalaxy, parentSector, isAlive,
+  system, parentGalaxy, parentSector, lifeLevelOf,
 }: {
   system: SolarSystemData;
   parentGalaxy: GalaxyData | null;
   parentSector: SectorData | null;
-  isAlive: (id: string, staticLife: boolean) => boolean;
+  lifeLevelOf: (id: string, staticLevel: LifeLevel | undefined) => LifeLevel | undefined;
 }) {
   const info = SYSTEM_KIND_INFO[system.kind];
   const standalone = isStandaloneKind(system.kind);
@@ -573,12 +590,13 @@ function SystemDetails({
       ) : (
         <CollapsibleSection title="Planets" count={system.planets.length}>
           {system.planets.map(planet => {
-            const planetAlive = isAlive(planet.id, planet.life);
+            const planetLevel = lifeLevelOf(planet.id, planet.lifeLevel);
+            const planetAlive = planetLevel !== undefined;
             return (
               <Item key={planet.id}>
                 <EntityLabel humanName={planet.humanName} scientificName={planet.scientificName} />
                 <span style={s.dim}> — {planet.composition.toLowerCase()}</span>
-                {planetAlive && <span style={s.life}> ★life</span>}
+                {planetAlive && <span style={s.life}> ★life ({LIFE_LEVEL_LABEL[planetLevel!]})</span>}
                 {planetAlive && planet.biome && <span style={s.biome}> [{planet.biome}]</span>}
                 {planet.satellites.length > 0 && (
                   <span style={s.dim}>, {planet.satellites.length} sat{planet.satellites.length > 1 ? 's' : ''}</span>
@@ -624,18 +642,22 @@ function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: Sol
 }
 
 function PlanetDetails({
-  planet, parentSystem, isAlive,
+  planet, parentSystem, lifeLevelOf,
 }: {
   planet: PlanetData;
   parentSystem: SolarSystemData;
-  isAlive: (id: string, staticLife: boolean) => boolean;
+  lifeLevelOf: (id: string, staticLevel: LifeLevel | undefined) => LifeLevel | undefined;
 }) {
-  const planetAlive = isAlive(planet.id, planet.life);
+  const planetLevel = lifeLevelOf(planet.id, planet.lifeLevel);
+  const planetAlive = planetLevel !== undefined;
   return (
     <>
       <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
       <Row label="Composition">{planet.composition.toLowerCase()} ({planet.subtype.replace(/_/g, ' ')})</Row>
       <Row label="Life">{planetAlive ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {planetAlive && (
+        <Row label="Life Level"><span style={s.life}>{LIFE_LEVEL_LABEL[planetLevel!]}</span></Row>
+      )}
       {planetAlive && planet.biome && (
         <Row label="Biome"><span style={s.biome}>{planet.biome}</span></Row>
       )}
@@ -651,12 +673,13 @@ function PlanetDetails({
 
       <CollapsibleSection title="Satellites" count={planet.satellites.length}>
         {planet.satellites.map(sat => {
-          const satAlive = isAlive(sat.id, sat.life);
+          const satLevel = lifeLevelOf(sat.id, sat.lifeLevel);
+          const satAlive = satLevel !== undefined;
           return (
             <Item key={sat.id}>
               <EntityLabel humanName={sat.humanName} scientificName={sat.scientificName} />
               <span style={s.dim}> — {sat.composition.toLowerCase()}, r={sat.radius.toFixed(2)}</span>
-              {satAlive && <span style={s.life}> ★life</span>}
+              {satAlive && <span style={s.life}> ★life ({LIFE_LEVEL_LABEL[satLevel!]})</span>}
               {satAlive && sat.biome && <span style={s.biome}> [{sat.biome}]</span>}
             </Item>
           );
@@ -733,20 +756,25 @@ function WormholeDetails({
 }
 
 function SatelliteDetails({
-  satellite, parentPlanet, parentSystem, isAlive,
+  satellite, parentPlanet, parentSystem, lifeLevelOf,
 }: {
   satellite: SatelliteData;
   parentPlanet: PlanetData;
   parentSystem: SolarSystemData;
-  isAlive: (id: string, staticLife: boolean) => boolean;
+  lifeLevelOf: (id: string, staticLevel: LifeLevel | undefined) => LifeLevel | undefined;
 }) {
-  const satAlive = isAlive(satellite.id, satellite.life);
-  const parentAlive = isAlive(parentPlanet.id, parentPlanet.life);
+  const satLevel = lifeLevelOf(satellite.id, satellite.lifeLevel);
+  const parentLevel = lifeLevelOf(parentPlanet.id, parentPlanet.lifeLevel);
+  const satAlive = satLevel !== undefined;
+  const parentAlive = parentLevel !== undefined;
   return (
     <>
       <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
       <Row label="Composition">{satellite.composition.toLowerCase()} ({satellite.subtype.replace(/_/g, ' ')})</Row>
       <Row label="Life">{satAlive ? <span style={s.life}>yes ★</span> : 'no'}</Row>
+      {satAlive && (
+        <Row label="Life Level"><span style={s.life}>{LIFE_LEVEL_LABEL[satLevel!]}</span></Row>
+      )}
       {satAlive && satellite.biome && (
         <Row label="Biome"><span style={s.biome}>{satellite.biome}</span></Row>
       )}
@@ -756,7 +784,7 @@ function SatelliteDetails({
         <Item>
           <EntityLabel humanName={parentPlanet.humanName} scientificName={parentPlanet.scientificName} />
           <span style={s.dim}> — {parentPlanet.composition.toLowerCase()}</span>
-          {parentAlive && <span style={s.life}> ★life</span>}
+          {parentAlive && <span style={s.life}> ★life ({LIFE_LEVEL_LABEL[parentLevel!]})</span>}
           {parentAlive && parentPlanet.biome && <span style={s.biome}> [{parentPlanet.biome}]</span>}
         </Item>
       </Section>

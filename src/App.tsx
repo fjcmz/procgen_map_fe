@@ -11,7 +11,7 @@ import { LandingScreen } from './components/LandingScreen';
 import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
-import type { UniverseData, PlanetData, SatelliteData, SolarSystemData } from './lib/universe/types';
+import type { UniverseData, PlanetData, SatelliteData, SolarSystemData, LifeLevel } from './lib/universe/types';
 import { planetToGenSpec, satelliteToGenSpec } from './lib/universe/bodyToProfile';
 
 const DEFAULT_SEED = 'fantasy';
@@ -478,7 +478,7 @@ export default function App() {
    * just sets up the form.
    */
   const handleGenerateWorldFromPlanet = useCallback(
-    (planet: PlanetData, system: SolarSystemData, universe: UniverseData, isAlive: boolean) => {
+    (planet: PlanetData, system: SolarSystemData, universe: UniverseData, lifeLevelAtStep: LifeLevel | undefined) => {
       // Tear down any previous world state so the new screen starts clean.
       workerRef.current?.terminate();
       workerRef.current = null;
@@ -492,14 +492,21 @@ export default function App() {
       // Isolated PRNG sub-stream — same convention as the existing
       // `_racebias_<id>` / `_chars_<cellIndex>` streams in the codebase.
       const planetSeed = `${universe.seed}_${planet.id}`;
-      // Body's serialized `.life` reflects end-of-time when history is on,
-      // but the user may scrubbed back to before life appeared — pass a
-      // patched view so `planetToGenSpec` picks the rocky-no-life branch
-      // (and the world-map handoff disables history) at early steps.
-      const stepBody: PlanetData = isAlive === planet.life
+      // Body's serialized `.lifeLevel` reflects end-of-time when history is
+      // on, but the user may have scrubbed back to before life appeared (or
+      // before it reached intelligent_animals) — pass a patched view so
+      // `planetToGenSpec` picks the rocky-no-life branch (or disables
+      // civilizational history) at earlier steps.
+      const stepBody: PlanetData = lifeLevelAtStep === planet.lifeLevel
         ? planet
-        : { ...planet, life: isAlive, biome: isAlive ? planet.biome : undefined };
+        : {
+            ...planet,
+            life: lifeLevelAtStep !== undefined,
+            lifeLevel: lifeLevelAtStep,
+            biome: lifeLevelAtStep !== undefined ? planet.biome : undefined,
+          };
       const spec = planetToGenSpec(stepBody);
+      const isLifeBody = lifeLevelAtStep !== undefined;
 
       setSeed(planetSeed);
       setNumCells(cellCountForPlanetRadius(planet.radius));
@@ -522,7 +529,7 @@ export default function App() {
         planetName: planet.humanName,
         bodyKind: spec.bodyKind,
         disableHistory: spec.disableHistory,
-        isLifeBody: isAlive,
+        isLifeBody,
       });
       // Remember which system to land on when the user clicks "Back".
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
@@ -532,7 +539,7 @@ export default function App() {
   );
 
   const handleGenerateWorldFromSatellite = useCallback(
-    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData, isAlive: boolean) => {
+    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData, lifeLevelAtStep: LifeLevel | undefined) => {
       workerRef.current?.terminate();
       workerRef.current = null;
       setMapData(null);
@@ -543,10 +550,16 @@ export default function App() {
       setGenerating(false);
 
       const satelliteSeed = `${universe.seed}_${satellite.id}`;
-      const stepSat: SatelliteData = isAlive === satellite.life
+      const stepSat: SatelliteData = lifeLevelAtStep === satellite.lifeLevel
         ? satellite
-        : { ...satellite, life: isAlive, biome: isAlive ? satellite.biome : undefined };
+        : {
+            ...satellite,
+            life: lifeLevelAtStep !== undefined,
+            lifeLevel: lifeLevelAtStep,
+            biome: lifeLevelAtStep !== undefined ? satellite.biome : undefined,
+          };
       const spec = satelliteToGenSpec(stepSat);
+      const isLifeBody = lifeLevelAtStep !== undefined;
 
       setSeed(satelliteSeed);
       setNumCells(cellCountForPlanetRadius(satellite.radius));
@@ -567,7 +580,7 @@ export default function App() {
         planetName: `${planet.humanName} / ${satellite.humanName}`,
         bodyKind: spec.bodyKind,
         disableHistory: spec.disableHistory,
-        isLifeBody: isAlive,
+        isLifeBody,
       });
       setUniverseReturnTo({ systemId: system.id, planetId: planet.id });
       setScreen('planet');

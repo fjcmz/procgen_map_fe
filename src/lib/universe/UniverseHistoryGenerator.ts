@@ -1,24 +1,37 @@
 import type { Universe } from './Universe';
 import type { Planet, PlanetBiome, RockPlanetSubtype } from './Planet';
 import type { Satellite, RockSatelliteSubtype } from './Satellite';
-import type { UniverseHistoryData, UniverseHistoryEvent } from './types';
+import type {
+  LifeAdvanceEntry,
+  LifeLevel,
+  UniverseHistoryData,
+  UniverseHistoryEvent,
+} from './types';
+import { LIFE_LEVELS } from './types';
 import { isPlanetHabitable, isSatelliteHabitable } from './habitability';
 import { seededPRNG } from '../terrain/noise';
 
 const LIFE_CHANCE_PER_STEP = 0.00005;
+const LIFE_ADVANCE_CHANCE_PER_STEP = 0.005;
 
 /**
  * Universe-history simulation. Runs after `universeGenerator.generate(...)`
  * when the request carries `generateHistory: true`. For every body in the
- * habitable zone, walks `numSteps` 1 million-year ticks and rolls a 0.005%
- * chance per step for life to appear. First success records the step,
- * picks a biome, and mutates the underlying entity so the serializer
- * downstream sees `life=true` + the right biome.
+ * habitable zone, walks `numSteps` 1 million-year ticks:
  *
- * All randomness routes through a per-body isolated sub-stream
- * (`${seed}_universe_life_${bodyId}`) so that adding future event types
- * (extinctions, civilizations) won't perturb existing life timings and the
- * history-on / history-off branches stay independent.
+ * 1. Until life appears, roll 0.005% per step on the existing
+ *    `${seed}_universe_life_${bodyId}` sub-stream. First success seeds the
+ *    body with `lifeLevel = 'unicellular'`, picks a biome, and emits a
+ *    `LIFE_APPEARED` event.
+ * 2. Once life is present and below the terminal level, roll 0.5% per step
+ *    on the new `${seed}_lifeevolution_${bodyId}` sub-stream to step the
+ *    body one tier up the `LIFE_LEVELS` ladder. Each success emits a
+ *    `LIFE_ADVANCED` event.
+ *
+ * Splitting the appearance + advancement rolls onto isolated sub-streams
+ * keeps the spawn timings byte-stable against earlier seeds — feature gates
+ * on the universe sweep (none today, but the discipline matches the
+ * world-history sub-stream convention in CLAUDE.md).
  */
 function pickBiome(rng: () => number): PlanetBiome {
   const r = rng();
@@ -55,10 +68,16 @@ function satelliteSubtypeForBiome(biome: PlanetBiome): RockSatelliteSubtype {
   return biome === 'desert' ? 'desert_moon' : 'terrestrial';
 }
 
+function nextLifeLevel(current: LifeLevel): LifeLevel | null {
+  const idx = LIFE_LEVELS.indexOf(current);
+  if (idx < 0 || idx >= LIFE_LEVELS.length - 1) return null;
+  return LIFE_LEVELS[idx + 1];
+}
+
 export class UniverseHistoryGenerator {
   generate(universe: Universe, seed: string, numSteps: number): UniverseHistoryData {
     const events: UniverseHistoryEvent[] = [];
-    const lifeAppearedAtStep: Record<string, number> = {};
+    const lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]> = {};
 
     // Walk planets in their canonical generation order. Satellites are walked
     // alongside their parent so events within the same step land in a stable
@@ -66,11 +85,11 @@ export class UniverseHistoryGenerator {
     for (const ss of universe.solarSystems) {
       for (const planet of ss.planets) {
         if (isPlanetHabitable(planet)) {
-          rollPlanet(planet, seed, numSteps, events, lifeAppearedAtStep);
+          rollPlanet(planet, seed, numSteps, events, lifeAdvancesByBody);
         }
         for (const satellite of planet.satellites) {
           if (isSatelliteHabitable(satellite, planet)) {
-            rollSatellite(satellite, seed, numSteps, events, lifeAppearedAtStep);
+            rollSatellite(satellite, seed, numSteps, events, lifeAdvancesByBody);
           }
         }
       }
@@ -81,7 +100,7 @@ export class UniverseHistoryGenerator {
     // planet-before-its-moons order within a tie.
     events.sort((a, b) => a.step - b.step);
 
-    return { numSteps, events, lifeAppearedAtStep };
+    return { numSteps, events, lifeAdvancesByBody };
   }
 }
 
@@ -90,19 +109,46 @@ function rollPlanet(
   seed: string,
   numSteps: number,
   events: UniverseHistoryEvent[],
-  lifeAppearedAtStep: Record<string, number>,
+  lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]>,
 ): void {
-  const rng = seededPRNG(`${seed}_universe_life_${planet.id}`);
+  const appearanceRng = seededPRNG(`${seed}_universe_life_${planet.id}`);
+  const advanceRng = seededPRNG(`${seed}_lifeevolution_${planet.id}`);
+  let currentLevel: LifeLevel | undefined;
+  const entries: LifeAdvanceEntry[] = [];
+
   for (let step = 0; step < numSteps; step++) {
-    if (rng() < LIFE_CHANCE_PER_STEP) {
-      const biome = pickBiome(rng);
-      planet.life = true;
-      planet.biome = biome;
-      planet.subtype = PLANET_BIOME_TO_SUBTYPE[biome];
-      lifeAppearedAtStep[planet.id] = step;
-      events.push({ type: 'LIFE_APPEARED', step, bodyKind: 'planet', bodyId: planet.id });
-      return;
+    if (currentLevel === undefined) {
+      if (appearanceRng() < LIFE_CHANCE_PER_STEP) {
+        const biome = pickBiome(appearanceRng);
+        planet.life = true;
+        planet.biome = biome;
+        planet.subtype = PLANET_BIOME_TO_SUBTYPE[biome];
+        currentLevel = 'unicellular';
+        planet.lifeLevel = currentLevel;
+        entries.push({ step, level: currentLevel });
+        events.push({
+          type: 'LIFE_APPEARED', step, bodyKind: 'planet', bodyId: planet.id,
+          level: 'unicellular',
+        });
+      }
+      continue;
     }
+    const next = nextLifeLevel(currentLevel);
+    if (!next) break;
+    if (advanceRng() < LIFE_ADVANCE_CHANCE_PER_STEP) {
+      const fromLevel = currentLevel;
+      currentLevel = next;
+      planet.lifeLevel = currentLevel;
+      entries.push({ step, level: currentLevel });
+      events.push({
+        type: 'LIFE_ADVANCED', step, bodyKind: 'planet', bodyId: planet.id,
+        fromLevel, toLevel: currentLevel,
+      });
+    }
+  }
+
+  if (entries.length > 0) {
+    lifeAdvancesByBody[planet.id] = entries;
   }
 }
 
@@ -111,19 +157,46 @@ function rollSatellite(
   seed: string,
   numSteps: number,
   events: UniverseHistoryEvent[],
-  lifeAppearedAtStep: Record<string, number>,
+  lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]>,
 ): void {
-  const rng = seededPRNG(`${seed}_universe_life_${satellite.id}`);
+  const appearanceRng = seededPRNG(`${seed}_universe_life_${satellite.id}`);
+  const advanceRng = seededPRNG(`${seed}_lifeevolution_${satellite.id}`);
+  let currentLevel: LifeLevel | undefined;
+  const entries: LifeAdvanceEntry[] = [];
+
   for (let step = 0; step < numSteps; step++) {
-    if (rng() < LIFE_CHANCE_PER_STEP) {
-      const biome = pickBiome(rng);
-      satellite.life = true;
-      satellite.biome = biome;
-      satellite.subtype = satelliteSubtypeForBiome(biome);
-      lifeAppearedAtStep[satellite.id] = step;
-      events.push({ type: 'LIFE_APPEARED', step, bodyKind: 'satellite', bodyId: satellite.id });
-      return;
+    if (currentLevel === undefined) {
+      if (appearanceRng() < LIFE_CHANCE_PER_STEP) {
+        const biome = pickBiome(appearanceRng);
+        satellite.life = true;
+        satellite.biome = biome;
+        satellite.subtype = satelliteSubtypeForBiome(biome);
+        currentLevel = 'unicellular';
+        satellite.lifeLevel = currentLevel;
+        entries.push({ step, level: currentLevel });
+        events.push({
+          type: 'LIFE_APPEARED', step, bodyKind: 'satellite', bodyId: satellite.id,
+          level: 'unicellular',
+        });
+      }
+      continue;
     }
+    const next = nextLifeLevel(currentLevel);
+    if (!next) break;
+    if (advanceRng() < LIFE_ADVANCE_CHANCE_PER_STEP) {
+      const fromLevel = currentLevel;
+      currentLevel = next;
+      satellite.lifeLevel = currentLevel;
+      entries.push({ step, level: currentLevel });
+      events.push({
+        type: 'LIFE_ADVANCED', step, bodyKind: 'satellite', bodyId: satellite.id,
+        fromLevel, toLevel: currentLevel,
+      });
+    }
+  }
+
+  if (entries.length > 0) {
+    lifeAdvancesByBody[satellite.id] = entries;
   }
 }
 

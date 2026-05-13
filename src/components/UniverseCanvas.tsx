@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, LifeLevel } from '../lib/universe/types';
 import {
   drawGalaxyScene,
   drawSystemScene,
@@ -50,13 +50,13 @@ interface UniverseCanvasProps {
   onSceneChange?: (state: UniverseSceneState) => void;
   onEntityClick?: (entity: PopupEntity) => void;
   /**
-   * Optional step-derived "alive" id set, recomputed by the parent each time
-   * `selectedStep` (or `data.history`) changes. Null/undefined means use the
-   * body's static `.life` flag (legacy behaviour when history is off). The
-   * canvas reads the set via a ref so step-scrubbing doesn't reset the RAF
-   * loop on every change.
+   * Optional step-derived life-level lookup, recomputed by the parent each
+   * time `selectedStep` (or `data.history`) changes. Null/undefined means
+   * use the body's static `.lifeLevel` (legacy behaviour when history is
+   * off). The canvas reads the map via a ref so step-scrubbing doesn't
+   * reset the RAF loop on every change.
    */
-  liveLifeIds?: Set<string> | null;
+  liveLifeLevels?: Map<string, LifeLevel> | null;
 }
 
 // ── Zoom/pan transform helpers ────────────────────────────────────────────────
@@ -98,7 +98,7 @@ function ease(t: number): number {
 }
 
 export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasProps>(
-  function UniverseCanvas({ data, onSceneChange, onEntityClick, liveLifeIds }, ref) {
+  function UniverseCanvas({ data, onSceneChange, onEntityClick, liveLifeLevels }, ref) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [sceneState, setSceneState] = useState<UniverseSceneState>({
       scene: 'galaxy',
@@ -142,8 +142,8 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
     onEntityClickRef.current = onEntityClick;
     // Step-derived life lookup — read inside the RAF tick via a ref so
     // scrubbing the universe timeline doesn't restart the animation loop.
-    const liveLifeIdsRef = useRef<Set<string> | null | undefined>(liveLifeIds);
-    liveLifeIdsRef.current = liveLifeIds;
+    const liveLifeLevelsRef = useRef<Map<string, LifeLevel> | null | undefined>(liveLifeLevels);
+    liveLifeLevelsRef.current = liveLifeLevels;
 
     useEffect(() => {
       onSceneChange?.(sceneState);
@@ -302,9 +302,9 @@ export const UniverseCanvas = forwardRef<UniverseCanvasHandle, UniverseCanvasPro
         if (state.scene === 'galaxy') {
           rawHit = drawGalaxyScene(ctx, d, vw, vh, stars, 1, true, scale, time, state.galaxyId, viewBounds, hoveredGalaxyId).hit;
         } else if (state.scene === 'system' && system) {
-          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale, liveLifeIdsRef.current).hit;
+          rawHit = drawSystemScene(ctx, system, vw, vh, stars, time, true, scale, liveLifeLevelsRef.current).hit;
         } else if (state.scene === 'planet' && planet) {
-          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true, scale, liveLifeIdsRef.current).hit;
+          rawHit = drawPlanetScene(ctx, planet, vw, vh, stars, time, true, scale, liveLifeLevelsRef.current).hit;
         }
 
         ctx.restore();

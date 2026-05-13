@@ -1,4 +1,5 @@
 import type {
+  LifeLevel,
   PlanetData,
   SatelliteData,
   UniverseHistoryData,
@@ -33,19 +34,28 @@ export function isSatelliteHabitable(
 }
 
 /**
- * Step-derived life lookup for any body. When no history is attached, falls
- * back to the body's static `life` flag (the legacy generation behaviour).
- * Used by the canvas + popup + world-handoff to decide whether life is
- * "present" at the user-selected timeline step.
+ * Step-derived life-level lookup for any body. When no history is attached,
+ * falls back to the body's static `.lifeLevel` (or undefined when life is
+ * absent in static mode). Used by the canvas + popup + world-handoff to read
+ * the body's biosphere stage at the user-selected timeline step.
+ *
+ * The per-body entries in `lifeAdvancesByBody` are chronological. A linear
+ * scan is fine — each body has at most `LIFE_LEVELS.length` (= 5) entries.
  */
-export function isAliveAtStep(
+export function getLifeLevelAtStep(
   bodyId: string,
-  staticLife: boolean,
+  staticLevel: LifeLevel | undefined,
   step: number,
   history: UniverseHistoryData | undefined,
-): boolean {
-  if (!history) return staticLife;
-  const appearedAt = history.lifeAppearedAtStep[bodyId];
-  if (appearedAt === undefined) return false;
-  return step >= appearedAt;
+): LifeLevel | undefined {
+  if (!history) return staticLevel;
+  const entries = history.lifeAdvancesByBody[bodyId];
+  if (!entries || entries.length === 0) return undefined;
+  let current: LifeLevel | undefined;
+  for (const entry of entries) {
+    if (entry.step > step) break;
+    current = entry.level;
+  }
+  return current;
 }
+

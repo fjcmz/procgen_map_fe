@@ -28,13 +28,15 @@ The universe entity instances live **only inside `universegen.worker.ts`** — t
 | `Star.ts` | Star entity: composition (`'MATTER' \| 'ANTIMATTER'`), `subtype: StarSubtype` (per-body type tag), radius, brightness, parent system id |
 | `SystemKind.ts` | `SystemKind` taxonomy: 10 planetary kinds + 6 standalone (planetless) kinds. Exports `PlanetaryStarKind`, `StandaloneBodyKind`, `StarSubtype` unions and `isStandaloneKind` |
 | `SystemKindInfo.ts` | `SYSTEM_KIND_INFO` metadata table — per-kind display name, description, weight, star count range, radius/brightness ranges, renderer palette, optional naming prefix. Exports `pickSystemKind` (weighted roll) and `STAR_SUBTYPE_HUE` (per-body palette table used by the renderer) |
-| `Planet.ts` | Planet entity: composition (`'ROCK' \| 'GAS'`), 13 fine-grained subtypes (`PlanetSubtype` = `RockPlanetSubtype` ∪ `GasPlanetSubtype`), radius, orbit, life flag, optional `biome: PlanetBiome` (only for ROCK + life), satellites, parent system id. Exports the `PLANET_SUBTYPE_COMPOSITION` enforcement table — every subtype belongs to exactly one composition |
-| `Satellite.ts` | Satellite entity: composition (`'ICE' \| 'ROCK'`), 10 fine-grained subtypes (`SatelliteSubtype` = `IceSatelliteSubtype` ∪ `RockSatelliteSubtype`), radius, life flag, optional biome (only for ROCK + life), parent planet id. Exports the `SATELLITE_SUBTYPE_COMPOSITION` enforcement table |
+| `Planet.ts` | Planet entity: composition (`'ROCK' \| 'GAS'`), 13 fine-grained subtypes (`PlanetSubtype` = `RockPlanetSubtype` ∪ `GasPlanetSubtype`), radius, orbit, life flag, optional `lifeLevel: LifeLevel` + `biome: PlanetBiome` (both only when life is present), satellites, parent system id. Exports the `PLANET_SUBTYPE_COMPOSITION` enforcement table — every subtype belongs to exactly one composition |
+| `Satellite.ts` | Satellite entity: composition (`'ICE' \| 'ROCK'`), 10 fine-grained subtypes (`SatelliteSubtype` = `IceSatelliteSubtype` ∪ `RockSatelliteSubtype`), radius, life flag, optional `lifeLevel: LifeLevel` + biome (only when life is present), parent planet id. Exports the `SATELLITE_SUBTYPE_COMPOSITION` enforcement table |
 | `UniverseGenerator.ts` | Top-level orchestrator + galaxy grouping. Generates `numSolarSystems` solar systems (defaulting to `rndSize(rng, 5, 1)` when no override is supplied), then chunks them into galaxies (≤100 → 1 galaxy; >100 → `ceil(N/100)` chunks), names them, assigns each a morphology shape (`spiral` or `oval`) via an isolated sub-stream, lays them out via `layoutGalaxies`, and names the universe (single galaxy → reuse galaxy name; multi-galaxy → `generateUniverseName`) |
 | `SolarSystemGenerator.ts` | Per-system generator: rolls composition (50/50 ROCK/GAS), then rolls `SystemKind` on an isolated sub-stream (`${seed}_systemkind_${id}`) via `pickSystemKind`. Star count comes from `SYSTEM_KIND_INFO[kind].starCount` (binary forces 2, standalone forces 1). Sets the system's name from the **primary star** (no separate RNG draw); planet generation runs only when `!isStandaloneKind(kind)` (gated by the standalone vs planetary distinction) |
 | `StarGenerator.ts` | Per-star: rolls radius / brightness using the `SYSTEM_KIND_INFO[subtype].radiusRange` + `brightnessRange` (same number of `rng()` draws as the legacy version), composition (50/50). `star.subtype` is set from the system kind (or, for `binary_star`, from a precomputed pair on the kind sub-stream). Names via `generateStarName(seed, id, used, kind)` — kind drives the optional catalog prefix override |
 | `PlanetGenerator.ts` | Per-planet: rolls radius (1 000–31 000), orbit (monotonic in insertion index — read **before** push), composition driven by orbit (`rockProbability`: <10 → 100% rock, >20 → 100% gas, linear in between), life flag (10%), biome (only ROCK + life, 7 weighted profiles), subtype via isolated sub-stream `${seed}_planetsubtype_${planet.id}`, then `rndSize(rng, 15, -5)` satellites |
 | `SatelliteGenerator.ts` | Per-satellite: rolls radius (relative to parent planet), composition (50/50 ICE/ROCK), life (10%), biome (ROCK + life only), subtype via isolated sub-stream `${seed}_satsubtype_${satellite.id}` (parent-orbit aware: inner → volcanic/iron_rich/sulfur_ice; outer → cratered/methane_ice) |
+| `UniverseHistoryGenerator.ts` | Optional `numSteps`-step timeline simulation (each step = 1 million years). For every habitable body, rolls the existing 0.005%/step spawn chance for life on `${seed}_universe_life_${bodyId}` and the new 0.5%/step advancement chance on `${seed}_lifeevolution_${bodyId}`. Emits `LIFE_APPEARED` (always unicellular) + `LIFE_ADVANCED` events and mutates the body's `life` / `lifeLevel` / `biome` / `subtype` so the serializer downstream sees end-of-time values |
+| `habitability.ts` | Habitable-zone gate (orbit ∈ [6, 14], ROCK composition) + `getLifeLevelAtStep(bodyId, staticLevel, step, history)` lookup that walks `lifeAdvancesByBody[bodyId]` to return the body's biosphere stage at any step |
 | `galaxyLayout.ts` | Random rejection-sampling layout for multi-galaxy universes. Bakes per-galaxy `cx`, `cy`, `radius`, `spread` in **normalized world units** so the renderer can apply a single viewport-fit factor at draw time. Enforces a minimum centre-to-centre distance of `MIN_CENTER_DIST = 10` world units; container radius scales as `10 × √N` so density stays roughly constant as galaxy count grows. RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams. Also exports `computeLayoutExtent(galaxies)` for the renderer's viewport fit |
 | `universeNameGenerator.ts` | Procedural names for every tier: `generateGalaxyName`, `generateUniverseName`, `generateStarName`, `generatePlanetName`, `generateSatelliteName`. Two layers per name: **scientific** (catalog-style: NGC, HD, HIP, GJ, KOI, Roman numerals) + **human** (proper names with a tier-distinct phonetic feel). Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entityId>` — name generation never perturbs physics RNG. Per-tier dedup via the `usedNames: Set<string>` that callers pass in (lives on `Universe`) |
 | `helpers.ts` | `rndSize(rng, max, min)` — uniform integer in `[min, min + max)`, clamped at 0. Mirrors the `ReferenceSizeConfig.RandomSizeConfig.rndSize(max, min)` helper from the upstream Java framework. Used everywhere in this package for child-count rolls |
@@ -171,9 +173,43 @@ Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entit
 
 Per-tier dedup uses `Set<string>` instances on the `Universe` (`usedStarNames`, `usedPlanetNames`, `usedSatelliteNames`) — generators retry on collision until they find an unused name.
 
+## Universe History (life evolution)
+
+The universe pipeline can optionally run a per-body timeline simulation after generation, gated by `UniverseGenerateRequest.generateHistory`. Each step represents 1 million years and the default range is 1–5000 steps. The simulation is owned by `UniverseHistoryGenerator.ts` and produces a `UniverseHistoryData` attached to the serialized payload as `UniverseData.history`.
+
+**Five-stage life ladder** (`LifeLevel` in `types.ts`):
+
+```
+unicellular → vegetation → small_animals → large_animals → intelligent_animals
+```
+
+Life always starts at `unicellular`. Each subsequent stage requires a successful 0.5%/step roll (`LIFE_ADVANCE_CHANCE_PER_STEP`).
+
+**Two PRNG sub-streams per body** — kept separate so adding the evolution layer didn't shift the earlier spawn timings:
+
+| Sub-stream | Purpose |
+|------------|---------|
+| `${seed}_universe_life_${bodyId}` | First-appearance roll (0.005%/step) **and** the biome / subtype pick on success |
+| `${seed}_lifeevolution_${bodyId}` | Per-step advancement roll (0.5%) once life exists and the body is below `intelligent_animals` |
+
+**Events** — `UniverseHistoryEvent` is a discriminated union:
+
+- `LIFE_APPEARED { step, bodyKind, bodyId, level: 'unicellular' }` — first appearance.
+- `LIFE_ADVANCED { step, bodyKind, bodyId, fromLevel, toLevel }` — one tier up the ladder.
+
+Events are recorded per body in chronological order, then sorted globally by step (stable sort preserves planet-before-its-moons grouping on ties).
+
+**Per-body progression** — `UniverseHistoryData.lifeAdvancesByBody[bodyId]` is the ordered list of `(step, level)` entries (first entry is always the unicellular spawn, at most 5 entries total). `getLifeLevelAtStep` does a linear walk to find the latest level ≤ `step`.
+
+**Static (no-history) mode** — when `generateHistory: false`, `PlanetGenerator` / `SatelliteGenerator` still roll the 10% life flag. On success they seed the body with `lifeLevel = 'intelligent_animals'` so the world-history hand-off (gated on intelligent animals) remains reachable without enabling the timeline.
+
+**Renderer marker** — bodies that have reached `intelligent_animals` get **two concentric green rings** drawn around them by `drawIntelligentLifeRings` in `renderer.ts`. The marker is applied in both `drawSystemScene` (orbit-view planet disks) and `drawPlanetScene` (hero planet + its satellite disks). The renderer accepts a `liveLifeLevels: Map<string, LifeLevel>` lookup built once per (history, step) change in `UniverseScreen` — null/undefined falls back to the body's static `lifeLevel`.
+
 ## Hand-off to World Map
 
-The user can drill `galaxy → system → planet` (or `satellite`) in the universe canvas. When they click "Generate World" on a habitable rock body in `UniverseEntityPopup`, `App.tsx`'s `handleGenerateWorldFromPlanet` / `handleGenerateWorldFromSatellite` callbacks:
+The user can drill `galaxy → system → planet` (or `satellite`) in the universe canvas. The popup's "Generate World" button is enabled for every planet / satellite, but **civilizational history only unlocks when the body's life level at the selected timeline step is `'intelligent_animals'`** (gated by `planetToGenSpec` / `satelliteToGenSpec` in `bodyToProfile.ts` via `disableHistory: !intelligent`). Bodies with primitive life (unicellular / vegetation / small / large animals) still generate a terrain map with the biome palette intact — just without the 5000-year history sim.
+
+When the user clicks "Generate World", `App.tsx`'s `handleGenerateWorldFromPlanet` / `handleGenerateWorldFromSatellite` callbacks:
 
 1. Tear down any existing world worker / `mapData` / params.
 2. Compute the world seed: `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) — an isolated PRNG sub-stream, same convention as `_racebias_<id>` / `_chars_<cellIndex>` (`characters.md`).
@@ -260,6 +296,9 @@ Single star: solid circle at canvas center. Multi-star binary: stars orbit a tig
 - **Single-galaxy universes (N ≤ 100) reuse the galaxy's name as the universe name.** This preserves existing UI labels ("↑ Galaxy", breadcrumb "Galaxy") that were written before galaxy grouping landed. If you change the universe-naming branch, mirror that decision in `UniverseTreeTab.tsx` (which hides the galaxy level when `N === 1`).
 - **The background star field uses an INDEPENDENT LCG seed (`STAR_FIELD_SEED = 42`)** in `renderer.ts`. This is **deliberate** — the backdrop is identical across universes for visual continuity (same as the reference repo). Do NOT thread `universe.seed` into it; the star field is decorative chrome, not part of the universe's seeded content.
 - **Planet / satellite biomes are only assigned when `composition === 'ROCK' && life`.** Other planets / moons have `biome === undefined`. The hand-off code in `App.tsx` falls back to `'default'` for the world-map profile when biome is undefined — keep that fallback if you ever extend biome assignment.
+- **`lifeLevel` is present iff `life === true`.** Both fields are serialized; keep them in lockstep. The world-history hand-off is gated on `lifeLevel === 'intelligent_animals'` (in `bodyToProfile.ts`), NOT on `life` alone — primitive life biomes render terrain but skip civilizations.
+- **Life evolution rolls use TWO isolated sub-streams per body.** `${seed}_universe_life_${bodyId}` is the legacy spawn roll (also feeds biome + subtype on success); `${seed}_lifeevolution_${bodyId}` is the new advancement roll. Keep them separate — collapsing them would shift spawn timings for every pre-existing seed. If you add a third life-related roll, give it its own sub-stream too.
+- **Static (no-history) life rolls always seed `lifeLevel = 'intelligent_animals'`.** Don't change this without updating the world-history gate — static-mode universes assume "any life-bearing body is generatable." If you want static mode to expose primitive biospheres, gate the popup differently or give static life a weighted level roll.
 - **Hand-off seed format is part of the determinism contract.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on. Changing this format would break "the same universe seed always gives the same world for a given planet". Treat it like a stable interface.
 - **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.
 - **Do NOT call `galaxySpiralPositions` or `galaxyOvalPositions` outside `getOrBuildLayout`.** Both call `Math.exp` / `Math.sin` per system — at 10 000 systems this is significant. `getOrBuildLayout` caches the result; bypassing it reintroduces an O(N) cost every animation frame.

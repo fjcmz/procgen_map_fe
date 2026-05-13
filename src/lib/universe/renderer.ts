@@ -5,6 +5,7 @@ import type {
   StarData,
   PlanetData,
   SatelliteData,
+  LifeLevel,
 } from './types';
 import type { PlanetSubtype, PlanetBiome } from './Planet';
 import type { SatelliteSubtype } from './Satellite';
@@ -446,6 +447,34 @@ function drawOrbitRing(
   }
   ctx.strokeStyle = 'rgba(180, 200, 240, 0.18)';
   ctx.lineWidth = 1 / viewScale;
+  ctx.stroke();
+}
+
+/**
+ * Two concentric green rings drawn around a body that has reached the
+ * `intelligent_animals` life stage. The outer ring is stroked slightly
+ * thinner + more transparent than the inner so the marker reads as a halo,
+ * not a solid annulus. Radii are scaled relative to the body's disk size so
+ * the rings stay proportionate at any zoom.
+ */
+function drawIntelligentLifeRings(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  bodyRadius: number,
+  viewScale: number = 1,
+): void {
+  const innerR = bodyRadius * 1.45;
+  const outerR = bodyRadius * 1.85;
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(120, 255, 150, 0.85)';
+  ctx.lineWidth = 2 / viewScale;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(120, 255, 150, 0.55)';
+  ctx.lineWidth = 1.5 / viewScale;
   ctx.stroke();
 }
 
@@ -1807,7 +1836,7 @@ export function drawSystemScene(
   timeSec: number,
   skipBg: boolean = false,
   viewScale: number = 1,
-  liveLifeIds?: Set<string> | null,
+  liveLifeLevels?: Map<string, LifeLevel> | null,
 ): SystemDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -1935,7 +1964,11 @@ export function drawSystemScene(
     // Divide by viewScale so the disk stays at a constant screen-pixel size
     // regardless of zoom level (orbit radii still scale, only the body shrinks).
     const sizePx = scaleMap(planet.radius, pRadMin, pRadMax, PLANET_MIN_PX, PLANET_MAX_PX, 'sqrt') / viewScale;
-    const planetAlive = liveLifeIds ? liveLifeIds.has(planet.id) : planet.life;
+    const planetLevel = liveLifeLevels
+      ? liveLifeLevels.get(planet.id)
+      : (planet.life ? planet.lifeLevel : undefined);
+    const planetAlive = planetLevel !== undefined;
+    const planetIntelligent = planetLevel === 'intelligent_animals';
     drawPlanetBody(ctx, px, py, sizePx, planet, viewScale, planetAlive);
     if (planetAlive) {
       ctx.beginPath();
@@ -1943,6 +1976,9 @@ export function drawSystemScene(
       ctx.strokeStyle = 'rgba(120,255,150,0.55)';
       ctx.lineWidth = 1 / viewScale;
       ctx.stroke();
+    }
+    if (planetIntelligent) {
+      drawIntelligentLifeRings(ctx, px, py, sizePx, viewScale);
     }
     hit.push({ x: px, y: py, r: Math.max(sizePx * 1.6, 8 / viewScale), kind: 'planet', id: planet.id });
   }
@@ -1988,7 +2024,7 @@ export function drawPlanetScene(
   timeSec: number,
   skipBg: boolean = false,
   viewScale: number = 1,
-  liveLifeIds?: Set<string> | null,
+  liveLifeLevels?: Map<string, LifeLevel> | null,
 ): PlanetDrawResult {
   if (!skipBg) drawBackground(ctx, vw, vh, stars);
   const cx = vw / 2;
@@ -2001,7 +2037,11 @@ export function drawPlanetScene(
   // planetPx is the visual disk radius, kept constant in screen pixels.
   const planetPx = minSide * 0.06 / viewScale;
 
-  const planetAlive = liveLifeIds ? liveLifeIds.has(planet.id) : planet.life;
+  const planetLevel = liveLifeLevels
+    ? liveLifeLevels.get(planet.id)
+    : (planet.life ? planet.lifeLevel : undefined);
+  const planetAlive = planetLevel !== undefined;
+  const planetIntelligent = planetLevel === 'intelligent_animals';
 
   // Hero planet — constant-size disk with composition-driven texture
   drawPlanetBody(ctx, cx, cy, planetPx, planet, viewScale, planetAlive);
@@ -2011,6 +2051,9 @@ export function drawPlanetScene(
     ctx.strokeStyle = 'rgba(120,255,150,0.5)';
     ctx.lineWidth = 2 / viewScale;
     ctx.stroke();
+  }
+  if (planetIntelligent) {
+    drawIntelligentLifeRings(ctx, cx, cy, planetPx, viewScale);
   }
 
   // Planet hit circle — always present so the central planet is clickable.
@@ -2047,7 +2090,11 @@ export function drawPlanetScene(
     const sx = cx + slx * cosST - sly * sinST;
     const sy = cy + slx * sinST + sly * cosST;
     const sizePx = scaleMap(sat.radius, sRadMin, sRadMax, SAT_MIN_PX, SAT_MAX_PX, 'sqrt') / viewScale;
-    const satAlive = liveLifeIds ? liveLifeIds.has(sat.id) : sat.life;
+    const satLevel = liveLifeLevels
+      ? liveLifeLevels.get(sat.id)
+      : (sat.life ? sat.lifeLevel : undefined);
+    const satAlive = satLevel !== undefined;
+    const satIntelligent = satLevel === 'intelligent_animals';
     drawSatelliteBody(ctx, sx, sy, sizePx, sat, viewScale, satAlive);
     if (satAlive) {
       ctx.beginPath();
@@ -2055,6 +2102,9 @@ export function drawPlanetScene(
       ctx.strokeStyle = 'rgba(120,255,150,0.55)';
       ctx.lineWidth = 1 / viewScale;
       ctx.stroke();
+    }
+    if (satIntelligent) {
+      drawIntelligentLifeRings(ctx, sx, sy, sizePx, viewScale);
     }
     hit.push({ x: sx, y: sy, r: Math.max(sizePx * 2, 10 / viewScale), kind: 'satellite', id: sat.id });
   }
