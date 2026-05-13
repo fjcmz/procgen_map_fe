@@ -98,19 +98,21 @@ export function placeSlumClusters(
   waterPolygonIds: Set<number>,
   mountainPolygonIds: Set<number>,
   canvasSize: number,
+  bufferPolygonIds: Set<number> = new Set(),
 ): Set<number> {
   const interior = wall.interiorPolygonIds;
 
   // [Voronoi-polygon] Eligible exterior set: not interior, not water, not
-  // mountain. Polygons with no eligible neighbors will end up as singleton
-  // clusters and naturally fail the "non-trivial slum" filter through their
-  // tiny diameter, but we keep them in the pool so they can still be picked
-  // for tiny-fringe cities.
+  // mountain, not in the canvas-edge buffer. Polygons with no eligible
+  // neighbors will end up as singleton clusters and naturally fail the
+  // "non-trivial slum" filter through their tiny diameter, but we keep them
+  // in the pool so they can still be picked for tiny-fringe cities.
   const exterior = new Set<number>();
   for (const p of polygons) {
     if (interior.has(p.id)) continue;
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
+    if (bufferPolygonIds.has(p.id)) continue;
     exterior.add(p.id);
   }
   if (exterior.size === 0) return new Set<number>();
@@ -396,6 +398,7 @@ export function assignDistricts(
   _river: RiverGenerationResult | null,
   canvasSize: number,
   _cityPolygonCount: number,
+  bufferPolygonIds: Set<number> = new Set(),
 ): DistrictType[] {
   const n = polygons.length;
   const out = new Array<DistrictType>(n).fill('residential_medium');
@@ -404,9 +407,13 @@ export function assignDistricts(
   const interior = wall.interiorPolygonIds;
 
   // ── Step 3: exterior agricultural ───────────────────────────────────────
+  // Buffer polygons are skipped here so the canvas-edge inset stays free of
+  // any district assignment — they keep the sentinel value but remain
+  // unassigned, which means blocks / buildings / sprawl never pick them up.
   for (const p of polygons) {
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
+    if (bufferPolygonIds.has(p.id)) continue;
     if (interior.has(p.id)) continue;
     out[p.id] = 'agricultural';
     assigned[p.id] = true;
@@ -416,6 +423,7 @@ export function assignDistricts(
   const slumPolygonIds = placeSlumClusters(
     seed, cityName, env, polygons, wall,
     waterPolygonIds, mountainPolygonIds, canvasSize,
+    bufferPolygonIds,
   );
   for (const pid of slumPolygonIds) {
     out[pid] = 'slum';
@@ -555,6 +563,7 @@ export function assignDistricts(
     if (assigned[p.id]) continue;
     if (waterPolygonIds.has(p.id)) continue;
     if (mountainPolygonIds.has(p.id)) continue;
+    if (bufferPolygonIds.has(p.id)) continue;
     const [x, y] = p.site;
     const a = proximityFalloff(distPositive[p.id]);
     const b = proximityFalloff(distNegative[p.id]);

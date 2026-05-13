@@ -158,6 +158,7 @@ export function buildBlocksFromDistricts(
   mountainPolygonIds: Set<number>,
   citySize: CitySize,
   landmarksNew: LandmarkV2[] = [],
+  bufferPolygonIds: Set<number> = new Set(),
 ): CityBlockNewV2[] {
   if (polygons.length < 4 || districtsNew.length === 0) return [];
 
@@ -179,7 +180,11 @@ export function buildBlocksFromDistricts(
 
   for (let startId = 0; startId < polygons.length; startId++) {
     if (visited.has(startId)) continue;
-    if (waterPolygonIds.has(startId) || mountainPolygonIds.has(startId)) {
+    if (
+      waterPolygonIds.has(startId) ||
+      mountainPolygonIds.has(startId) ||
+      bufferPolygonIds.has(startId)
+    ) {
       visited.add(startId);
       continue;
     }
@@ -205,7 +210,11 @@ export function buildBlocksFromDistricts(
       }
       for (const nb of polygons[curr].neighbors) {
         if (visited.has(nb)) continue;
-        if (waterPolygonIds.has(nb) || mountainPolygonIds.has(nb)) {
+        if (
+          waterPolygonIds.has(nb) ||
+          mountainPolygonIds.has(nb) ||
+          bufferPolygonIds.has(nb)
+        ) {
           visited.add(nb);
           continue;
         }

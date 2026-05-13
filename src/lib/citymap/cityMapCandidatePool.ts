@@ -30,7 +30,11 @@ export function buildCandidatePool(
   wall: WallGenerationResult,
   polygons: CityPolygon[],
   _edgeGraph: PolygonEdgeGraph,
-  exclude: { waterPolygonIds: Set<number>; mountainPolygonIds: Set<number> },
+  exclude: {
+    waterPolygonIds: Set<number>;
+    mountainPolygonIds: Set<number>;
+    bufferPolygonIds?: Set<number>;
+  },
 ): Set<number> {
   const interior = wall.interiorPolygonIds;
   if (interior.size === 0) return new Set<number>();
@@ -58,6 +62,7 @@ export function buildCandidatePool(
   for (const [pid] of dist) {
     if (exclude.waterPolygonIds.has(pid)) continue;
     if (exclude.mountainPolygonIds.has(pid)) continue;
+    if (exclude.bufferPolygonIds?.has(pid)) continue;
     pool.add(pid);
   }
   return pool;
