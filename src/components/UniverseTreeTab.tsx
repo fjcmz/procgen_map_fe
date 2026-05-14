@@ -8,6 +8,7 @@ import type {
   PlanetData,
   SatelliteData,
   WormholeData,
+  LifeLevel,
 } from '../lib/universe/types';
 import type { StarComposition } from '../lib/universe/Star';
 import type { PlanetComposition, PlanetBiome } from '../lib/universe/Planet';
@@ -26,6 +27,12 @@ type PlanetFilter = 'any' | PlanetComposition;
 type SatelliteFilter = 'any' | SatelliteComposition;
 type BiomeFilter = 'any' | PlanetBiome;
 type KindFilter = 'any' | 'planetary' | 'standalone' | SystemKind;
+/**
+ * Life filter tri-state. `any` disables the filter; `any-life` keeps bodies
+ * with any non-undefined `lifeLevel`; `intelligent` narrows to the terminal
+ * `intelligent_animals` stage only.
+ */
+type LifeFilter = 'any' | 'any-life' | 'intelligent';
 
 interface Filters {
   kind: KindFilter;
@@ -33,7 +40,7 @@ interface Filters {
   planet: PlanetFilter;
   satellite: SatelliteFilter;
   biome: BiomeFilter;
-  lifeOnly: boolean;
+  life: LifeFilter;
   wormholeOnly: boolean;
 }
 
@@ -43,9 +50,15 @@ const DEFAULT_FILTERS: Filters = {
   planet: 'any',
   satellite: 'any',
   biome: 'any',
-  lifeOnly: false,
+  life: 'any',
   wormholeOnly: false,
 };
+
+const LIFE_OPTIONS: ReadonlyArray<readonly [LifeFilter, string]> = [
+  ['any', 'All'],
+  ['any-life', 'Any life'],
+  ['intelligent', 'Intelligent life'],
+];
 
 const BIOME_OPTIONS: ReadonlyArray<readonly [BiomeFilter, string]> = [
   ['any', 'Any'],
@@ -77,7 +90,19 @@ function formatCount(visible: number, total: number, noun: string): string {
   return `${visible}/${total} ${pluralize(total, noun)}`;
 }
 
+function formatGalaxyCount(visible: number, total: number): string {
+  const label = total === 1 ? 'galaxy' : 'galaxies';
+  if (visible === total) return `${total} ${label}`;
+  return `${visible}/${total} ${label}`;
+}
+
 // ── Filter logic ──────────────────────────────────────────────────────────
+
+function lifeLevelMatches(level: LifeLevel | undefined, f: LifeFilter): boolean {
+  if (f === 'any') return true;
+  if (f === 'any-life') return level !== undefined;
+  return level === 'intelligent_animals';
+}
 
 function starMatches(star: StarData, f: Filters): boolean {
   if (f.star !== 'any' && star.composition !== f.star) return false;
@@ -86,7 +111,7 @@ function starMatches(star: StarData, f: Filters): boolean {
 
 function satelliteMatches(sat: SatelliteData, f: Filters): boolean {
   if (f.satellite !== 'any' && sat.composition !== f.satellite) return false;
-  if (f.lifeOnly && !sat.life) return false;
+  if (!lifeLevelMatches(sat.lifeLevel, f.life)) return false;
   if (f.biome !== 'any' && sat.biome !== f.biome) return false;
   return true;
 }
@@ -95,7 +120,7 @@ function satelliteMatches(sat: SatelliteData, f: Filters): boolean {
  * A planet is visible when it, or one of its satellites, satisfies all active
  * filters. Specifically:
  *  - satellite composition filter → planet must have a matching satellite
- *  - life filter → planet has life OR has a satellite with life
+ *  - life filter → planet matches the selected stage OR has a satellite that does
  *  - biome filter → planet has matching biome OR has a satellite with matching biome
  *  - planet composition filter → always applies to the planet itself
  */
@@ -106,11 +131,14 @@ function planetPasses(planet: PlanetData, f: Filters): boolean {
     return planet.satellites.some(sat => satelliteMatches(sat, f));
   }
 
-  const hasSatLife = planet.satellites.some(s => s.life);
-  const hasSatBiome = (b: BiomeFilter) => planet.satellites.some(s => s.biome === b);
+  if (f.life !== 'any') {
+    const planetOk = lifeLevelMatches(planet.lifeLevel, f.life);
+    const satOk = planet.satellites.some(s => lifeLevelMatches(s.lifeLevel, f.life));
+    if (!planetOk && !satOk) return false;
+  }
 
-  if (f.lifeOnly && !planet.life && !hasSatLife) return false;
-  if (f.biome !== 'any' && planet.biome !== f.biome && !hasSatBiome(f.biome)) return false;
+  if (f.biome !== 'any' && planet.biome !== f.biome
+      && !planet.satellites.some(s => s.biome === f.biome)) return false;
 
   return true;
 }
@@ -165,6 +193,13 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
     }
     return m;
   }, [data, filters, grouped]);
+
+  // Hide galaxies whose entire visible-system list is empty — a parent with
+  // no matching children should not appear in the tree.
+  const visibleGalaxies = useMemo(() => {
+    if (!grouped) return data.galaxies;
+    return data.galaxies.filter(g => (visibleByGalaxy.get(g.id) ?? []).length > 0);
+  }, [data.galaxies, visibleByGalaxy, grouped]);
 
   const toggle = (key: string) => {
     setExpanded(prev => {
@@ -225,14 +260,18 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
           options={BIOME_OPTIONS}
           onChange={v => setFilter('biome', v as BiomeFilter)}
         />
-        <label style={s.lifeRow}>
-          <input
-            type="checkbox"
-            checked={filters.lifeOnly}
-            onChange={e => setFilter('lifeOnly', e.target.checked)}
-          />
-          <span>Life only (planets &amp; moons)</span>
-        </label>
+        <div style={s.filterRow}>
+          <span style={s.filterLabel}>Life</span>
+          <select
+            value={filters.life}
+            onChange={e => setFilter('life', e.target.value as LifeFilter)}
+            style={s.select}
+          >
+            {LIFE_OPTIONS.map(([v, lbl]) => (
+              <option key={v} value={v}>{lbl}</option>
+            ))}
+          </select>
+        </div>
         <label style={s.lifeRow}>
           <input
             type="checkbox"
@@ -247,14 +286,14 @@ export function UniverseTreeTab({ data, onSelect }: UniverseTreeTabProps) {
       <div style={s.treeWrap}>
         <div style={s.treeHeader}>
           {grouped
-            ? `${data.galaxies.length} galaxies · ${formatCount(visibleSystems.length, data.solarSystems.length, 'system')}`
+            ? `${formatGalaxyCount(visibleGalaxies.length, data.galaxies.length)} · ${formatCount(visibleSystems.length, data.solarSystems.length, 'system')}`
             : formatCount(visibleSystems.length, data.solarSystems.length, 'system')}
         </div>
         {visibleSystems.length === 0 && (
           <div style={s.empty}>No systems match the active filters.</div>
         )}
         {grouped
-          ? data.galaxies.map(galaxy => (
+          ? visibleGalaxies.map(galaxy => (
               <GalaxyNode
                 key={galaxy.id}
                 galaxy={galaxy}
@@ -327,9 +366,6 @@ function GalaxyNode({
               onSelect={onSelect}
             />
           ))}
-          {sectorRows.length === 0 && (
-            <div style={s.emptyChild}>no matching systems</div>
-          )}
         </div>
       )}
     </div>
@@ -760,6 +796,17 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: '#dde0ff',
     cursor: 'pointer',
+  },
+  select: {
+    padding: '2px 6px',
+    border: '1px solid #4a5080',
+    borderRadius: 4,
+    background: '#1a1830',
+    fontFamily: 'Georgia, serif',
+    fontSize: 11,
+    color: '#dde0ff',
+    cursor: 'pointer',
+    letterSpacing: 0.3,
   },
   treeWrap: {
     display: 'flex',
