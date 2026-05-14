@@ -12,7 +12,7 @@ import { isPlanetHabitable, isSatelliteHabitable } from './habitability';
 import { seededPRNG } from '../terrain/noise';
 
 const LIFE_CHANCE_PER_STEP = 0.00005;
-const LIFE_ADVANCE_CHANCE_PER_STEP = 0.00005;
+const LIFE_ADVANCE_CHANCE_PER_STEP = 0.001;
 
 /**
  * Universe-history simulation. Runs after `universeGenerator.generate(...)`
@@ -23,7 +23,7 @@ const LIFE_ADVANCE_CHANCE_PER_STEP = 0.00005;
  *    `${seed}_universe_life_${bodyId}` sub-stream. First success seeds the
  *    body with `lifeLevel = 'unicellular'`, picks a biome, and emits a
  *    `LIFE_APPEARED` event.
- * 2. Once life is present and below the terminal level, roll 0.005% per
+ * 2. Once life is present and below the terminal level, roll 0.1% per
  *    step on the new `${seed}_lifeevolution_${bodyId}` sub-stream to step
  *    the body one tier up the `LIFE_LEVELS` ladder. Each success emits a
  *    `LIFE_ADVANCED` event.
