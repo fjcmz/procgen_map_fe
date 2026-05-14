@@ -4,6 +4,7 @@ import type { UniverseData } from '../lib/universe/types';
 import type { UniverseSceneState, PopupEntity } from './UniverseCanvas';
 import { UniverseTreeTab } from './UniverseTreeTab';
 import { UniverseEventsTab } from './UniverseEventsTab';
+import { UniverseStatsTab } from './UniverseStatsTab';
 
 interface UniverseOverlayProps {
   seed: string;
@@ -24,19 +25,21 @@ interface UniverseOverlayProps {
   onTreeEntitySelect: (entity: PopupEntity) => void;
 }
 
-type OverlayTab = 'generation' | 'tree' | 'events';
+type OverlayTab = 'generation' | 'tree' | 'stats' | 'events';
 
 const TAB_LABELS: Record<OverlayTab, string> = {
   generation: 'Gen',
   tree: 'Tree',
+  stats: 'Stats',
   events: 'Events',
 };
 
-const VALID_TABS: readonly OverlayTab[] = ['generation', 'tree', 'events'];
+const VALID_TABS: readonly OverlayTab[] = ['generation', 'tree', 'stats', 'events'];
 
 const TAB_WIDTHS: Record<OverlayTab, number> = {
   generation: 320,
   tree: 360,
+  stats: 360,
   events: 360,
 };
 const SYSTEM_OPTIONS = [500, 1000, 5000, 10000];
@@ -70,9 +73,14 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<OverlayTab>('generation');
   const treeEnabled = !!data;
+  const statsEnabled = !!data;
   const eventsEnabled = !!data?.history;
   const fallbackTab = (t: OverlayTab): OverlayTab =>
-    (t === 'tree' && !treeEnabled) || (t === 'events' && !eventsEnabled) ? 'generation' : t;
+    (t === 'tree' && !treeEnabled)
+    || (t === 'stats' && !statsEnabled)
+    || (t === 'events' && !eventsEnabled)
+      ? 'generation'
+      : t;
   const effectiveTab: OverlayTab = fallbackTab(activeTab);
 
   useEffect(ensureFocusStyle, []);
@@ -80,6 +88,7 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
   const tabEnabled: Record<OverlayTab, boolean> = {
     generation: true,
     tree: treeEnabled,
+    stats: statsEnabled,
     events: eventsEnabled,
   };
 
@@ -157,6 +166,9 @@ export function UniverseOverlay(props: UniverseOverlayProps) {
             )}
             {effectiveTab === 'tree' && data && (
               <UniverseTreeTab data={data} onSelect={onTreeEntitySelect} />
+            )}
+            {effectiveTab === 'stats' && data && (
+              <UniverseStatsTab data={data} />
             )}
             {effectiveTab === 'events' && data && data.history && (
               <UniverseEventsTab
