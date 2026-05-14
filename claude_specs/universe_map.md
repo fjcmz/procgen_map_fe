@@ -35,7 +35,7 @@ The universe entity instances live **only inside `universegen.worker.ts`** — t
 | `StarGenerator.ts` | Per-star: rolls radius / brightness using the `SYSTEM_KIND_INFO[subtype].radiusRange` + `brightnessRange` (same number of `rng()` draws as the legacy version), composition (50/50). `star.subtype` is set from the system kind (or, for `binary_star`, from a precomputed pair on the kind sub-stream). Names via `generateStarName(seed, id, used, kind)` — kind drives the optional catalog prefix override |
 | `PlanetGenerator.ts` | Per-planet: rolls radius (1 000–31 000), orbit (monotonic in insertion index — read **before** push), composition driven by orbit (`rockProbability`: <10 → 100% rock, >20 → 100% gas, linear in between), life flag (10%), biome (only ROCK + life, 7 weighted profiles), subtype via isolated sub-stream `${seed}_planetsubtype_${planet.id}`, then `rndSize(rng, 15, -5)` satellites |
 | `SatelliteGenerator.ts` | Per-satellite: rolls radius (relative to parent planet), composition (50/50 ICE/ROCK), life (10%), biome (ROCK + life only), subtype via isolated sub-stream `${seed}_satsubtype_${satellite.id}` (parent-orbit aware: inner → volcanic/iron_rich/sulfur_ice; outer → cratered/methane_ice) |
-| `UniverseHistoryGenerator.ts` | Optional `numSteps`-step timeline simulation (each step = 1 million years). For every habitable body, rolls the existing 0.005%/step spawn chance for life on `${seed}_universe_life_${bodyId}` and the new 0.5%/step advancement chance on `${seed}_lifeevolution_${bodyId}`. Emits `LIFE_APPEARED` (always unicellular) + `LIFE_ADVANCED` events and mutates the body's `life` / `lifeLevel` / `biome` / `subtype` so the serializer downstream sees end-of-time values |
+| `UniverseHistoryGenerator.ts` | Optional `numSteps`-step timeline simulation (each step = 1 million years). For every habitable body, rolls the existing 0.005%/step spawn chance for life on `${seed}_universe_life_${bodyId}` and the new 0.005%/step advancement chance on `${seed}_lifeevolution_${bodyId}`. Emits `LIFE_APPEARED` (always unicellular) + `LIFE_ADVANCED` events and mutates the body's `life` / `lifeLevel` / `biome` / `subtype` so the serializer downstream sees end-of-time values |
 | `habitability.ts` | Habitable-zone gate (orbit ∈ [6, 14], ROCK composition) + `getLifeLevelAtStep(bodyId, staticLevel, step, history)` lookup that walks `lifeAdvancesByBody[bodyId]` to return the body's biosphere stage at any step |
 | `galaxyLayout.ts` | Random rejection-sampling layout for multi-galaxy universes. Bakes per-galaxy `cx`, `cy`, `radius`, `spread` in **normalized world units** so the renderer can apply a single viewport-fit factor at draw time. Enforces a minimum centre-to-centre distance of `MIN_CENTER_DIST = 10` world units; container radius scales as `10 × √N` so density stays roughly constant as galaxy count grows. RNG goes through `${universeSeed}_galaxy_layout` — isolated from physics streams. Also exports `computeLayoutExtent(galaxies)` for the renderer's viewport fit |
 | `universeNameGenerator.ts` | Procedural names for every tier: `generateGalaxyName`, `generateUniverseName`, `generateStarName`, `generatePlanetName`, `generateSatelliteName`. Two layers per name: **scientific** (catalog-style: NGC, HD, HIP, GJ, KOI, Roman numerals) + **human** (proper names with a tier-distinct phonetic feel). Each entity gets an isolated PRNG sub-stream `${universe.seed}_<tier>name_<entityId>` — name generation never perturbs physics RNG. Per-tier dedup via the `usedNames: Set<string>` that callers pass in (lives on `Universe`) |
@@ -183,14 +183,14 @@ The universe pipeline can optionally run a per-body timeline simulation after ge
 unicellular → vegetation → small_animals → large_animals → intelligent_animals
 ```
 
-Life always starts at `unicellular`. Each subsequent stage requires a successful 0.5%/step roll (`LIFE_ADVANCE_CHANCE_PER_STEP`).
+Life always starts at `unicellular`. Each subsequent stage requires a successful 0.005%/step roll (`LIFE_ADVANCE_CHANCE_PER_STEP`).
 
 **Two PRNG sub-streams per body** — kept separate so adding the evolution layer didn't shift the earlier spawn timings:
 
 | Sub-stream | Purpose |
 |------------|---------|
 | `${seed}_universe_life_${bodyId}` | First-appearance roll (0.005%/step) **and** the biome / subtype pick on success |
-| `${seed}_lifeevolution_${bodyId}` | Per-step advancement roll (0.5%) once life exists and the body is below `intelligent_animals` |
+| `${seed}_lifeevolution_${bodyId}` | Per-step advancement roll (0.005%) once life exists and the body is below `intelligent_animals` |
 
 **Events** — `UniverseHistoryEvent` is a discriminated union:
 
