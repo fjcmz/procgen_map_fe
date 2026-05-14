@@ -117,30 +117,26 @@ function satelliteMatches(sat: SatelliteData, f: Filters): boolean {
 }
 
 /**
- * A planet is visible when it, or one of its satellites, satisfies all active
- * filters. Specifically:
- *  - satellite composition filter → planet must have a matching satellite
- *  - life filter → planet matches the selected stage OR has a satellite that does
- *  - biome filter → planet has matching biome OR has a satellite with matching biome
- *  - planet composition filter → always applies to the planet itself
+ * A planet is visible iff:
+ *  - Its own composition matches the planet filter (`f.planet`).
+ *  - **If it has satellites**, at least one passes `satelliteMatches` — this
+ *    enforces the "hide parents with no matching children" rule consistently
+ *    across galaxies, sectors, systems, and planets.
+ *  - **If it has no satellites**, the planet itself must satisfy every
+ *    remaining active filter (life, biome). A satellite-targeted composition
+ *    filter eliminates a no-satellite planet by definition.
  */
 function planetPasses(planet: PlanetData, f: Filters): boolean {
   if (f.planet !== 'any' && planet.composition !== f.planet) return false;
 
-  if (f.satellite !== 'any') {
-    return planet.satellites.some(sat => satelliteMatches(sat, f));
+  if (planet.satellites.length === 0) {
+    if (f.satellite !== 'any') return false;
+    if (!lifeLevelMatches(planet.lifeLevel, f.life)) return false;
+    if (f.biome !== 'any' && planet.biome !== f.biome) return false;
+    return true;
   }
 
-  if (f.life !== 'any') {
-    const planetOk = lifeLevelMatches(planet.lifeLevel, f.life);
-    const satOk = planet.satellites.some(s => lifeLevelMatches(s.lifeLevel, f.life));
-    if (!planetOk && !satOk) return false;
-  }
-
-  if (f.biome !== 'any' && planet.biome !== f.biome
-      && !planet.satellites.some(s => s.biome === f.biome)) return false;
-
-  return true;
+  return planet.satellites.some(sat => satelliteMatches(sat, f));
 }
 
 function kindMatches(system: SolarSystemData, f: Filters): boolean {
@@ -638,9 +634,6 @@ function PlanetNode({
               onSelect={onSelect}
             />
           ))}
-          {visibleSats.length === 0 && (
-            <div style={s.emptyChild}>no matching satellites</div>
-          )}
         </div>
       )}
     </div>
