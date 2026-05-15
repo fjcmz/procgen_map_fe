@@ -12,7 +12,7 @@ import { isPlanetHabitable, isSatelliteHabitable } from './habitability';
 import { seededPRNG } from '../terrain/noise';
 
 const LIFE_CHANCE_PER_STEP = 0.00005;
-const LIFE_ADVANCE_CHANCE_PER_STEP = 0.001;
+const LIFE_ADVANCE_CHANCE_PER_STEP = 0.07;
 
 /**
  * Universe-history simulation. Runs after `universeGenerator.generate(...)`
