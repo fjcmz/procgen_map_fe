@@ -38,6 +38,8 @@ const DEFAULT_LAYERS: LayerVisibility = {
   // Default on so gas-giant maps get the wind overlay automatically.
   // Hidden in the Layers list when bodyKind !== 'gas-giant'.
   windOverlay: true,
+  // Off by default — only meaningful when the current world has an underground.
+  undergroundConnections: false,
 };
 
 type Screen = 'landing' | 'planet' | 'universe';
@@ -131,6 +133,13 @@ export default function App() {
   const [bodyKind, setBodyKind] = useState<BodyKind>('rocky-life');
   const [disableHistory, setDisableHistory] = useState(false);
   const [paletteOverride, setPaletteOverride] = useState<Record<string, string> | undefined>(undefined);
+  // Worker-side underground eligibility. Resolved from the body spec when
+  // entering via the universe handoff; defaults to the rocky-life value when
+  // generating directly from the landing screen.
+  const [undergroundChance, setUndergroundChance] = useState<number>(0.45);
+  // UI-only: which view is shown for the current world. Only meaningful when
+  // mapData.hasUnderground === true.
+  const [worldView, setWorldView] = useState<'surface' | 'underground'>('surface');
 
   const workerRef = useRef<Worker | null>(null);
   const mapCanvasRef = useRef<MapCanvasHandle>(null);
@@ -406,8 +415,10 @@ export default function App() {
       bodyKind,
       disableHistory,
       paletteOverride,
+      undergroundChance,
     });
-  }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode, bodyKind, disableHistory, paletteOverride]);
+    setWorldView('surface');
+  }, [generating, seed, numCells, waterRatio, profileName, shapeName, generateHistory, numSimYears, resourceRarityMode, bodyKind, disableHistory, paletteOverride, undergroundChance]);
 
   const handleGenerateHistory = useCallback(() => {
     if (generating) return;
@@ -434,7 +445,13 @@ export default function App() {
         // History-only path: the worker echoes cells/rivers/width/height back
         // unchanged and adds the simulation outputs. Replace mapData with the
         // full payload — selectedYear resets to 0 like the combined path.
-        setMapData(msg.data);
+        // Underground was generated in the prior GENERATE call and isn't
+        // re-emitted by the history path; preserve it from the snapshot.
+        setMapData(prev => ({
+          ...msg.data,
+          hasUnderground: prev?.hasUnderground,
+          underground: prev?.underground,
+        }));
         if (msg.data.history) {
           setSelectedYear(0);
         }
@@ -520,6 +537,7 @@ export default function App() {
       setBodyKind(spec.bodyKind);
       setDisableHistory(spec.disableHistory);
       setPaletteOverride(spec.paletteOverride);
+      setUndergroundChance(spec.undergroundChance);
 
       setWorldOrigin({
         universeSeed: universe.seed,
@@ -571,6 +589,7 @@ export default function App() {
       setBodyKind(spec.bodyKind);
       setDisableHistory(spec.disableHistory);
       setPaletteOverride(spec.paletteOverride);
+      setUndergroundChance(spec.undergroundChance);
 
       setWorldOrigin({
         universeSeed: universe.seed,
@@ -686,6 +705,7 @@ export default function App() {
         onTransformChange={setViewTransform}
         onCellClick={handleCellClick}
         onInteraction={handleMapInteraction}
+        worldView={mapData?.hasUnderground ? worldView : 'surface'}
       />
       <ZoomControls
         onZoomIn={() => mapCanvasRef.current?.zoomIn()}
@@ -735,6 +755,8 @@ export default function App() {
         onSelectEntity={handleSelectEntity}
         worldOrigin={worldOrigin}
         onBackToSystem={worldOrigin ? handleBackToSystem : undefined}
+        worldView={worldView}
+        onWorldViewChange={setWorldView}
       />
       {mapData && layers.legend && (
         <Legend mapData={mapData} />

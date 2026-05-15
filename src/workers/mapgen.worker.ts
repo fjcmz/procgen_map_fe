@@ -3,6 +3,8 @@ import { createNoiseSamplers3D, seededPRNG, buildCellGraph, assignElevation, com
 import { assignGasBands } from '../lib/terrain/gasBands';
 import { buildPhysicalWorld } from '../lib/history';
 import { historyGenerator } from '../lib/history/HistoryGenerator';
+import { generateUnderground, DEFAULT_UNDERGROUND_CHANCE } from '../lib/underground';
+import type { UndergroundMap } from '../lib/underground';
 import { RARITY_WEIGHTS_BY_MODE } from '../lib/history/physical/ResourceCatalog';
 import { CityEntity, CITY_SIZE_TRADE_CAP, type CitySize } from '../lib/history/physical/CityEntity';
 
@@ -184,6 +186,12 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
       continents = result.continentData;
     }
 
+    // Underground map: eligibility roll on an isolated sub-stream, then
+    // (if eligible) generate the cavern/tunnel graph. Gas-giant worlds
+    // never reach here — they return from the `profile.gasGiantMode`
+    // branch above.
+    const { hasUnderground, underground } = maybeBuildUnderground(seed, width, height, cells, req.undergroundChance);
+
     post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
 
     post({
@@ -194,11 +202,28 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
         paletteOverride: req.paletteOverride,
         coastlinesSuppressed: profile.suppressCoastlineRender,
         hillshadeSuppressed: profile.suppressHillshade,
+        hasUnderground,
+        underground,
       },
     });
   } catch (err) {
     post({ type: 'ERROR', message: String(err) });
   }
+}
+
+function maybeBuildUnderground(
+  seed: string,
+  width: number,
+  height: number,
+  cells: Parameters<typeof generateUnderground>[3],
+  chanceRaw: number | undefined,
+): { hasUnderground: boolean; underground: UndergroundMap | undefined } {
+  const chance = Math.max(0, Math.min(1, chanceRaw ?? DEFAULT_UNDERGROUND_CHANCE));
+  if (chance <= 0) return { hasUnderground: false, underground: undefined };
+  const presentRng = seededPRNG(`${seed}_underground_present`);
+  if (presentRng() >= chance) return { hasUnderground: false, underground: undefined };
+  const underground = generateUnderground(seed, width, height, cells);
+  return { hasUnderground: true, underground };
 }
 
 function handleGenerateHistory(req: Extract<GenerateRequest, { type: 'GENERATE_HISTORY' }>): void {

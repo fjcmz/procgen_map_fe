@@ -1,8 +1,6 @@
-# Underground Map (Proposal — Not Yet Implemented)
+# Underground Map
 
-This file documents the **proposed** underground map layer: a per-world cavern + tunnel network that sits "beneath" the surface terrain and is shown via a toggle in the Generation tab. Read `CLAUDE.md` first for framework conventions (worker boundary, RNG sub-streams) and `world_map.md` for the surface pipeline this layer hangs off.
-
-> **Status (2026-05-15)**: design proposal only. No code under `src/lib/underground/` yet. The contract below is what the implementation will follow; revise this file alongside the first PR.
+This file documents the **underground map layer**: a per-world cavern + tunnel network that sits "beneath" the surface terrain and is shown via a toggle in the Generation tab. Read `CLAUDE.md` first for framework conventions (worker boundary, RNG sub-streams) and `world_map.md` for the surface pipeline this layer hangs off.
 
 ## Goal
 
@@ -10,29 +8,23 @@ For some rocky worlds, expose an **alternate map view** that depicts a planet-wi
 
 ## Where it sits in the architecture
 
-Underground is a **lazy, render-only zoom-in feature**, the same architectural slot as V2 city maps and character rosters:
+Underground generation runs **eagerly inside `mapgen.worker.ts`** after the rest of the world map (and optional history) is complete:
 
 ```
-universe ──► planet ──► world map ──► world history (optional)
-                          │
-                          ├─► city map (lazy, on-demand)
-                          ├─► characters (lazy, on-demand)
-                          └─► underground map (lazy, on-demand)   ◄── this spec
+voronoi → terrain pipeline → buildPhysicalWorld
+  → (if generateHistory) HistoryGenerator → roads
+  → underground (eligibility roll + generation)   ◄── this spec
 ```
 
 Concretely:
-- Generation runs **on the main thread**, on the first toggle into the underground view (or when the toggle is on at world-load).
-- The worker (`mapgen.worker.ts`) does **not** generate the cavern graph. It only stamps a boolean `hasUnderground` onto `MapData` so the toggle can decide whether to expose itself.
-- All randomness routes through an **isolated sub-stream** `${worldSeed}_underground_*` so the world-history sweep stays byte-identical (`scripts/results/baseline-a.json`).
-
-Why lazy rather than in-worker:
-- Most worlds will never have the toggle flipped; generating eagerly is wasted work + payload weight.
-- Lazy + sub-stream-isolated guarantees zero sweep diff with no "no-op when default" gymnastics.
-- Matches the existing pattern for city maps + character rosters, so the contributor mental model is already in place.
+- The worker computes the cavern/tunnel graph for every world for which `seededPRNG('${seed}_underground_present')() < req.undergroundChance`, and ships the resulting `UndergroundMap` on `MapData`.
+- All randomness routes through isolated sub-streams `${worldSeed}_underground_*` so the world-history sweep stays byte-identical (`scripts/results/baseline-a.json`).
+- Generation must NEVER mutate `cells[i]` — caverns are an overlay on top of read-only surface terrain.
+- The view itself is render-only: no history, no kingdoms, no resources, no characters touch it.
 
 ## Eligibility (which worlds have an underground)
 
-Rolled **once** inside the worker, via a dedicated sub-stream `${seed}_underground_present`, so the boolean is deterministic per world and the roll is independent of every other worker RNG draw.
+Rolled **once** inside the worker, via a dedicated sub-stream `${seed}_underground_present`, so the boolean is deterministic per world and the roll is independent of every other worker RNG draw. The chance itself is passed in on `GenerateMapRequest.undergroundChance: number` (clamped to [0, 1]). When omitted (e.g. user generates a world directly from the landing screen without picking a body), the worker defaults to 0.45 — the same value as a generic rocky-life body.
 
 | `bodyKind` (planet/satellite) | Subtype hint | `undergroundChance` |
 |---|---|---|
@@ -46,13 +38,13 @@ Rolled **once** inside the worker, via a dedicated sub-stream `${seed}_undergrou
 | `rocky-barren` — `ocean` | sub-seabed only | **0.30** |
 | `ice-shell` (all ice satellite subtypes) | thin brittle crust | 0.30 |
 
-Source of truth for the table: `src/lib/underground/eligibility.ts` (proposed) — pure function `undergroundChance(bodyKind, subtype): number`. The worker pulls it via `bodyToProfile.ts` so the seed handoff from the universe view stays the single integration point.
+Source of truth for the table: `src/lib/underground/eligibility.ts` — pure function `undergroundChance(bodyKind, subtype): number`. Consumed by `bodyToProfile.ts`, which stamps `undergroundChance` onto `BodyGenSpec`; `App.tsx` forwards it onto the worker request. The universe handoff is therefore the single integration point.
 
 **Bounds**: every non-zero value sits in the 0.30–0.60 band requested in the original spec. Tune freely within that band; don't introduce a value outside it without a note here.
 
-## Generation (lazy, main-thread)
+## Generation (eager, in-worker)
 
-Module: `src/lib/underground/generator.ts` (proposed). Entry point:
+Module: `src/lib/underground/generator.ts`. Entry point:
 
 ```ts
 generateUnderground(
@@ -63,7 +55,7 @@ generateUnderground(
 ): UndergroundMap
 ```
 
-Determinism contract: same `(seed, width, height, cells)` produces a byte-identical `UndergroundMap`. The function makes **no mutations** to `cells`.
+Determinism contract: same `(seed, width, height, cells)` produces a byte-identical `UndergroundMap`. The function makes **no mutations** to `cells`. Because the output ships across `postMessage`, the structure stays plain data (no `Map`/`Set`).
 
 Pipeline (each step uses its own sub-stream so future tuning of one slice cannot perturb the others):
 
@@ -137,7 +129,7 @@ interface UndergroundConnection {
 }
 ```
 
-`UndergroundMap` is plain data (no `Map`/`Set`) so it can be cached in component state or memoised with `useMemo` without surprises. There is no class layer for underground entities — the generation is one-shot and there's no per-year simulation to mutate them.
+`UndergroundMap` is plain data (no `Map`/`Set`) so it can cross the worker boundary via `postMessage` without a serializer. There is no class layer for underground entities — the generation is one-shot and there's no per-year simulation to mutate them.
 
 ## Rendering
 
@@ -167,24 +159,29 @@ History overlays (kingdoms, roads, tech, religion, country borders, etc.) are **
 ## UI integration
 
 - **Generation tab**: add a "View" toggle (segmented control: `Surface | Underground`) visible only when `mapData.hasUnderground === true`. Default: `Surface`.
-- The toggle is **pure UI state** held in `App.tsx` (or `UnifiedOverlay.tsx`) — flipping it triggers `MapCanvas` to switch its draw path. Generation of the `UndergroundMap` is `useMemo`-cached on `mapData.seed + mapData.hasUnderground`, so it runs at most once per world.
+- The toggle is **pure UI state** held in `App.tsx` — flipping it tells `MapCanvas` to switch its draw path. The `UndergroundMap` itself is already on `mapData.underground`, so the toggle is render-cheap.
 - Minimap, Legend, Timeline, and history overlays are hidden / disabled while the underground view is active.
+- **Layers list**: a new `undergroundConnections` flag (default false) toggles the small entrance-glyph overlay on the **surface** map at each connection point's surface cell. Visible regardless of whether the underground view is active.
 
-## Worker-side touchpoints (minimal)
+## Worker-side touchpoints
 
-Only two things change in `mapgen.worker.ts`:
+`mapgen.worker.ts` integrates the underground generator as a final post-history step:
 
-1. After `buildPhysicalWorld`, roll `hasUnderground` via:
+1. After history + roads (or after `buildPhysicalWorld` if history is off), roll eligibility:
+   ```ts
+   const chance = Math.max(0, Math.min(1, req.undergroundChance ?? 0.45));
+   const presentRng = seededPRNG(`${seed}_underground_present`);
+   const hasUnderground = chance > 0 && presentRng() < chance;
    ```
-   const undergroundRng = seededPRNG(`${seed}_underground_present`);
-   const chance = undergroundChance(req.bodyKind, /* subtype */);
-   const hasUnderground = undergroundRng() < chance;
+2. If `hasUnderground === true`, generate the `UndergroundMap`:
+   ```ts
+   const underground = generateUnderground(seed, width, height, cells);
    ```
-2. Stamp `hasUnderground` onto the emitted `MapData`.
+3. Stamp `{ hasUnderground, underground }` onto the emitted `MapData`.
 
-That's the entire worker change. No new pipeline step, no payload bloat (one boolean), and because the roll lives on its own sub-stream, the sweep stays byte-identical.
+Gas-giant worlds short-circuit earlier (the gas-band branch returns before reaching this step) so we never roll underground for them.
 
-`bodyToProfile.ts` doesn't need a new field on `BodyGenSpec` — the renderer-side `undergroundChance(bodyKind, subtype)` lookup is enough. If we discover we need the subtype on the worker side (e.g. for the eligibility roll), the cleanest path is to add a `subtype` field to `GenerateMapRequest` rather than couple `BodyGenSpec` to underground specifics.
+`BodyGenSpec` (in `src/lib/universe/bodyToProfile.ts`) gains an `undergroundChance: number` field, populated via `undergroundChance(bodyKind, subtype)`. `App.tsx` forwards `spec.undergroundChance` onto the worker request. Direct world-map landings (no body context) default to 0.45.
 
 ## `MapData` additions
 
@@ -195,10 +192,12 @@ interface MapData {
   /** Set by the worker; true if this world has an underground map.
    *  When false (or undefined), the Generation-tab toggle stays hidden. */
   hasUnderground?: boolean;
+  /** Eager underground graph — present iff hasUnderground === true. */
+  underground?: UndergroundMap;
 }
 ```
 
-The `UndergroundMap` itself is **not** placed on `MapData` — it's computed lazily on the main thread (cached in component state), same as V2 city maps. This keeps `postMessage` payload size unchanged and avoids forcing every world generation to spend cycles on caverns the user may never look at.
+`UndergroundMap` is plain data (no `Map`/`Set`) so the structured clone in `postMessage` handles it natively.
 
 ## Seed sub-streams (add to CLAUDE.md table)
 
@@ -213,7 +212,7 @@ The `UndergroundMap` itself is **not** placed on `MapData` — it's computed laz
 
 All sub-streams are consumed locally; their draws never leak back into the world-map or universe RNG.
 
-## File layout (proposed)
+## File layout
 
 ```
 src/lib/underground/
@@ -221,14 +220,13 @@ src/lib/underground/
 ├── types.ts              # UndergroundMap, Cavern, Tunnel, MazeCluster, UndergroundConnection
 ├── eligibility.ts        # undergroundChance(bodyKind, subtype)
 ├── generator.ts          # generateUnderground(seed, width, height, cells)
-├── renderer.ts           # drawUnderground(ctx, underground, layers)
-└── (internal helpers as the implementation grows)
+├── renderer.ts           # drawUnderground(ctx, underground, layers, transform)
 ```
 
 ## Verification
 
 - **Type-check**: `npm run build`.
-- **Sweep**: `npm run sweep -- --label underground-feature`. Diff against `scripts/results/baseline-a.json` — **must be a zero-diff** because the feature is render-only and its sole worker side-effect (the `hasUnderground` boolean) is rolled from an isolated sub-stream that does not affect any history simulation. A non-zero diff means a sub-stream draw leaked.
+- **Sweep**: `npm run sweep -- --label underground-feature`. Diff against `scripts/results/baseline-a.json` — **must be a zero-diff** because (a) the sweep harness emits only `HistoryStats`, which has no underground fields, and (b) underground generation routes through isolated sub-streams that don't perturb history rolls. A non-zero diff means a sub-stream draw leaked.
 - **Visual check**: in `npm run dev`, generate enough worlds to see at least one with `hasUnderground=true`, flip the toggle, walk a few cavern-to-cavern paths visually, confirm every cavern is reachable (the renderer should add a debug "isolated cavern" warning if the graph ever has more than one component).
 
 ## Pitfalls
@@ -236,6 +234,6 @@ src/lib/underground/
 - **Sub-stream isolation is the entire correctness contract for the sweep.** Every random draw in the underground module must use one of the listed sub-streams — never the main `rng` parameter from a calling site, never `Math.random()`. If `npm run sweep` shows a non-zero diff after underground-only changes, a draw leaked.
 - **No history coupling.** The underground layer does not place cities, regions, resources, kingdoms, characters, or anything that participates in the timeline simulation. If a future requirement wants e.g. "drow city in this cavern", that lives in the history layer, takes the `UndergroundMap` as **input**, and requires its own design + spec update.
 - **Surface cells are read-only.** `generateUnderground` may not mutate `cells[i]`. Cavern footprints don't change biome, elevation, or `regionId`. The renderer paints over the surface canvas in underground mode, but the underlying `cells` array is untouched.
-- **`hasUnderground` is the only worker-side change.** Don't grow `MapData` with cached `UndergroundMap` data — keep generation lazy. If we later observe that lazy generation is too slow for the UI (unlikely, expected <50 ms), revisit, but treat that as a performance change with its own spec note.
-- **Gas giants have no underground.** Eligibility returns 0 for every gas subtype. Worker should still emit `hasUnderground: false` (not `undefined`) for gas worlds so the toggle code can treat the field as a clean boolean.
+- **Gas giants have no underground.** The worker's gas-band branch returns before the underground step, so `hasUnderground` is `undefined` on gas worlds. UI must treat `undefined === false` (no toggle).
 - **Connection-point land check matters.** A connection placed on a water/lake cell would render as an undersea staircase — confusing. Always filter eligible surface cells to land before sampling.
+- **`undergroundChance` clamps to [0, 1] in the worker.** Don't trust the request value — clamping is cheap and protects against UI bugs that pass NaN / out-of-range.
