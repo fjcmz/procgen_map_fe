@@ -2,7 +2,8 @@
  * Underground map generator — one-shot, deterministic, side-effect-free.
  *
  * Builds an independent Voronoi cell graph (same primitive as the surface
- * map) and classifies each cell as solid / cavern / tunnel:
+ * map, sized to the same cell count) and classifies each cell as
+ * solid / cavern / tunnel:
  *
  * - Caverns are BFS-grown groups of cells around Poisson-disk-sampled seeds.
  *   Three kinds: large (combined area ~30 % of the world), small, and
@@ -26,11 +27,6 @@ import type {
   UndergroundConnection,
   UndergroundMap,
 } from './types';
-
-/** Cell count for the underground Voronoi graph. Independent of the surface
- *  cell count — caverns are big enough that 4000 cells gives a polygon
- *  density visibly similar to a default surface map. */
-const UNDERGROUND_CELL_COUNT = 4000;
 
 function randInt(rng: () => number, lo: number, hi: number): number {
   return Math.floor(lo + rng() * (hi - lo + 1));
@@ -119,10 +115,45 @@ function centroidOf(cells: UndergroundCell[], cellIndices: number[]): { cx: numb
   return { cx: sx / n, cy: sy / n };
 }
 
+/** Binary min-heap of `{idx, f}` entries keyed on `f`. Inline implementation
+ *  so A* below scales to the surface map's full cell count (defaults to
+ *  100 000). A plain array with linear-scan find-min would dominate runtime
+ *  at that size. */
+interface HeapEntry { idx: number; f: number; }
+function heapPush(heap: HeapEntry[], entry: HeapEntry): void {
+  heap.push(entry);
+  let i = heap.length - 1;
+  while (i > 0) {
+    const parent = (i - 1) >> 1;
+    if (heap[parent].f <= heap[i].f) break;
+    const tmp = heap[parent]; heap[parent] = heap[i]; heap[i] = tmp;
+    i = parent;
+  }
+}
+function heapPop(heap: HeapEntry[]): HeapEntry | undefined {
+  if (heap.length === 0) return undefined;
+  const top = heap[0];
+  const last = heap.pop()!;
+  if (heap.length === 0) return top;
+  heap[0] = last;
+  let i = 0;
+  const n = heap.length;
+  while (true) {
+    const l = i * 2 + 1;
+    const r = l + 1;
+    let best = i;
+    if (l < n && heap[l].f < heap[best].f) best = l;
+    if (r < n && heap[r].f < heap[best].f) best = r;
+    if (best === i) break;
+    const tmp = heap[best]; heap[best] = heap[i]; heap[i] = tmp;
+    i = best;
+  }
+  return top;
+}
+
 /** A* through the cell graph from `start` to `end`. Returns the list of
  *  cell indices on the path (inclusive of both ends), or `null` if no
- *  path exists. Cells in `passThrough` keep cost ~1; cells in `avoid`
- *  cost more so tunnels prefer unclaimed territory. */
+ *  path exists. */
 function aStar(
   cells: UndergroundCell[],
   start: number,
@@ -137,20 +168,12 @@ function aStar(
   gScore[start] = 0;
   const cameFrom = new Int32Array(N);
   cameFrom.fill(-1);
-  // Simple binary-heap priority queue keyed by fScore.
-  const open: { idx: number; f: number }[] = [{ idx: start, f: heuristic(cells, start, end) }];
   const closed = new Uint8Array(N);
+  const open: HeapEntry[] = [];
+  heapPush(open, { idx: start, f: heuristic(cells, start, end) });
   while (open.length > 0) {
-    // Pop min (linear scan — N is small enough that the constant beats heap bookkeeping).
-    let bestI = 0;
-    for (let i = 1; i < open.length; i++) {
-      if (open[i].f < open[bestI].f) bestI = i;
-    }
-    const current = open[bestI];
-    open[bestI] = open[open.length - 1];
-    open.pop();
+    const current = heapPop(open)!;
     if (current.idx === end) {
-      // Reconstruct
       const path: number[] = [end];
       let cur = end;
       while (cameFrom[cur] !== -1) {
@@ -162,14 +185,16 @@ function aStar(
     }
     if (closed[current.idx]) continue;
     closed[current.idx] = 1;
-    for (const nb of cells[current.idx].neighbors) {
+    const neighbours = cells[current.idx].neighbors;
+    for (let n = 0; n < neighbours.length; n++) {
+      const nb = neighbours[n];
       if (closed[nb]) continue;
       if (isBlocked(nb) && nb !== end) continue;
       const tentativeG = gScore[current.idx] + costOf(nb);
       if (tentativeG < gScore[nb]) {
         gScore[nb] = tentativeG;
         cameFrom[nb] = current.idx;
-        open.push({ idx: nb, f: tentativeG + heuristic(cells, nb, end) });
+        heapPush(open, { idx: nb, f: tentativeG + heuristic(cells, nb, end) });
       }
     }
   }
@@ -213,9 +238,17 @@ function edgeKey(a: string, b: string): string {
 }
 
 /** Build the underground cell array from `buildCellGraph`'s output. Strips
- *  surface-specific fields so the postMessage payload stays minimal. */
-function buildUndergroundCells(seed: string, width: number, height: number): UndergroundCell[] {
-  const { cells } = buildCellGraph(`${seed}_underground_graph`, UNDERGROUND_CELL_COUNT, width, height);
+ *  surface-specific fields so the postMessage payload stays minimal. The
+ *  underground graph uses the same cell count as the surface map so the
+ *  polygon density matches; the actual layout is independent (the seed is
+ *  isolated). */
+function buildUndergroundCells(
+  seed: string,
+  numCells: number,
+  width: number,
+  height: number,
+): UndergroundCell[] {
+  const { cells } = buildCellGraph(`${seed}_underground_graph`, numCells, width, height);
   return cells.map((c: SurfaceCell): UndergroundCell => ({
     index: c.index,
     x: c.x,
@@ -273,12 +306,15 @@ function planLargeCaverns(
 function planSmallCaverns(
   rng: () => number,
   cells: UndergroundCell[],
+  width: number,
+  height: number,
   forbidden: Set<number>,
 ): CavernPlan[] {
   const count = randInt(rng, 5, 50);
   const avgPer = randInt(rng, 4, 12);
-  // Looser min-distance; small caverns can pack tighter.
-  const minDist = Math.sqrt(cells.length) * 0.6;
+  // World-coordinate-based spacing so the layout stays stable across cell
+  // counts. Target spread for ~25 caverns across the map: ~sqrt(A/25) * 0.7.
+  const minDist = Math.sqrt((width * height) / 25) * 0.7;
   const seedIndices = poissonDiskCells(rng, cells, minDist, count, count * 80, forbidden);
   return seedIndices.map((seedCell, i): CavernPlan => ({
     id: `sm_${i}`,
@@ -291,10 +327,13 @@ function planSmallCaverns(
 function planMazeClusters(
   rng: () => number,
   cells: UndergroundCell[],
+  width: number,
+  height: number,
   forbidden: Set<number>,
 ): CavernPlan[] {
   const count = randInt(rng, 3, 10);
-  const minDist = Math.sqrt(cells.length) * 1.6;
+  // ~6 clusters average → wide spacing.
+  const minDist = Math.sqrt((width * height) / 6) * 0.75;
   const seedIndices = poissonDiskCells(rng, cells, minDist, count, count * 80, forbidden);
   return seedIndices.map((seedCell, i): CavernPlan => ({
     id: `mz_${i}`,
@@ -607,8 +646,9 @@ export function generateUnderground(
   height: number,
   surfaceCells: SurfaceCell[],
 ): UndergroundMap {
-  // Step 1: build the underground Voronoi graph.
-  const cells = buildUndergroundCells(seed, width, height);
+  // Step 1: build the underground Voronoi graph — same cell count as the
+  // surface map so polygon density matches across the two views.
+  const cells = buildUndergroundCells(seed, surfaceCells.length, width, height);
   const owned = new Int32Array(cells.length).fill(-1);
 
   // Step 2: plan + grow caverns. Each plan adds one Cavern record + marks
@@ -630,7 +670,7 @@ export function generateUnderground(
 
   const usedSeeds = new Set<number>(largePlans.map(p => p.seedCell));
   const smallRng = seededPRNG(`${seed}_underground_smallcaverns`);
-  const smallPlans = planSmallCaverns(smallRng, cells, usedSeeds);
+  const smallPlans = planSmallCaverns(smallRng, cells, width, height, usedSeeds);
   for (const plan of smallPlans) {
     const grown = growCavern(smallRng, cells, plan.seedCell, plan.targetSize, owned);
     if (grown.length === 0) continue;
@@ -644,7 +684,7 @@ export function generateUnderground(
 
   for (const p of smallPlans) usedSeeds.add(p.seedCell);
   const mazeTopRng = seededPRNG(`${seed}_underground_maze_top`);
-  const mazePlans = planMazeClusters(mazeTopRng, cells, usedSeeds);
+  const mazePlans = planMazeClusters(mazeTopRng, cells, width, height, usedSeeds);
   for (let mi = 0; mi < mazePlans.length; mi++) {
     const plan = mazePlans[mi];
     const grown = growCavern(mazeTopRng, cells, plan.seedCell, plan.targetSize, owned);

@@ -61,7 +61,7 @@ Determinism contract: same `(seed, width, height, surfaceCells)` produces a byte
 
 Pipeline (each step uses its own sub-stream so future tuning of one slice cannot perturb the others):
 
-0. **Build the underground Voronoi graph.** `buildCellGraph(\`${seed}_underground_graph\`, UNDERGROUND_CELL_COUNT=4000, width, height)` produces an independent polygon graph sized purely for the underground (the surface graph's cell count is irrelevant). Each cell starts as `category: 'solid'`, `cavernId: null`. The result ships on `UndergroundMap.cells`.
+0. **Build the underground Voronoi graph.** `buildCellGraph(\`${seed}_underground_graph\`, surfaceCells.length, width, height)` produces an independent polygon graph sized to **match the surface map's cell count** so polygon density looks consistent across the two views. The graph layout itself is independent — the seed `${seed}_underground_graph` is isolated from the surface RNG. Each cell starts as `category: 'solid'`, `cavernId: null`. The result ships on `UndergroundMap.cells`.
 
 1. **Large caverns** — 2–20 caverns covering ~30 % of the underground graph by cell count.
    Sub-stream: `${seed}_underground_largecaverns`.
