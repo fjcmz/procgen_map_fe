@@ -490,6 +490,10 @@ export interface MapData {
   coastlinesSuppressed?: boolean;
   /** Mirrored from `profile.suppressHillshade`. */
   hillshadeSuppressed?: boolean;
+  /** True if this world has an underground map. Drives the Generation-tab toggle visibility. */
+  hasUnderground?: boolean;
+  /** Eager underground graph; present iff hasUnderground === true. */
+  underground?: import('./underground/types').UndergroundMap;
 }
 
 export interface TerrainProfile {
@@ -644,6 +648,10 @@ export interface GenerateMapRequest {
   /** Sparse `BiomeType → hex` map applied at render time. Drives gas-giant
    *  per-subtype recoloring without forking the renderer. */
   paletteOverride?: Record<string, string>;
+  /** Probability (0–1) that the worker generates an underground map. Worker
+   *  clamps to [0, 1]; if omitted, defaults to DEFAULT_UNDERGROUND_CHANCE.
+   *  Gas-giant worlds short-circuit earlier so this is ignored for them. */
+  undergroundChance?: number;
 }
 
 export interface GenerateHistoryRequest {
@@ -708,6 +716,9 @@ export interface LayerVisibility {
   cityIcons: boolean;
   /** Static wind streamlines + storm spirals; only meaningful on gas-giant maps. */
   windOverlay: boolean;
+  /** Small entrance-glyph overlay on the surface map at each underground
+   *  connection point. Only meaningful when `mapData.hasUnderground`. */
+  undergroundConnections: boolean;
 }
 
 export interface BiomeInfo {

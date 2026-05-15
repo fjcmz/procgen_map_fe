@@ -48,6 +48,10 @@ export interface GenerationTabProps {
    */
   worldOrigin?: WorldOrigin | null;
   onBackToSystem?: () => void;
+  /** Surface vs underground view toggle. Only rendered when the current
+   *  world has `mapData.hasUnderground === true`. */
+  worldView: 'surface' | 'underground';
+  onWorldViewChange: (view: 'surface' | 'underground') => void;
 }
 
 const CELL_OPTIONS = [10000, 20000, 50000, 100000, 200000];
@@ -126,11 +130,16 @@ const LAYER_LABELS: Record<keyof LayerVisibility, string> = {
   seasonalIce: 'Seasons',
   cityIcons: 'City Icons',
   windOverlay: 'Wind',
+  undergroundConnections: 'Cave Entrances',
 };
 
 /** Layer keys that only make sense on gas-giant maps; hidden from the
  *  Layers list when the loaded body isn't a gas giant. */
 const GAS_ONLY_LAYERS: Set<keyof LayerVisibility> = new Set(['windOverlay']);
+
+/** Layer keys that only make sense when the current world has an underground;
+ *  hidden from the Layers list otherwise. */
+const UNDERGROUND_ONLY_LAYERS: Set<keyof LayerVisibility> = new Set(['undergroundConnections']);
 
 export function GenerationTab({
   seed,
@@ -169,6 +178,8 @@ export function GenerationTab({
   exporting,
   worldOrigin,
   onBackToSystem,
+  worldView,
+  onWorldViewChange,
 }: GenerationTabProps) {
   // When the planet flow was entered from the universe, the predefined
   // params are read-only — the universe planet is the source of truth.
@@ -378,6 +389,32 @@ export function GenerationTab({
         </div>
       )}
 
+      {mapData?.hasUnderground && (
+        <div style={styles.label}>
+          View
+          <div style={styles.viewToggleRow}>
+            <button
+              style={{
+                ...styles.viewBtn,
+                ...(worldView === 'surface' ? styles.viewBtnActive : {}),
+              }}
+              onClick={() => onWorldViewChange('surface')}
+            >
+              Surface
+            </button>
+            <button
+              style={{
+                ...styles.viewBtn,
+                ...(worldView === 'underground' ? styles.viewBtnActive : {}),
+              }}
+              onClick={() => onWorldViewChange('underground')}
+            >
+              Underground
+            </button>
+          </div>
+        </div>
+      )}
+
       <div style={styles.label}>
         Map View
         <div style={styles.viewToggleRow}>
@@ -447,6 +484,7 @@ export function GenerationTab({
         <div style={{ ...styles.toggleRow, marginTop: 6 }}>
           {(Object.keys(LAYER_LABELS) as (keyof LayerVisibility)[])
             .filter(key => !GAS_ONLY_LAYERS.has(key) || (mapData?.bodyKind === 'gas-giant'))
+            .filter(key => !UNDERGROUND_ONLY_LAYERS.has(key) || mapData?.hasUnderground)
             .map(key => (
               <label key={key} style={styles.toggle}>
                 <input

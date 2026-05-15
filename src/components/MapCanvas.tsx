@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../lib/types';
 import { render } from '../lib/renderer';
+import { drawUnderground, drawConnectionOverlay } from '../lib/underground';
 
 interface MapCanvasProps {
   mapData: MapData | null;
@@ -16,6 +17,8 @@ interface MapCanvasProps {
   onTransformChange?: (transform: Transform) => void;
   onCellClick?: (cellIndex: number) => void;
   onInteraction?: () => void;
+  /** Surface terrain vs underground cavern/tunnel view. Defaults to surface. */
+  worldView?: 'surface' | 'underground';
 }
 
 export interface Transform {
@@ -68,7 +71,7 @@ function constrainTransform(t: Transform, mapWidth: number, mapHeight: number): 
 }
 
 export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function MapCanvas(
-  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, citySizesAtYear, expansionFlags, onTransformChange, onCellClick, onInteraction }: MapCanvasProps,
+  { mapData, layers, seed, selectedYear, mapView = 'terrain', politicalMode = 'countries', season = 0, highlightCells, citySizesAtYear, expansionFlags, onTransformChange, onCellClick, onInteraction, worldView = 'surface' }: MapCanvasProps,
   ref,
 ) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -148,9 +151,32 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.setTransform(transform.scale, 0, 0, transform.scale, transform.x, transform.y);
-    render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear, expansionFlags, transform.scale);
+
+    if (worldView === 'underground' && mapData.underground) {
+      // Mirror the surface renderer's three-offset wrap so panning across
+      // the east-west seam stays seamless on the underground view too.
+      const w = mapData.width;
+      for (const dx of [-w, 0, w]) {
+        ctx.save();
+        ctx.translate(dx, 0);
+        drawUnderground(ctx, mapData.underground, mapData.width, mapData.height);
+        ctx.restore();
+      }
+    } else {
+      render(ctx, mapData, layers, seed, selectedYear, mapView, season, politicalMode, highlightCells ?? undefined, citySizesAtYear, expansionFlags, transform.scale);
+      // Optional entrance-glyph overlay on the surface map.
+      if (layers.undergroundConnections && mapData.underground) {
+        const w = mapData.width;
+        for (const dx of [-w, 0, w]) {
+          ctx.save();
+          ctx.translate(dx, 0);
+          drawConnectionOverlay(ctx, mapData.underground, mapData.cells);
+          ctx.restore();
+        }
+      }
+    }
     ctx.resetTransform();
-  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells, citySizesAtYear, expansionFlags]);
+  }, [mapData, layers, seed, transform, selectedYear, mapView, politicalMode, season, highlightCells, citySizesAtYear, expansionFlags, worldView]);
 
   // Wheel zoom centered on cursor
   useEffect(() => {

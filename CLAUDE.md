@@ -9,19 +9,22 @@ The project is a layered procedural generator. The user picks a generation mode 
 ```
 universe ──► galaxy ──► solar system ──► planet (or satellite)
                                           │
-                                          └─► world map (terrain + biomes + rivers)
-                                                │
-                                                └─► world history (5000-yr civilizational sim, optional)
-                                                      │
-                                                      └─► city map  (V1 tile / V2 Voronoi-polygon)
-                                                            │
-                                                            └─► characters (PC/NPC roster)
+                                          └─► world map (terrain + biomes + rivers)  ◄─┐
+                                                │                                      │
+                                                ├─► world history (5000-yr sim, opt.) │
+                                                │     │                                │
+                                                │     └─► city map (V1 / V2)           │
+                                                │            │                         │
+                                                │            └─► characters (PC/NPC)   │
+                                                │                                      │
+                                                └─► underground map (toggle, lazy) ────┘
+                                                     (caverns + tunnels, rocky worlds only)
 ```
 
 **Key design principles**:
 - **The physical world is always built from terrain.** Continents / regions / resources run even without history.
 - **Cities and kingdoms are outputs of the history simulation, not independent pipeline steps.** When history is disabled, the map shows terrain + geographic structure only.
-- **City maps and character rosters are render-only zoom-in features** — they never affect the simulation and are never reached by the sweep harness.
+- **City maps and character rosters are render-only zoom-in features** — they never affect the simulation and are never reached by the sweep harness. **Underground maps** are render-only too, but generated eagerly in the worker so the cavern/tunnel graph ships with `MapData`.
 - **The universe layer is an outer wrapper, not a hard dependency.** The world-map flow can run on its own; the universe flow drills down into it via a seed hand-off.
 
 ## Commands
@@ -47,6 +50,7 @@ The simulation is split into five layers, each documented in its own `claude_spe
 | **[`claude_specs/world_history.md`](claude_specs/world_history.md)** | Phase 6 HistoryGenerator orchestration, `buildPhysicalWorld`, Timeline + 12 Phase 5 generators, tech / religion / cataclysm / war / conquer / empire mechanics, HistoryStats + sweep harness, render-time concerns (overlay tabs, Timeline panel, ownership reconstruction) |
 | **[`claude_specs/city_map.md`](claude_specs/city_map.md)** | City-map popups: V1 (tile, frozen) + V2 (Voronoi-polygon, in-progress through PR 5). Polygon graph, walls, river, roads, streets, bridges, open spaces, blocks, landmarks, buildings, sprawl |
 | **[`claude_specs/characters.md`](claude_specs/characters.md)** | PC/NPC roster generation — `lib/fantasy/` D&D 3.5e engine, `lib/citychars.ts` lazy roller, `Country.raceBias` + `Religion.deity/alignment` simulation metadata, `World.seed` threading |
+| **[`claude_specs/underground_map.md`](claude_specs/underground_map.md)** | Alternate cavern/tunnel map view for rocky worlds — eager worker-side generation behind a Generation-tab toggle. Subtype-driven eligibility (gas giants never have one; volcanic/lava bias up to 0.60). Render-only: caverns never participate in the simulation. |
 | **[`claude_specs/performance.md`](claude_specs/performance.md)** | Cross-cutting: `DEBUG_HISTORY_TIMING` flag + `timed()` helper in `src/lib/history/timeline/timing.ts`, current hot paths, why per-year parallelization is blocked, performance levers per layer |
 
 When working on a change, identify which layer it touches and read the relevant spec. For wall-clock or profiling work, also read `performance.md`. Most changes also need to respect the framework conventions documented below.
@@ -71,13 +75,15 @@ voronoi → elevation → oceanCurrents → moisture → temperature → biomes
   → fillDepressions → rivers (initial) → hydraulicErosion → fillDepressions
   → rivers (final) → temperature (refresh) → biomes (refresh)
   → buildPhysicalWorld
-  └─ (if generateHistory=true) → HistoryGenerator → roads
-                                    ├─ buildPhysicalWorld (World + Continents + Regions + Resources + Cities)
-                                    ├─ TimelineGenerator (5000 years via YearGenerator)
-                                    │    └─ 12 Phase 5 generators per year:
-                                    │       Foundation → Contact → Country → Illustrate → Religion
-                                    │       → Trade → Wonder → Cataclysm → War → Tech → Conquer → Empire
-                                    └─ serialize → HistoryData (ownership snapshots + events)
+  ├─ (if generateHistory=true) → HistoryGenerator → roads
+  │                                 ├─ buildPhysicalWorld (World + Continents + Regions + Resources + Cities)
+  │                                 ├─ TimelineGenerator (5000 years via YearGenerator)
+  │                                 │    └─ 12 Phase 5 generators per year:
+  │                                 │       Foundation → Contact → Country → Illustrate → Religion
+  │                                 │       → Trade → Wonder → Cataclysm → War → Tech → Conquer → Empire
+  │                                 └─ serialize → HistoryData (ownership snapshots + events)
+  └─ underground (eligibility roll + optional generateUnderground)
+       (skipped on gas-giant worlds via the early-return branch)
 ```
 
 Terrain steps are documented in `world_map.md`. The history pipeline is documented in `world_history.md`.
@@ -108,6 +114,8 @@ Two layers run **on demand**, not in the worker pipeline:
 
 Both run on the main thread, complete in milliseconds, and are seeded from `worldSeed` + the entity's id so re-opening the same entity produces a byte-identical artifact.
 
+**Underground maps** (`underground_map.md`) are render-only but generated **eagerly** inside `mapgen.worker.ts` after the rest of the pipeline. The `UndergroundMap` ships on `MapData.underground` so the Generation-tab toggle is a pure render swap. Eligibility is rolled via an isolated sub-stream `${seed}_underground_present` so the sweep stays byte-identical.
+
 ## File Organization
 
 `src/lib/` is split by concern; each subdirectory has an `index.ts` barrel exporting its public API.
@@ -124,6 +132,7 @@ Both run on the main thread, complete in milliseconds, and are seeded from `worl
 | `src/lib/citymap/` | City map V1 (tile-based) + V2 (Voronoi-polygon-based) generators & renderers | `city_map.md` |
 | `src/lib/fantasy/` | Race / Deity / Alignment specs + `generatePcChar` D&D 3.5e roller | `characters.md` |
 | `src/lib/citychars.ts` | UI-only lazy roster roller for the Details tab | `characters.md` |
+| `src/lib/underground/` | Underground map eligibility + worker-side generator + renderer | `underground_map.md` |
 | `src/workers/mapgen.worker.ts` | World-map pipeline orchestrator | `world_map.md` + `world_history.md` |
 | `src/workers/universegen.worker.ts` | Universe pipeline orchestrator | `universe_map.md` |
 | `src/components/` | React UI (canvases, overlays, popups, timeline panel) | each spec covers its own panels |
@@ -175,6 +184,10 @@ Present only when `generateHistory = true`:
 - `roads: Road[]` — A* paths between cities
 - `history: HistoryData` — countries, years (events), ownership snapshots
 - `historyStats: HistoryStats` — aggregate metrics (forwarded, not recomputed; see `world_history.md`)
+
+Render-only fields (set on every generation):
+- `hasUnderground?: boolean` — true if this world has an underground map. Drives the Generation-tab toggle visibility.
+- `underground?: UndergroundMap` — eager cavern/tunnel graph, present iff `hasUnderground`. Plain data (no `Map`/`Set`) so it crosses `postMessage` natively. See `underground_map.md`.
 
 ### `UniverseData` (universe-worker output)
 
@@ -239,6 +252,8 @@ The codebase uses **isolated PRNG sub-streams** liberally — they're how new be
 | `${seed}_chars_<cellIndex>` | Character roster roll (`characters.md`) |
 | `${seed}_city_<cityName>_voronoi` / `_walls` / `_river` / `_roads` / `_streets` / `_openspaces_*` / `_blocks_names` / `_landmarks_*` / `_buildings` / `_sprawl` | V2 city slices (`city_map.md`) |
 | `${seed}_seasettle_<parentCityId>_<year>` | Sea-colonisation attempt in `CitySettlement.ts` (`world_history.md`). Isolated so pre-`maritime`-tech years stay byte-identical to the legacy run. |
+| `${seed}_underground_present` | Worker-side eligibility roll: does this world have an underground map? (`underground_map.md`) |
+| `${seed}_underground_largecaverns` / `_smallcaverns` / `_maze_<i>` / `_tunnels` / `_connections` | Worker-side underground generator slices — caverns, maze clusters, tunnel graph, surface entrances. Isolated so the sweep stays byte-identical. |
 
 The discipline: **a new feature that adds a behavioral roll must use its own sub-stream, OR be a no-op when its inputs are zero/default**. Otherwise the sweep baseline shifts.
 
@@ -276,8 +291,9 @@ The sweep does NOT cover:
 - The **universe pipeline** (`src/lib/universe/`, `universegen.worker.ts`) — verify universe changes via `npm run build` and visual inspection.
 - **City-map generation** (`src/lib/citymap/`) — render-only, never reached by the sweep.
 - **Character rosters** (`src/lib/citychars.ts` + `src/lib/fantasy/`) — render-only, never reached by the sweep.
+- **Underground map** (`src/lib/underground/`) — render-only. Worker generates it eagerly but every random draw routes through `${seed}_underground_*` sub-streams that are independent of history rolls, so the sweep stays byte-identical (the sweep emits only `HistoryStats` anyway).
 
-Any non-zero sweep diff after a citymap-only, characters-only, or universe-only change means an **accidental simulation-layer edit**.
+Any non-zero sweep diff after a citymap-only, characters-only, underground-only, or universe-only change means an **accidental simulation-layer edit**.
 
 ## Verification
 
@@ -309,6 +325,7 @@ These cut across multiple specs. Layer-specific pitfalls live in each spec's "Pi
 - **Universe ↔ world-map seed hand-off is a stable interface.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on when they generate a world from the universe view. Changing this format would break "the same universe seed always gives the same world for a given planet". See `universe_map.md`.
 - **Sea cities are gated by the `maritime` tech field.** Once a country reaches `maritime >= 1`, large+ coastal cities can spawn child cities on water cells via `CitySettlement.ts`. At `maritime >= 4` they can claim deep-ocean cells (no `regionId`); those cells are absorbed into the parent city's region by appending to `region.cellIndices` (water cells always appended after land — preserves the land-first invariant). All sea-attempt randomness routes through `seededPRNG(`${seed}_seasettle_${parentCityId}_${year}`)` so pre-tech years stay sweep-byte-identical. Sea cities render with an anchor icon (instead of a house) on the world map; their owned water cells get a translucent kingdom-colour tint over the sea palette. The V2 city map of a sea city skips walls / river / sprawl and turns the canvas surrounding the city footprint into open ocean (stilted-platform variant). Once founded, sea cities also expand into adjacent unclaimed water polygons (coastal or deep) up to `max(1, floor(exploration * 0.1 + maritime * 0.2))` total owned cells via the `sea-expansion-cells` step in `YearGenerator.ts`; sea cities are explicitly skipped in the land-expansion step so they never absorb adjacent land. See `world_history.md`, `world_map.md`, and `city_map.md`.
 - **Lifeless rocky bodies have their own resource gating.** `buildPhysicalWorld` accepts a `bodyKind` and computes `BodyContext = { hasLife, hasWater }` (life from `bodyKind === 'rocky-life'`, water from a one-time `cells.some(isWater)` scan), threading it into `ResourceGenerator`. Two new habitat flags drive the gates: `requiresWater: true` blocks all biological / agricultural specs (~28 entries) on dry bodies, and `requiresLifeless: true` restricts the 10 sci-fi strategic specs (`helium_3`, `deuterium`, `tritium`, `thorium`, `antimatter`, `iridosmium`, `naqahdah`, `promethium`, `xenon_ice`, `monatomic_gold`) to bodies that lack BOTH life and water. On dry bodies, `scaleAbundance` adds `+100` to each resource's dice `bonus` (mean per-deposit ~75 → ~175) without changing RNG call count — the "higher quantity of the other resources" knob. Defaults reproduce the Earth-like flow byte-identically (sweep stays green). See `world_history.md` "Lifeless rocky bodies".
+- **Underground map is a render-only zoom-in.** See `underground_map.md`. It does NOT generate cities, regions, resources, kingdoms, characters, or anything participating in the timeline. The worker generates the cavern/tunnel graph eagerly when `seededPRNG('${seed}_underground_present')() < req.undergroundChance` and ships it on `MapData.underground`. Eligibility: gas giants → 0%, rocky/ice bodies → 30–60% based on subtype. Surface `cells` are read-only inside the underground generator — caverns may not mutate biome / elevation / `regionId`. Every random draw routes through `${seed}_underground_*` sub-streams so the sweep stays byte-identical.
 - **Marine resources are gated by `maritime` tech.** Common marine (e.g. `fish`) is still `exploration 0` (basic shore fishing). Uncommon (`whales`, `kelp`, `coral`) needs `maritime 1`, rare (`pearls`) needs `maritime 3`, very-rare needs `maritime 5`. Enforced by `RESOURCE_TECH_REQUIREMENT.marine` in `ResourceCatalog.ts`; the yearly discovery tick in `YearGenerator` step 9 promotes a region's marine resources into `discoveredResources` once the owning country crosses each level. Pre-maritime civilisations therefore only ever trade `fish` from the sea — bootstrap (`isCommonUnlockedAtZero`) only matches `exploration 0` entries, so the higher marine tiers never enter `discoveredResources` until tech catches up.
 
 ## When You Add a New Feature

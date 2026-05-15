@@ -63,6 +63,10 @@ interface UnifiedOverlayProps {
   // params and shows a "← Back to {systemName}" button.
   worldOrigin?: WorldOrigin | null;
   onBackToSystem?: () => void;
+
+  // Underground view toggle.
+  worldView: 'surface' | 'underground';
+  onWorldViewChange: (view: 'surface' | 'underground') => void;
 }
 
 /** Fixed overlay width — wide enough for the widest tab (Events at 560 px). */
@@ -241,6 +245,8 @@ export function UnifiedOverlay(props: UnifiedOverlayProps) {
                 exporting={props.exporting}
                 worldOrigin={props.worldOrigin}
                 onBackToSystem={props.onBackToSystem}
+                worldView={props.worldView}
+                onWorldViewChange={props.onWorldViewChange}
               />
             )}
             {activeTab === 'events' && props.mapData?.history && (

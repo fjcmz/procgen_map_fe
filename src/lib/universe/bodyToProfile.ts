@@ -2,6 +2,7 @@ import type { BodyKind } from '../types';
 import type { PlanetData, SatelliteData } from './types';
 import type { PlanetSubtype, GasPlanetSubtype } from './Planet';
 import { PROFILE_WATER_RATIOS } from '../terrain/profiles';
+import { undergroundChance } from '../underground/eligibility';
 
 /**
  * Resolved generation spec for a body. Drives the App-side state setters
@@ -22,6 +23,9 @@ export interface BodyGenSpec {
    *  their cloud-band biomes per-subtype (jovian beige, ice_giant cyan,
    *  etc.) without forking the renderer. */
   paletteOverride?: Record<string, string>;
+  /** Probability (0–1) that this body has an underground map. Gas giants → 0;
+   *  rocky/ice bodies → 0.30–0.60 depending on subtype. See `underground_map.md`. */
+  undergroundChance: number;
 }
 
 /**
@@ -93,6 +97,7 @@ function rockPlanetSpec(planet: PlanetData): BodyGenSpec {
       waterRatio: PROFILE_WATER_RATIOS[biome] ?? 0.40,
       bodyKind: 'rocky-life',
       disableHistory: !intelligent,
+      undergroundChance: undergroundChance('rocky-life', planet.subtype),
     };
   }
   return rockSpecForSubtype(planet.subtype);
@@ -111,6 +116,7 @@ function rockSpecForSubtype(subtype: PlanetSubtype | 'cratered' | 'iron_rich' | 
     waterRatio: waterRatio ?? PROFILE_WATER_RATIOS[profileName] ?? 0.40,
     bodyKind: 'rocky-barren',
     disableHistory: true,
+    undergroundChance: undergroundChance('rocky-barren', subtype),
   });
   switch (subtype) {
     case 'terrestrial': return base('default', 0.40);
@@ -138,6 +144,7 @@ export function planetToGenSpec(planet: PlanetData): BodyGenSpec {
       bodyKind: 'gas-giant',
       disableHistory: true,
       paletteOverride: gasPaletteFor(planet.subtype as GasPlanetSubtype),
+      undergroundChance: 0,
     };
   }
   return rockPlanetSpec(planet);
@@ -155,6 +162,7 @@ export function satelliteToGenSpec(satellite: SatelliteData): BodyGenSpec {
       waterRatio: PROFILE_WATER_RATIOS[biome] ?? 0.40,
       bodyKind: 'rocky-life',
       disableHistory: !intelligent,
+      undergroundChance: undergroundChance('rocky-life', satellite.subtype),
     };
   }
   // ICE composition — use the per-subtype ice profile.
@@ -167,6 +175,7 @@ export function satelliteToGenSpec(satellite: SatelliteData): BodyGenSpec {
       waterRatio: PROFILE_WATER_RATIOS[profile] ?? 0.55,
       bodyKind: 'ice-shell',
       disableHistory: true,
+      undergroundChance: undergroundChance('ice-shell', satellite.subtype),
     };
   }
   // ROCK satellite without life — same logic as a barren rocky planet.
