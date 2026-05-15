@@ -65,19 +65,19 @@ Pipeline (each step uses its own sub-stream so future tuning of one slice cannot
 
 1. **Large caverns** — 2–20 caverns covering ~30 % of the underground graph by cell count.
    Sub-stream: `${seed}_underground_largecaverns`.
-   Poisson-disk-sample seed cells; for each seed, BFS-grow a footprint of cells up to a randomised target size so the combined cell count lands near `0.30 * UNDERGROUND_CELL_COUNT`. Each grown footprint becomes a `Cavern { id, kind: 'large', cellIndices, cx, cy }` record; cells flip to `category: 'cavern'` and record the cavern id.
+   Poisson-disk-sample seed cells (min-distance derived from per-cavern radius); for each seed, BFS-grow a footprint of cells up to a randomised target size so the combined cell count lands near `0.30 * surfaceCells.length`. Each grown footprint becomes a `Cavern { id, kind: 'large', cellIndices, cx, cy }` record; cells flip to `category: 'cavern'` and record the cavern id.
 
 2. **Small caverns** — 5–50 caverns of 2–12 cells each.
    Sub-stream: `${seed}_underground_smallcaverns`.
-   Same BFS-grow primitive as large caverns, with smaller target sizes and tighter Poisson-disk spacing. Cells already owned by another cavern are skipped (no overlaps).
+   Same BFS-grow primitive as large caverns. Poisson-disk min-distance is **world-coordinate-based** (`sqrt(width*height/25) * 0.7`) so spacing stays visually stable whether the user picks 10k or 200k cells. Cells already owned by another cavern are skipped (no overlaps).
 
 3. **Maze clusters** — 3–10 cluster anchors plus 3–8 mini-caverns each, wired with single-cell maze passages.
-   Sub-streams: `${seed}_underground_maze_top` (anchor placement), `${seed}_underground_maze_<i>` (per-cluster flesh-out).
+   Sub-streams: `${seed}_underground_maze_top` (anchor placement, `sqrt(width*height/6) * 0.75` spacing) and `${seed}_underground_maze_<i>` (per-cluster flesh-out).
    For each cluster anchor: BFS-grow a small (2–4 cell) seed cavern, then place 3–8 additional mini-caverns nearby (each 1–3 cells), and A*-path single-cell tunnels between them. Maze-internal tunnel cells carry `cavernId = cluster.id` so the renderer paints the whole cluster cohesively.
 
 4. **Inter-cavern tunnel graph** — single-cell-wide tunnel chains connecting every top-level cavern so the connectivity graph has exactly one component.
    Sub-stream: `${seed}_underground_tunnels`.
-   Treat each large cavern, small cavern, and top-level maze cluster as a node anchored at its centroid. Build a Minimum Spanning Tree by closest-pair (mandatory edges) plus ~10–20 % extra edges over the same node set (loop edges). For each edge: A*-path through the cell graph from one cavern's boundary cell nearest the other → the other cavern's boundary cell nearest the first. Costs prefer fresh solid rock (1.0) and existing tunnels (0.4); cavern cells are blocked. Path cells flip to `category: 'tunnel'`, `cavernId: null` (so the renderer paints them with the generic tunnel colour rather than a cluster colour).
+   Treat each large cavern, small cavern, and top-level maze cluster as a node anchored at its centroid. Build a Minimum Spanning Tree by closest-pair (mandatory edges) plus ~10–20 % extra edges over the same node set (loop edges). For each edge: A*-path through the cell graph from one cavern's boundary cell nearest the other → the other cavern's boundary cell nearest the first. Costs prefer fresh solid rock (1.0) and existing tunnels (0.4); cavern cells are blocked. Path cells flip to `category: 'tunnel'`, `cavernId: null` (so the renderer paints them with the generic tunnel colour rather than a cluster colour). A* uses an inline binary min-heap so it scales to the default 100k-cell graph.
 
 5. **Surface connection points** — 4–20 entrances mapping a cavern cell (in the underground graph) to a land cell (in the surface graph).
    Sub-stream: `${seed}_underground_connections`.
@@ -229,10 +229,10 @@ All sub-streams are consumed locally; their draws never leak back into the world
 ```
 src/lib/underground/
 ├── index.ts              # barrel — public API
-├── types.ts              # UndergroundMap, Cavern, Tunnel, MazeCluster, UndergroundConnection
-├── eligibility.ts        # undergroundChance(bodyKind, subtype)
-├── generator.ts          # generateUnderground(seed, width, height, cells)
-├── renderer.ts           # drawUnderground(ctx, underground, layers, transform)
+├── types.ts              # UndergroundMap, UndergroundCell, Cavern, UndergroundConnection
+├── eligibility.ts        # undergroundChance(bodyKind, subtype) + DEFAULT_UNDERGROUND_CHANCE
+├── generator.ts          # generateUnderground(seed, width, height, surfaceCells)
+└── renderer.ts           # drawUnderground / drawConnectionOverlay
 ```
 
 ## Verification
@@ -244,8 +244,13 @@ src/lib/underground/
 ## Pitfalls
 
 - **Sub-stream isolation is the entire correctness contract for the sweep.** Every random draw in the underground module must use one of the listed sub-streams — never the main `rng` parameter from a calling site, never `Math.random()`. If `npm run sweep` shows a non-zero diff after underground-only changes, a draw leaked.
+- **The sweep harness deliberately does NOT mirror the underground step.** `scripts/sweep-worker.ts` only runs the terrain + history pipeline and emits `HistoryStats`. Underground generation is excluded because (a) the sweep doesn't render or output any underground field, and (b) underground RNG sub-streams are independent of history rolls. If a future change starts threading underground RNG into history (it shouldn't), the harness MUST be updated.
 - **No history coupling.** The underground layer does not place cities, regions, resources, kingdoms, characters, or anything that participates in the timeline simulation. If a future requirement wants e.g. "drow city in this cavern", that lives in the history layer, takes the `UndergroundMap` as **input**, and requires its own design + spec update.
 - **Surface cells are read-only.** `generateUnderground` may not mutate `cells[i]`. Cavern footprints don't change biome, elevation, or `regionId`. The renderer paints over the surface canvas in underground mode, but the underlying `cells` array is untouched.
+- **Underground cell count = surface cell count.** `buildCellGraph` is called with `surfaceCells.length`, not a fixed constant. Don't reintroduce a fixed `UNDERGROUND_CELL_COUNT` — the user-facing contract is that polygon density matches across the two views. The graph LAYOUT remains independent (own `${seed}_underground_graph` sub-stream).
+- **World-geometry-based Poisson spacing for small caverns + maze clusters.** Don't switch back to `Math.sqrt(cells.length)`-style heuristics — those scale wrong and cause clumping/sparseness as the user changes cell count. Use `sqrt(width*height/N) * factor` so spacing stays world-stable.
 - **Gas giants have no underground.** The worker's gas-band branch returns before the underground step, so `hasUnderground` is `undefined` on gas worlds. UI must treat `undefined === false` (no toggle).
 - **Connection-point land check matters.** A connection placed on a water/lake cell would render as an undersea staircase — confusing. Always filter eligible surface cells to land before sampling.
 - **`undergroundChance` clamps to [0, 1] in the worker.** Don't trust the request value — clamping is cheap and protects against UI bugs that pass NaN / out-of-range.
+- **History-only path preserves underground via App-side merge.** When the user clicks "Generate History" on an existing terrain map, the worker's `GENERATE_HISTORY` response doesn't carry `underground`/`hasUnderground`. `App.tsx`'s DONE handler merges them from the previous `mapData` — don't drop that merge or the toggle vanishes after the second click.
+- **Top-level vs mini-cavern id convention.** Top-level caverns use a 2-token id (`lg_0`, `sm_12`, `mz_3`); maze cluster mini-caverns use 3 tokens (`mz_3_2`). The inter-cavern tunnel pass and entrance-sampling step both use this token-count check to filter for top-level caverns. If the id format changes, those filters need to change too.
