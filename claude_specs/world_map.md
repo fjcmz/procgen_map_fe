@@ -73,7 +73,13 @@ The `default` shape is deliberately `{}` so biome profiles with baked-in shape h
 
 `src/lib/renderer/renderer.ts` draws everything onto a single `<canvas>`. Layer visibility is controlled by `LayerVisibility` in `types.ts`.
 
-### Render Order (world map)
+`MapCanvas.tsx` selects between **two** render paths via the `worldView` prop:
+- `'surface'` → the full surface pipeline below.
+- `'underground'` → `drawUnderground()` from `src/lib/underground/renderer.ts` paints the cavern/tunnel polygon graph instead (see `underground_map.md`). The canvas wrap-loop (`-width / 0 / +width`) is applied identically so panning across the seam stays seamless on both views.
+
+In surface mode, when `mapData.underground` is present and `layers.undergroundConnections` is on, the renderer additionally calls `drawConnectionOverlay()` after the main surface render to paint small entrance pips on each connection's surface cell — making the two views correlate.
+
+### Render Order (world map, surface mode)
 
 1. Biome fill (land first, water second — water always wins shared edges; per-cell vegetation density modulation via `getVegetationDensity` + `modulateBiomeColor`)
 2. Hillshading (NW light, 315° azimuth, 45° altitude; rgba overlay; toggleable via `layers.hillshading`)
@@ -85,6 +91,7 @@ The `default` shape is deliberately `{}` so biome profiles with baked-in shape h
 8. Cities + roads (when history present)
 9. Highlight overlay (gold, topmost layer; for clickable entity navigation)
 10. Labels
+11. Underground connection pips (only when `mapData.underground` exists and `layers.undergroundConnections` is on)
 
 ### Political View
 
