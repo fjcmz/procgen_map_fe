@@ -1,54 +1,58 @@
 /**
- * Underground map renderer — Canvas 2D. Draws the cavern/tunnel graph onto
- * the world canvas, replacing the surface biome paint while the underground
- * view is active. See `claude_specs/underground_map.md`.
+ * Underground map renderer — Canvas 2D. Draws the underground polygon graph
+ * cell-by-cell, matching the surface map's visual language. See
+ * `claude_specs/underground_map.md`.
  */
 
-import type { Cell } from '../types';
-import type { Cavern, Point, UndergroundMap } from './types';
+import type { Cell as SurfaceCell } from '../types';
+import type { Cavern, CavernKind, UndergroundCell, UndergroundMap } from './types';
 
-const STONE_BG = '#1a1410';
-const CAVERN_LARGE = '#9a8c70';
-const CAVERN_SMALL = '#7a6d54';
-const MAZE_FILL = '#5e5440';
-const MAZE_PASSAGE = '#9a8c70';
-const TUNNEL = '#c0b090';
-const TUNNEL_LOOP = '#9a8870';
-const CAVERN_OUTLINE = '#3a2f22';
-const CONNECTION_FILL = '#f0d878';
-const CONNECTION_OUTLINE = '#1a1410';
+const COLORS = {
+  solidRock: '#1a1410',
+  cavernLarge: '#9a8c70',
+  cavernSmall: '#7a6d54',
+  cavernMaze: '#6e5a40',
+  tunnel: '#8c7a5a',
+  tunnelMaze: '#7c6848',
+  cellOutline: 'rgba(20, 14, 8, 0.45)',
+  connectionFill: '#f0d878',
+  connectionOutline: '#1a1410',
+};
 
-function tracePolygon(ctx: CanvasRenderingContext2D, polygon: Point[]): void {
-  if (polygon.length === 0) return;
+function cavernKindById(caverns: Cavern[]): Map<string, CavernKind> {
+  const m = new Map<string, CavernKind>();
+  for (const c of caverns) m.set(c.id, c.kind);
+  return m;
+}
+
+function pxScale(ctx: CanvasRenderingContext2D): number {
+  const t = ctx.getTransform();
+  return (Math.abs(t.a) + Math.abs(t.d)) * 0.5;
+}
+
+function tracePolygon(ctx: CanvasRenderingContext2D, vertices: [number, number][]): void {
+  if (vertices.length === 0) return;
   ctx.beginPath();
-  ctx.moveTo(polygon[0].x, polygon[0].y);
-  for (let i = 1; i < polygon.length; i++) {
-    ctx.lineTo(polygon[i].x, polygon[i].y);
+  ctx.moveTo(vertices[0][0], vertices[0][1]);
+  for (let i = 1; i < vertices.length; i++) {
+    ctx.lineTo(vertices[i][0], vertices[i][1]);
   }
   ctx.closePath();
 }
 
-function traceCavern(ctx: CanvasRenderingContext2D, cavern: Cavern): void {
-  tracePolygon(ctx, cavern.polygon);
-}
-
-function tracePolyline(ctx: CanvasRenderingContext2D, path: Point[]): void {
-  if (path.length === 0) return;
-  ctx.beginPath();
-  ctx.moveTo(path[0].x, path[0].y);
-  for (let i = 1; i < path.length; i++) {
-    ctx.lineTo(path[i].x, path[i].y);
+function colorForCell(
+  cell: UndergroundCell,
+  kindOf: Map<string, CavernKind>,
+): string {
+  if (cell.category === 'solid') return COLORS.solidRock;
+  if (cell.category === 'tunnel') {
+    return cell.cavernId !== null ? COLORS.tunnelMaze : COLORS.tunnel;
   }
-}
-
-/** Pixels-per-world-unit; needed to keep stroke widths and icons visually
- *  stable across the canvas zoom. The caller is expected to apply its
- *  current transform before calling draw functions; we read it back via
- *  `ctx.getTransform().a`. */
-function pxScale(ctx: CanvasRenderingContext2D): number {
-  const t = ctx.getTransform();
-  // Average of x/y scale; on this canvas they're equal but be defensive.
-  return (Math.abs(t.a) + Math.abs(t.d)) * 0.5;
+  // cavern
+  const kind = cell.cavernId !== null ? kindOf.get(cell.cavernId) : undefined;
+  if (kind === 'large') return COLORS.cavernLarge;
+  if (kind === 'maze') return COLORS.cavernMaze;
+  return COLORS.cavernSmall;
 }
 
 export function drawUnderground(
@@ -57,83 +61,49 @@ export function drawUnderground(
   width: number,
   height: number,
 ): void {
-  // Solid stone background — covers the whole world rect.
   ctx.save();
-  ctx.fillStyle = STONE_BG;
+
+  // Solid background — covers any sliver gaps between cell polygons.
+  ctx.fillStyle = COLORS.solidRock;
   ctx.fillRect(0, 0, width, height);
 
   const scale = pxScale(ctx);
-  const px = (v: number) => v / scale;
+  const kindOf = cavernKindById(underground.caverns);
 
-  // Tunnels (drawn first so cavern fills paint over endpoints).
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (const tunnel of underground.tunnels) {
-    ctx.strokeStyle = tunnel.mandatory ? TUNNEL : TUNNEL_LOOP;
-    ctx.lineWidth = tunnel.mandatory ? px(3) : px(2);
-    tracePolyline(ctx, tunnel.path);
-    ctx.stroke();
-  }
-
-  // Large caverns.
-  ctx.fillStyle = CAVERN_LARGE;
-  ctx.strokeStyle = CAVERN_OUTLINE;
-  ctx.lineWidth = px(1.2);
-  for (const cavern of underground.largeCaverns) {
-    traceCavern(ctx, cavern);
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  // Small caverns.
-  ctx.fillStyle = CAVERN_SMALL;
-  for (const cavern of underground.smallCaverns) {
-    traceCavern(ctx, cavern);
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  // Maze clusters: filled bbox with grid hatching, then mini-caverns +
-  // internal passages painted on top.
-  for (const maze of underground.mazeClusters) {
-    ctx.fillStyle = MAZE_FILL;
-    ctx.fillRect(maze.bbox.x, maze.bbox.y, maze.bbox.w, maze.bbox.h);
-    // Hatched grid for the dungeon-room feel.
-    ctx.strokeStyle = '#3a3220';
-    ctx.lineWidth = px(0.6);
-    const step = Math.max(maze.bbox.w, maze.bbox.h) / 12;
-    for (let x = maze.bbox.x; x <= maze.bbox.x + maze.bbox.w; x += step) {
-      ctx.beginPath();
-      ctx.moveTo(x, maze.bbox.y);
-      ctx.lineTo(x, maze.bbox.y + maze.bbox.h);
-      ctx.stroke();
-    }
-    for (let y = maze.bbox.y; y <= maze.bbox.y + maze.bbox.h; y += step) {
-      ctx.beginPath();
-      ctx.moveTo(maze.bbox.x, y);
-      ctx.lineTo(maze.bbox.x + maze.bbox.w, y);
-      ctx.stroke();
-    }
-    // Mini-cavern passages first (so cavern fills cover their endpoints).
-    ctx.strokeStyle = MAZE_PASSAGE;
-    ctx.lineWidth = px(2);
-    for (const edge of maze.edges) {
-      tracePolyline(ctx, edge.path);
-      ctx.stroke();
-    }
-    // Mini-caverns.
-    ctx.fillStyle = CAVERN_SMALL;
-    ctx.strokeStyle = CAVERN_OUTLINE;
-    ctx.lineWidth = px(1);
-    for (const mc of maze.miniCaverns) {
-      traceCavern(ctx, mc);
+  // Pass 1: fill every cell polygon (main + wrap loop).
+  for (const cell of underground.cells) {
+    ctx.fillStyle = colorForCell(cell, kindOf);
+    if (cell.vertices.length > 0) {
+      tracePolygon(ctx, cell.vertices);
       ctx.fill();
+    }
+    if (cell.wrapVertices && cell.wrapVertices.length > 0) {
+      tracePolygon(ctx, cell.wrapVertices);
+      ctx.fill();
+    }
+  }
+
+  // Pass 2: thin outline between cells inside open areas (cavern↔cavern of
+  // the same cluster, tunnel↔tunnel, etc.). Helps the polygon structure
+  // read at high zoom. Skip on solid↔solid edges (they blend into the
+  // background) and on cavern↔solid edges (the colour contrast already
+  // delineates the cavern boundary).
+  ctx.strokeStyle = COLORS.cellOutline;
+  ctx.lineWidth = Math.max(0.3, 0.6 / scale);
+  for (const cell of underground.cells) {
+    if (cell.category === 'solid') continue;
+    if (cell.vertices.length > 0) {
+      tracePolygon(ctx, cell.vertices);
+      ctx.stroke();
+    }
+    if (cell.wrapVertices && cell.wrapVertices.length > 0) {
+      tracePolygon(ctx, cell.wrapVertices);
       ctx.stroke();
     }
   }
 
-  // Surface connections — bright pip with a dark outline. Drawn last so they
-  // sit on top of everything.
+  // Pass 3: connection pips. Anchor at the underground cell's centroid so
+  // they show up exactly where the cavern entrance is on this view.
   drawConnectionPips(ctx, underground, scale);
 
   ctx.restore();
@@ -145,12 +115,14 @@ function drawConnectionPips(
   scale: number,
 ): void {
   const radius = 5 / scale;
-  ctx.fillStyle = CONNECTION_FILL;
-  ctx.strokeStyle = CONNECTION_OUTLINE;
+  ctx.fillStyle = COLORS.connectionFill;
+  ctx.strokeStyle = COLORS.connectionOutline;
   ctx.lineWidth = 1.5 / scale;
   for (const conn of underground.connections) {
+    const ugCell = underground.cells[conn.undergroundCellIndex];
+    if (!ugCell) continue;
     ctx.beginPath();
-    ctx.arc(conn.xy.x, conn.xy.y, radius, 0, Math.PI * 2);
+    ctx.arc(ugCell.x, ugCell.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
   }
@@ -162,12 +134,12 @@ function drawConnectionPips(
 export function drawConnectionOverlay(
   ctx: CanvasRenderingContext2D,
   underground: UndergroundMap,
-  cells: Cell[],
+  cells: SurfaceCell[],
 ): void {
   const scale = pxScale(ctx);
   ctx.save();
-  ctx.fillStyle = CONNECTION_FILL;
-  ctx.strokeStyle = CONNECTION_OUTLINE;
+  ctx.fillStyle = COLORS.connectionFill;
+  ctx.strokeStyle = COLORS.connectionOutline;
   ctx.lineWidth = 1.5 / scale;
   const radius = 4 / scale;
   for (const conn of underground.connections) {

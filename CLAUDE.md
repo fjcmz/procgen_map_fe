@@ -253,7 +253,8 @@ The codebase uses **isolated PRNG sub-streams** liberally — they're how new be
 | `${seed}_city_<cityName>_voronoi` / `_walls` / `_river` / `_roads` / `_streets` / `_openspaces_*` / `_blocks_names` / `_landmarks_*` / `_buildings` / `_sprawl` | V2 city slices (`city_map.md`) |
 | `${seed}_seasettle_<parentCityId>_<year>` | Sea-colonisation attempt in `CitySettlement.ts` (`world_history.md`). Isolated so pre-`maritime`-tech years stay byte-identical to the legacy run. |
 | `${seed}_underground_present` | Worker-side eligibility roll: does this world have an underground map? (`underground_map.md`) |
-| `${seed}_underground_largecaverns` / `_smallcaverns` / `_maze_<i>` / `_tunnels` / `_connections` | Worker-side underground generator slices — caverns, maze clusters, tunnel graph, surface entrances. Isolated so the sweep stays byte-identical. |
+| `${seed}_underground_graph` | Voronoi cell graph for the underground (passed to `buildCellGraph`). Independent of the surface graph. |
+| `${seed}_underground_largecaverns` / `_smallcaverns` / `_maze_top` / `_maze_<i>` / `_tunnels` / `_connections` | Worker-side underground generator slices — cavern BFS-grow, maze cluster placement + internal A* passages, inter-cavern A* tunnel graph, surface entrances. Isolated so the sweep stays byte-identical. |
 
 The discipline: **a new feature that adds a behavioral roll must use its own sub-stream, OR be a no-op when its inputs are zero/default**. Otherwise the sweep baseline shifts.
 

@@ -44,6 +44,8 @@ Source of truth for the table: `src/lib/underground/eligibility.ts` — pure fun
 
 ## Generation (eager, in-worker)
 
+**Same polygon language as the surface map.** The underground builds its own Voronoi cell graph (independent of the surface graph), and every cell is classified as `solid` / `cavern` / `tunnel`. Caverns are BFS-grown groups of polygons (the underground equivalent of a region); tunnels are single-cell-wide chains found by A*-path between cavern boundaries. The renderer paints cells polygon-by-polygon, mirroring `drawBiomeFill` on the surface side.
+
 Module: `src/lib/underground/generator.ts`. Entry point:
 
 ```ts
@@ -55,37 +57,35 @@ generateUnderground(
 ): UndergroundMap
 ```
 
-Determinism contract: same `(seed, width, height, cells)` produces a byte-identical `UndergroundMap`. The function makes **no mutations** to `cells`. Because the output ships across `postMessage`, the structure stays plain data (no `Map`/`Set`).
+Determinism contract: same `(seed, width, height, surfaceCells)` produces a byte-identical `UndergroundMap`. The function makes **no mutations** to `surfaceCells`. Because the output ships across `postMessage`, the structure stays plain data (no `Map`/`Set`).
 
 Pipeline (each step uses its own sub-stream so future tuning of one slice cannot perturb the others):
 
-1. **Large caverns** — 2–20 blobs covering ~30 % of total world area combined.
+0. **Build the underground Voronoi graph.** `buildCellGraph(\`${seed}_underground_graph\`, UNDERGROUND_CELL_COUNT=4000, width, height)` produces an independent polygon graph sized purely for the underground (the surface graph's cell count is irrelevant). Each cell starts as `category: 'solid'`, `cavernId: null`. The result ships on `UndergroundMap.cells`.
+
+1. **Large caverns** — 2–20 caverns covering ~30 % of the underground graph by cell count.
    Sub-stream: `${seed}_underground_largecaverns`.
-   Algorithm sketch: Poisson-disk pick centres; each cavern is a metaball / blob with radius drawn so cumulative area lands in [0.27, 0.33] of `width*height`. Stored as `{ cx, cy, polygonPoints }` (cached polyline, not regenerated at draw time).
+   Poisson-disk-sample seed cells; for each seed, BFS-grow a footprint of cells up to a randomised target size so the combined cell count lands near `0.30 * UNDERGROUND_CELL_COUNT`. Each grown footprint becomes a `Cavern { id, kind: 'large', cellIndices, cx, cy }` record; cells flip to `category: 'cavern'` and record the cavern id.
 
-2. **Small caverns** — 5–50 smaller blobs.
+2. **Small caverns** — 5–50 caverns of 2–12 cells each.
    Sub-stream: `${seed}_underground_smallcaverns`.
-   Same primitive as large caverns, with smaller radius and tighter Poisson-disk spacing. Caverns are allowed to abut large caverns but not fully overlap them.
+   Same BFS-grow primitive as large caverns, with smaller target sizes and tighter Poisson-disk spacing. Cells already owned by another cavern are skipped (no overlaps).
 
-3. **Maze clusters** — 3–10 dungeon-like clusters of tightly-packed mini-caverns + interconnecting passages.
-   Sub-stream: `${seed}_underground_maze_<i>` (per cluster).
-   Algorithm sketch: pick a cluster bounding region, place 4–12 mini-caverns inside it on a jittered grid, then connect them with a randomised-DFS / Prim maze. Each cluster stored as `{ bbox, miniCaverns[], mazeEdges[] }`.
+3. **Maze clusters** — 3–10 cluster anchors plus 3–8 mini-caverns each, wired with single-cell maze passages.
+   Sub-streams: `${seed}_underground_maze_top` (anchor placement), `${seed}_underground_maze_<i>` (per-cluster flesh-out).
+   For each cluster anchor: BFS-grow a small (2–4 cell) seed cavern, then place 3–8 additional mini-caverns nearby (each 1–3 cells), and A*-path single-cell tunnels between them. Maze-internal tunnel cells carry `cavernId = cluster.id` so the renderer paints the whole cluster cohesively.
 
-4. **Tunnel graph** — narrow tunnels connecting every cavern + maze cluster so the connectivity graph has exactly one component.
+4. **Inter-cavern tunnel graph** — single-cell-wide tunnel chains connecting every top-level cavern so the connectivity graph has exactly one component.
    Sub-stream: `${seed}_underground_tunnels`.
-   Algorithm sketch:
-   - Treat large caverns, small caverns, and maze clusters as graph nodes (anchored at their centroid).
-   - Build a Delaunay triangulation of node centroids.
-   - Take a Minimum Spanning Tree over the triangulation as the **mandatory** edges (guarantees no isolated cavern).
-   - Add ~10–20 % extra edges from the triangulation's non-MST set to introduce loops (more interesting traversal).
-   - Each edge is rendered as a Bezier or noise-perturbed polyline so tunnels don't look ruler-straight. Stored as `path: {x:number,y:number}[]`.
+   Treat each large cavern, small cavern, and top-level maze cluster as a node anchored at its centroid. Build a Minimum Spanning Tree by closest-pair (mandatory edges) plus ~10–20 % extra edges over the same node set (loop edges). For each edge: A*-path through the cell graph from one cavern's boundary cell nearest the other → the other cavern's boundary cell nearest the first. Costs prefer fresh solid rock (1.0) and existing tunnels (0.4); cavern cells are blocked. Path cells flip to `category: 'tunnel'`, `cavernId: null` (so the renderer paints them with the generic tunnel colour rather than a cluster colour).
 
-5. **Surface connection points** — 4–20 points where the underground meets the surface map.
+5. **Surface connection points** — 4–20 entrances mapping a cavern cell (in the underground graph) to a land cell (in the surface graph).
    Sub-stream: `${seed}_underground_connections`.
-   Each connection is `{ cavernId, surfaceCellIndex, xy: {x,y} }`:
-   - Pick the cavern via weighted random (bias toward large caverns).
-   - Find a surface cell whose centroid lies within the cavern polygon and which is **land** (not `isWater`, not `isLake`).
-   - If none exists for a given cavern, fall back to the nearest land cell to the cavern centre.
+   Each connection is `{ cavernId, surfaceCellIndex, undergroundCellIndex, xy }`:
+   - Pick the cavern via weighted random over **top-level** caverns (large/small/maze-anchor), with weights proportional to member-cell count.
+   - Pick a random member cell of that cavern as `undergroundCellIndex`.
+   - Find the nearest land surface cell (not `isWater`, not `isLake`) and record its index as `surfaceCellIndex`. `xy` is that surface cell's centroid.
+   Mini-caverns inside maze clusters are excluded from entrance placement so entrances don't cluster unrealistically.
 
 Output:
 
@@ -94,63 +94,73 @@ interface UndergroundMap {
   seed: string;            // `${worldSeed}_underground`, stamped for cache keying
   width: number;
   height: number;
-  largeCaverns: Cavern[];
-  smallCaverns: Cavern[];
-  mazeClusters: MazeCluster[];
-  tunnels: Tunnel[];       // every cavern & cluster reachable via these edges
+  cells: UndergroundCell[];
+  caverns: Cavern[];       // every large/small/maze cavern (mini-caverns nested via id naming)
   connections: UndergroundConnection[];
 }
 
+type UndergroundCellCategory = 'solid' | 'cavern' | 'tunnel';
+type CavernKind = 'large' | 'small' | 'maze';
+
+interface UndergroundCell {
+  index: number;
+  x: number;
+  y: number;
+  vertices: [number, number][];
+  wrapVertices?: [number, number][];   // seam-straddling cells, mirrors Cell.wrapVertices
+  neighbors: number[];
+  category: UndergroundCellCategory;
+  /** Cavern this cell belongs to. Solid cells: always null. Cavern cells:
+   *  the owning cavern. Tunnel cells: null for inter-cavern tunnels;
+   *  a maze cluster id for tunnels internal to that cluster. */
+  cavernId: string | null;
+}
+
 interface Cavern {
-  id: string;              // e.g. "lg_0", "sm_12"
-  cx: number; cy: number;
-  polygon: { x: number; y: number }[];   // closed, CCW
-  areaApprox: number;
-}
-
-interface MazeCluster {
-  id: string;              // e.g. "mz_3"
-  bbox: { x: number; y: number; w: number; h: number };
-  miniCaverns: Cavern[];
-  edges: { from: string; to: string; path: { x: number; y: number }[] }[];
-}
-
-interface Tunnel {
-  from: string;             // cavern or maze-cluster id
-  to: string;
-  path: { x: number; y: number }[];   // polyline
-  mandatory: boolean;       // true for MST edges, false for added loops
+  id: string;              // "lg_0", "sm_12", "mz_3" (top-level) or "mz_3_2" (cluster mini-cavern)
+  kind: CavernKind;
+  cellIndices: number[];   // indices into UndergroundMap.cells
+  cx: number;              // centroid (for tunnel-path endpoints + entrance placement)
+  cy: number;
 }
 
 interface UndergroundConnection {
-  cavernId: string;         // id of the cavern/cluster the entrance leads into
-  surfaceCellIndex: number; // index into `MapData.cells` of the surface tile
-  xy: { x: number; y: number };  // entrance position in world coords
+  cavernId: string;
+  surfaceCellIndex: number;     // index into MapData.cells (the surface graph)
+  undergroundCellIndex: number; // index into UndergroundMap.cells
+  xy: { x: number; y: number }; // surface-coordinate position of the entrance icon
 }
 ```
+
+Cell-id convention: top-level caverns use a 2-token id (`lg_0`, `sm_12`, `mz_3`); maze cluster mini-caverns are 3 tokens (`mz_3_2`). The inter-cavern tunnel pass treats only 2-token caverns as graph nodes, so maze cluster internals are routed locally and entrance sampling skips mini-caverns.
 
 `UndergroundMap` is plain data (no `Map`/`Set`) so it can cross the worker boundary via `postMessage` without a serializer. There is no class layer for underground entities — the generation is one-shot and there's no per-year simulation to mutate them.
 
 ## Rendering
 
-Module: `src/lib/underground/renderer.ts` (proposed). Entry point:
+Module: `src/lib/underground/renderer.ts`. Entry point:
 
 ```ts
 drawUnderground(
   ctx: CanvasRenderingContext2D,
   underground: UndergroundMap,
-  layers: UndergroundLayerVisibility,
+  width: number,
+  height: number,
 ): void
 ```
 
 Render order:
-1. Solid dark-stone background fills the whole canvas.
-2. Large caverns (filled lighter-stone polygons, soft edges).
-3. Small caverns (filled, slightly darker than large).
-4. Maze clusters (tight grid fill, dungeon-room style hatching).
-5. Tunnels (1–3 px polylines; mandatory edges slightly thicker than loop edges).
-6. Connection-point icons (stairs / chasm glyph) at each connection's `xy`.
-7. (Optional) overlay the world seed + counts in a corner debug HUD.
+1. Solid dark-stone background fills the whole canvas (covers any sliver gaps between cell polygons).
+2. Pass 1 — fill every cell polygon with a colour determined by `(category, cavern.kind)`:
+   - `solid` → dark stone
+   - `cavern` (`kind: 'large'`) → lighter stone
+   - `cavern` (`kind: 'small'`) → mid stone
+   - `cavern` (`kind: 'maze'`) → maze cavern shade
+   - `tunnel` (`cavernId === null`) → passage colour
+   - `tunnel` (`cavernId !== null`) → maze-passage colour (paints maze cluster cohesively)
+   Each cell's `wrapVertices` (if present) is drawn as a second polygon so the east-west seam stays seamless.
+3. Pass 2 — thin polygon outlines on non-solid cells only (helps read the polygon structure at high zoom; solid↔solid edges blend into the background and don't need a stroke).
+4. Pass 3 — connection-point pips at each connection's underground cell centroid.
 
 The **surface map** also gains an optional overlay: when `underground` is generated and the user enables "show connection points", paint a small glyph at each connection's surface cell centroid. This makes the two views correlate. The overlay is off by default and lives behind a `layers.undergroundConnections` flag in `LayerVisibility`.
 
@@ -204,11 +214,13 @@ interface MapData {
 | Sub-stream | Purpose |
 |---|---|
 | `${seed}_underground_present` | Worker-side eligibility gate (one boolean per world) |
-| `${seed}_underground_largecaverns` | Large cavern centres + polygons |
-| `${seed}_underground_smallcaverns` | Small cavern centres + polygons |
-| `${seed}_underground_maze_<i>` | Per-cluster maze layout |
-| `${seed}_underground_tunnels` | Tunnel graph (Delaunay → MST + loops) |
-| `${seed}_underground_connections` | Surface connection-point picks |
+| `${seed}_underground_graph` | Voronoi cell graph for the underground (passed to `buildCellGraph`) |
+| `${seed}_underground_largecaverns` | Large cavern seeds + BFS-grow |
+| `${seed}_underground_smallcaverns` | Small cavern seeds + BFS-grow |
+| `${seed}_underground_maze_top` | Maze cluster anchor placement |
+| `${seed}_underground_maze_<i>` | Per-cluster mini-cavern placement + internal passages |
+| `${seed}_underground_tunnels` | Inter-cavern A* tunnel graph (MST + loops) |
+| `${seed}_underground_connections` | Surface↔underground entrance picks |
 
 All sub-streams are consumed locally; their draws never leak back into the world-map or universe RNG.
 
