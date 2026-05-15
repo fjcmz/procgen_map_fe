@@ -9,4 +9,4 @@ export type {
 } from './types';
 export { DEFAULT_UNDERGROUND_CHANCE, undergroundChance } from './eligibility';
 export { generateUnderground } from './generator';
-export { drawUnderground, drawConnectionOverlay } from './renderer';
+export { drawUnderground, drawConnectionOverlay, drawUndergroundResourceOverlay } from './renderer';

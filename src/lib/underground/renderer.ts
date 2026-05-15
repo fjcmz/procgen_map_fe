@@ -4,8 +4,14 @@
  * `claude_specs/underground_map.md`.
  */
 
-import type { Cell as SurfaceCell } from '../types';
+import type { Cell as SurfaceCell, RegionData } from '../types';
 import type { Cavern, CavernKind, UndergroundCell, UndergroundMap } from './types';
+import { getLegacyCategory, type ResourceType } from '../history/physical/ResourceCatalog';
+import {
+  drawStrategicIcon,
+  drawAgriculturalIcon,
+  drawLuxuryIcon,
+} from '../renderer/renderer';
 
 const COLORS = {
   solidRock: '#1a1410',
@@ -126,6 +132,43 @@ function drawConnectionPips(
     ctx.fill();
     ctx.stroke();
   }
+}
+
+/**
+ * Draws a resource icon (legacy 3-category set) at each underground cell that
+ * holds a subterranean deposit. Walks every `RegionData.resources` array,
+ * filters for `subterranean === true`, and uses the resource's
+ * `undergroundCellIndex` to position the icon in the underground coordinate
+ * frame. Mirrors the surface renderer's `drawResources` pass so the
+ * underground view picks up the same visual vocabulary (pickaxe / wheat /
+ * sparkle) without any new art.
+ */
+export function drawUndergroundResourceOverlay(
+  ctx: CanvasRenderingContext2D,
+  regions: RegionData[] | undefined,
+  underground: UndergroundMap,
+): void {
+  if (!regions || regions.length === 0) return;
+  const scale = pxScale(ctx);
+  const iconSize = 5 / scale;
+  ctx.save();
+  for (const region of regions) {
+    if (!region.resources) continue;
+    for (const r of region.resources) {
+      if (!r.subterranean) continue;
+      const ugIdx = r.undergroundCellIndex;
+      if (ugIdx === undefined) continue;
+      const ugCell = underground.cells[ugIdx];
+      if (!ugCell) continue;
+      const category = getLegacyCategory(r.type as ResourceType);
+      switch (category) {
+        case 'strategic':    drawStrategicIcon(ctx, ugCell.x, ugCell.y, iconSize, scale); break;
+        case 'agricultural': drawAgriculturalIcon(ctx, ugCell.x, ugCell.y, iconSize, scale); break;
+        case 'luxury':       drawLuxuryIcon(ctx, ugCell.x, ugCell.y, iconSize, scale); break;
+      }
+    }
+  }
+  ctx.restore();
 }
 
 /** Optional overlay drawn ON TOP of the surface map when the user enables

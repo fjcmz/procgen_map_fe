@@ -1,5 +1,6 @@
 import type { Cell } from '../../types';
 import type { Region, RegionBiome } from './Region';
+import type { Cavern, UndergroundCell } from '../../underground/types';
 import { Resource } from './Resource';
 import {
   RESOURCE_SPECS,
@@ -214,6 +215,11 @@ export function computeFitScore(
   if (h.requiresWater && !body.hasWater) return 0;
   if (h.requiresLifeless && (body.hasLife || body.hasWater)) return 0;
 
+  // Underground-only specs are filtered out of surface placement entirely.
+  // The underground equivalent (`computeUndergroundFitScore`) runs the
+  // mirror check (must be `requiresUnderground || allowsUnderground`).
+  if (h.requiresUnderground) return 0;
+
   // Sea/land exclusion gates
   if (isSea && !h.requiresSea && !h.allowsSea) return 0; // land-only spec on a sea cell
   if (!isSea && h.requiresSea) return 0;                  // sea-only spec on a land cell
@@ -317,6 +323,65 @@ function buildCellFit(
 // ---------------------------------------------------------------------------
 // Public generator
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Underground fit scoring
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the fit weight of an underground-eligible spec for a cavern. Mirrors
+ * `computeFitScore` but reads cavern kind instead of biome/climate fields.
+ *
+ * Returns 0 (reject) if:
+ *   - The spec is not eligible underground (neither `requiresUnderground`
+ *     nor `allowsUnderground`).
+ *   - The spec has a `cavernKinds` whitelist and `cavern.kind` is not in it.
+ *
+ * Otherwise returns 1 — flat weight. There is no soft trapezoid because
+ * caverns carry no climate state. Rarity weighting is applied by the caller.
+ */
+function computeUndergroundFitScore(spec: ResourceSpec, cavern: Cavern): number {
+  const h: HabitatSpec = spec.habitat;
+  if (!h.requiresUnderground && !h.allowsUnderground) return 0;
+  if (h.cavernKinds && !h.cavernKinds.includes(cavern.kind)) return 0;
+  return 1;
+}
+
+interface UndergroundCellFit {
+  cellIndex: number;
+  pool: EligibleEntry[];
+  totalWeight: number;
+}
+
+function buildUndergroundCellFit(
+  cellIndex: number,
+  cavern: Cavern,
+  rarityWeights: Record<ResourceRarity, number>,
+): UndergroundCellFit {
+  const pool: EligibleEntry[] = [];
+  let totalWeight = 0;
+  for (const spec of RESOURCE_SPECS) {
+    const fit = computeUndergroundFitScore(spec, cavern);
+    if (fit <= 0) continue;
+    const w = rarityWeights[spec.rarity] * fit;
+    pool.push({ spec, weight: w });
+    totalWeight += w;
+  }
+  return { cellIndex, pool, totalWeight };
+}
+
+/**
+ * Target resource count for a cavern, biased by kind. Consumes 1 rng call.
+ *
+ *   - large: 2-5  (big mineral veins, sweeping crystal galleries)
+ *   - small: 1-2  (pockets — fungi clusters, gem geodes)
+ *   - maze : 1-3  (rare and weird — mythic metals, magical/cave fauna)
+ */
+function rollCavernResourceCount(cavern: Cavern, rng: () => number): number {
+  if (cavern.kind === 'large') return 2 + Math.floor(rng() * 4);
+  if (cavern.kind === 'small') return 1 + Math.floor(rng() * 2);
+  return 1 + Math.floor(rng() * 3); // maze
+}
 
 export class ResourceGenerator {
   /**
@@ -445,6 +510,79 @@ export class ResourceGenerator {
         region.cellResources.set(cf.cellIndex, arr);
       }
       arr.push(res);
+    }
+    return out;
+  }
+
+  /**
+   * Generate resources for a single cavern in the underground map.
+   *
+   * Mirrors `generateForRegion`:
+   *   - Step A: roll target count by cavern kind (1 rng call).
+   *   - Step B: score each cavern cell. The pool only contains specs with
+   *     `requiresUnderground || allowsUnderground` (and matching `cavernKinds`).
+   *     Cell scoring is uniform — caverns don't carry climate.
+   *   - Step C: top-K weighted pick, then construct each `Resource` with
+   *     `subterranean=true` and `undergroundCellIndex` set to the picked
+   *     underground cell. `cellIndex` is set to the underground cell index
+   *     temporarily and re-keyed to a SURFACE cell by the caller
+   *     (`attachUndergroundResources` in `history.ts`) once it has the
+   *     projection from underground (x,y) → surface region.
+   *
+   * RNG budget: 1 (count) + count * 14. Burns 14 calls per missing slot when
+   * the cavern has fewer cells than `count` so the per-cavern budget is
+   * deterministic regardless of cavern shape.
+   *
+   * All randomness is supplied by the caller via the isolated
+   * `${seed}_underground_resources` sub-stream so the sweep stays
+   * byte-identical apart from the intentional integration drift.
+   */
+  generateForCavern(
+    cavern: Cavern,
+    ugCells: UndergroundCell[],
+    rng: () => number,
+    rarityWeights: Record<ResourceRarity, number> = RARITY_WEIGHTS_BY_MODE.scarce,
+  ): Resource[] {
+    // --- Step A: target count (1 rng call) ---
+    const count = rollCavernResourceCount(cavern, rng);
+
+    // --- Step B: score every cell that belongs to this cavern ---
+    const fits: UndergroundCellFit[] = [];
+    for (const ci of cavern.cellIndices) {
+      if (ci < 0 || ci >= ugCells.length) continue;
+      fits.push(buildUndergroundCellFit(ci, cavern, rarityWeights));
+    }
+
+    // Sort by cellIndex ascending for determinism (no biome/climate differentiator,
+    // so total weight is uniform within a cavern; cellIndex order is stable).
+    fits.sort((a, b) => a.cellIndex - b.cellIndex);
+
+    // --- Step C: pick top `count` cells, one resource each ---
+    const out: Resource[] = [];
+
+    for (let i = 0; i < count; i++) {
+      if (i >= fits.length) {
+        // Fewer cavern cells than target — burn 14 rng calls to keep the
+        // per-cavern budget stable.
+        for (let j = 0; j < 14; j++) rng();
+        continue;
+      }
+      const cf = fits[i];
+      if (cf.pool.length === 0) {
+        // Cavern kind excludes every spec — burn 14 rng calls.
+        for (let j = 0; j < 14; j++) rng();
+        continue;
+      }
+      const idx = weightedPickIndex(cf.pool, rng);
+      const picked = cf.pool[idx].spec;
+      // Underground resources don't get the dry-body abundance boost — that's
+      // a surface concept driven by lack of biosphere. Caverns on Earth-like
+      // worlds use the standard abundance dice.
+      const abundance = picked.abundance;
+      // Construct with the UNDERGROUND cell index in `cellIndex`. The caller
+      // re-keys it to the surface cell once the projection is computed.
+      const res = new Resource(cf.cellIndex, picked.type, rng, abundance, true, cf.cellIndex);
+      out.push(res);
     }
     return out;
   }

@@ -1,4 +1,6 @@
 import type { Cell, City, Road, Country, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, EmpireSnapshotEntry, BodyKind } from '../types';
+import type { UndergroundMap } from '../underground/types';
+import type { Region } from './physical/Region';
 import { generateRoads } from './roads';
 import { BIOME_TO_REGION_BIOME } from './physical/Region';
 import type { World } from './physical/World';
@@ -10,6 +12,7 @@ import { selectPrimary, isCommonUnlockedAtZero, RARITY_WEIGHTS_BY_MODE } from '.
 import type { ResourceRarity } from './physical/ResourceCatalog';
 import { cityGenerator } from './physical/CityGenerator';
 import { generateCityName, generateCountryName } from './nameGenerator';
+import { seededPRNG } from '../terrain/noise';
 
 const MOUNTAIN_THRESHOLD = 0.72;
 
@@ -297,6 +300,17 @@ export function buildPhysicalWorld(
    * stay byte-identical.
    */
   bodyKind: BodyKind = 'rocky-life',
+  /**
+   * Optional underground map for this world. When present, after surface
+   * resources are placed, `attachUndergroundResources` rolls a deposit pool
+   * per cavern (isolated `${seed}_underground_resources` sub-stream), projects
+   * each cavern cell to a surface region, and attaches the resulting
+   * `Resource` instances (`subterranean=true`) to that region's resources.
+   * Country tech-discovery and trade logic then pick them up unchanged. Pass
+   * undefined to skip — every existing terrain-only / no-underground seed
+   * stays byte-identical.
+   */
+  underground: UndergroundMap | undefined = undefined,
 ): { world: World; regionData: RegionData[]; continentData: ContinentData[]; usedCityNames: Set<string> } {
   const usedCityNames = new Set<string>();
   const numCells = cells.length;
@@ -598,7 +612,145 @@ export function buildPhysicalWorld(
     }
   }
 
+  // --- Step 6: Attach underground resources to surface regions ---
+  // Caverns sit in their own Voronoi graph, but in the same (width × height)
+  // coordinate space as the surface. Each cavern projects to the nearest
+  // surface cell centroid; if that cell sits inside a region, the deposit
+  // is added to that region (so country trade / tech-discovery picks it up
+  // unchanged). Caverns over the open ocean — projected to a cell with no
+  // `regionId` — drop their deposits silently. All randomness routes
+  // through the isolated `${seed}_underground_resources` sub-stream so
+  // seeds without an underground stay byte-identical to the pre-feature
+  // sweep, and seeds WITH an underground use an independent stream that
+  // never perturbs the surface or history rolls.
+  if (underground) {
+    attachUndergroundResources(world.mapRegions, cells, regionData, underground, seed, rarityWeights);
+  }
+
   return { world, regionData, continentData, usedCityNames };
+}
+
+/**
+ * Project each cavern's resources onto surface regions and append them.
+ *
+ * Algorithm per cavern:
+ *   1. Roll a deposit pool via `resourceGenerator.generateForCavern`.
+ *      Randomness comes from a private sub-stream — see step 0 below.
+ *   2. For each placed `Resource`, look up the underground cell's (x, y),
+ *      find the nearest surface-cell centroid (linear scan, O(numCells)
+ *      per resource; resources per cavern are ≤ 5 and total caverns ≤ 50,
+ *      so total cost is well under a millisecond at numCells=3000).
+ *   3. If the projected surface cell has a `regionId` and that region is
+ *      live in `world.mapRegions`, append the resource to
+ *      `region.resources` (re-keying `cellIndex` to the projected surface
+ *      cell so country-cell-keyed exploit / trade lookups find it) and
+ *      mirror the addition into `regionData[…].resources` so the renderer
+ *      and DetailsTab pick it up.
+ *   4. If the projected cell has no region (ocean / unowned land), drop
+ *      the resource silently. The sub-stream still advances so the
+ *      per-cavern budget is deterministic.
+ *
+ * Step 0 — RNG isolation: the seed-derived sub-stream
+ * `${seed}_underground_resources` is opened ONCE here. Every roll inside
+ * `generateForCavern` consumes it. Surface / history / underground-
+ * geometry sub-streams never see this stream, so:
+ *   - Worlds without an underground are byte-identical to the pre-feature
+ *     sweep.
+ *   - The eligibility-roll order and underground-geometry generation are
+ *     unaffected.
+ */
+function attachUndergroundResources(
+  allRegions: Map<string, Region>,
+  cells: Cell[],
+  regionData: RegionData[],
+  underground: UndergroundMap,
+  seed: string,
+  rarityWeights: Record<ResourceRarity, number>,
+): void {
+  const ugRng = seededPRNG(`${seed}_underground_resources`);
+
+  // Index regionData by id once for cheap append-to-RegionData on attach.
+  const rdById = new Map<string, RegionData>();
+  for (const rd of regionData) rdById.set(rd.id, rd);
+
+  for (const cavern of underground.caverns) {
+    const cavernResources = resourceGenerator.generateForCavern(
+      cavern,
+      underground.cells,
+      ugRng,
+      rarityWeights,
+    );
+    for (const res of cavernResources) {
+      const ugIdx = res.undergroundCellIndex;
+      if (ugIdx === undefined) continue;
+      const ugCell = underground.cells[ugIdx];
+      if (!ugCell) continue;
+
+      // Project to nearest surface cell centroid.
+      const surfaceIdx = nearestSurfaceCellIndex(cells, ugCell.x, ugCell.y);
+      if (surfaceIdx < 0) continue;
+      const surfaceCell = cells[surfaceIdx];
+      const regionId = surfaceCell.regionId;
+      if (!regionId) continue; // ocean / unowned — drop the deposit
+
+      const region = allRegions.get(regionId);
+      if (!region) continue;
+
+      // Re-key the resource's surface cell index to the projected cell so
+      // city-territory exploit checks and trade route lookups (both
+      // surface-cell-indexed) resolve correctly.
+      res.cellIndex = surfaceIdx;
+
+      region.resources.push(res);
+      let arr = region.cellResources.get(surfaceIdx);
+      if (!arr) {
+        arr = [];
+        region.cellResources.set(surfaceIdx, arr);
+      }
+      arr.push(res);
+      region.updateHasResources();
+
+      // Mirror into RegionData so the serialized payload picks it up.
+      const rd = rdById.get(regionId);
+      if (rd) {
+        if (!rd.resources) rd.resources = [];
+        rd.resources.push({
+          type: res.type,
+          amount: res.original,
+          cellIndex: res.cellIndex,
+          requiredTechField: res.requiredTechField,
+          requiredTechLevel: res.requiredTechLevel,
+          subterranean: true,
+          undergroundCellIndex: ugIdx,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * Linear-scan nearest centroid lookup. Returns -1 if `cells` is empty.
+ *
+ * Cells live in a cylindrical (wrapping) coordinate space matching the
+ * surface map's width, but the cavern coordinates are already inside the
+ * `[0, width]` frame so a flat Euclidean distance is sufficient — every
+ * cavern centroid sits inside one of the existing Voronoi cells.
+ */
+function nearestSurfaceCellIndex(cells: Cell[], x: number, y: number): number {
+  if (cells.length === 0) return -1;
+  let bestIdx = -1;
+  let bestD2 = Infinity;
+  for (let i = 0; i < cells.length; i++) {
+    const c = cells[i];
+    const dx = c.x - x;
+    const dy = c.y - y;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
 }
 
 /**

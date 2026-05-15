@@ -4,23 +4,26 @@ This file documents the **underground map layer**: a per-world cavern + tunnel n
 
 ## Goal
 
-For some rocky worlds, expose an **alternate map view** that depicts a planet-wide system of caverns and tunnels (Underdark-style). The view is a sibling to the surface map at the same zoom level — toggled, not nested — and is **render-only**: it does not feed into history, cities, kingdoms, resources, characters, or any other simulation layer.
+For some rocky worlds, expose an **alternate map view** that depicts a planet-wide system of caverns and tunnels (Underdark-style). The view is a sibling to the surface map at the same zoom level — toggled, not nested. Geometry is render-only; the **resource layer is sim-integrated** — cavern resources land on surface regions before year-0 discovery so countries with overlapping territory can discover, trade, and fight over them.
 
 ## Where it sits in the architecture
 
-Underground generation runs **eagerly inside `mapgen.worker.ts`** after the rest of the world map (and optional history) is complete:
+Underground generation runs **eagerly inside `mapgen.worker.ts`** BEFORE the history pipeline so that cavern-resource attachment can happen during `buildPhysicalWorld` (after surface resources land, before the year-0 `discoveredResources` bootstrap):
 
 ```
-voronoi → terrain pipeline → buildPhysicalWorld
-  → (if generateHistory) HistoryGenerator → roads
-  → underground (eligibility roll + generation)   ◄── this spec
+voronoi → terrain pipeline → underground (eligibility roll + generation)   ◄── this spec
+  → (if generateHistory) HistoryGenerator
+        └─ buildPhysicalWorld
+              └─ attachUndergroundResources (projects caverns to surface regions)
+        └─ TimelineGenerator → roads
+  → MapData
 ```
 
 Concretely:
-- The worker computes the cavern/tunnel graph for every world for which `seededPRNG('${seed}_underground_present')() < req.undergroundChance`, and ships the resulting `UndergroundMap` on `MapData`.
-- All randomness routes through isolated sub-streams `${worldSeed}_underground_*` so the world-history sweep stays byte-identical (`scripts/results/baseline-a.json`).
-- Generation must NEVER mutate `cells[i]` — caverns are an overlay on top of read-only surface terrain.
-- The view itself is render-only: no history, no kingdoms, no resources, no characters touch it.
+- The worker rolls eligibility on `${seed}_underground_present` and, on a hit, calls `generateUnderground(seed, width, height, cells)` to build the cavern/tunnel graph.
+- The graph (plus the `${seed}_underground_resources` deposit roll inside `buildPhysicalWorld`) lands on `MapData.underground` and on each affected `RegionData.resources` entry (`subterranean: true` + `undergroundCellIndex`).
+- All randomness routes through isolated sub-streams `${worldSeed}_underground_*` so worlds without an underground stay byte-identical to the pre-feature sweep, and the worlds that DO have one only drift the simulation in the way the integration intends (more resources → different trade / war / wealth metrics).
+- Generation must NEVER mutate `cells[i].biome` / `.elevation` / `.regionId` — caverns and their projected resources remain an overlay over the surface terrain. `attachUndergroundResources` does append to `region.resources` and `region.cellResources` (the in-worker entities), which is the deliberate sim-integration coupling.
 
 ## Eligibility (which worlds have an underground)
 
@@ -221,8 +224,50 @@ interface MapData {
 | `${seed}_underground_maze_<i>` | Per-cluster mini-cavern placement + internal passages |
 | `${seed}_underground_tunnels` | Inter-cavern A* tunnel graph (MST + loops) |
 | `${seed}_underground_connections` | Surface↔underground entrance picks |
+| `${seed}_underground_resources` | Cavern deposit rolls in `attachUndergroundResources` (sim-integrated layer) |
 
-All sub-streams are consumed locally; their draws never leak back into the world-map or universe RNG.
+All sub-streams are consumed locally; their draws never leak back into the world-map or universe RNG. Seeds that fail the `_present` roll never consume any other underground stream, so the sweep stays byte-identical on those seeds.
+
+## Resources (sim-integrated)
+
+Underground resources mirror the surface resource pipeline but run on the cavern graph and attach to **surface** regions via projection. The single shared catalog (`src/lib/history/physical/ResourceCatalog.ts`) holds both surface and underground specs, distinguished by three new `HabitatSpec` fields:
+
+- `requiresUnderground: true` — spec ONLY spawns in caverns (e.g. `cave_fungi`, `mithril`). Surface scoring rejects it.
+- `allowsUnderground: true` — spec spawns in both biomes. Used on iron, copper, coal, gold, silver, platinum, marble, granite, limestone, obsidian, diamonds, rubies, sapphires so familiar deposits exist below ground too.
+- `cavernKinds: ['large' | 'small' | 'maze'][]` — optional whitelist filter. Crystal galleries favour large caverns; fungi pockets favour small/maze.
+
+Four new `ResourceCategory` entries cover the underground-thematic specs:
+
+| Category | Tech field | common | uncommon | rare | veryRare | Members |
+|---|---|---|---|---|---|---|
+| `subterranean_flora` | industry | 2 | 5 | 15 | 30 | cave_fungi, cave_lichen, glowcaps, deep_moss, phosphorescent_algae |
+| `subterranean_fauna` | industry | 2 | 5 | 15 | 30 | cavefish, bat_guano, glowworms |
+| `subterranean_mineral` | industry | 3 | 8 | 20 | 35 | rocksalt, gypsum, sulfur, nitre, geodes, crystal_formations |
+| `mythic_metals` | industry | 20 | 25 | 30 | 45 | mithril (rare), adamantine (veryRare), starsteel (veryRare) |
+
+All underground entries gate on `industry`, not `exploration`, so the lowest level is `industry 2` and `isCommonUnlockedAtZero` never returns true for them. Countries cannot trade cave deposits until they invest in mining tech, which is the design intent.
+
+### Placement algorithm
+
+Inside `buildPhysicalWorld`, after the per-region surface resource loop and after orphan absorption (Step 6), `attachUndergroundResources` walks every cavern:
+
+1. Roll target count by cavern kind: `large = 2 + floor(rng()*4)`, `small = 1 + floor(rng()*2)`, `maze = 1 + floor(rng()*3)`. Sub-stream: `${seed}_underground_resources`.
+2. Score each cavern cell uniformly (no biome/climate inputs). Eligible specs satisfy `requiresUnderground || allowsUnderground`; `cavernKinds` (when present) filters by `cavern.kind`. Weighted-pick from the resulting pool.
+3. Construct `Resource(undergroundCellIndex, type, rng, abundance, subterranean: true, undergroundCellIndex)`. RNG budget per cavern is `1 + count * 14`, with 14-call burns when count exceeds available cells or eligible specs (mirroring the surface generator).
+4. For each placed deposit, find the nearest surface-cell centroid via linear scan over `cells`. If the projected surface cell has no `regionId` (open ocean / unowned land), drop the deposit silently — the deposit still consumed RNG so the per-cavern budget is deterministic. Otherwise re-key `cellIndex` to the projected surface cell and push the resource onto `region.resources` + `region.cellResources` for that region.
+5. Mirror the attachment into `regionData[regionId].resources` with `subterranean: true` and the original `undergroundCellIndex` preserved (so the renderer can paint icons on the underground canvas).
+
+### Render-only resource overlay
+
+`drawUndergroundResourceOverlay(ctx, regions, underground)` in `src/lib/underground/renderer.ts` walks every `regions[].resources` array, filters `subterranean === true && undergroundCellIndex !== undefined`, looks up the underground cell's `(x, y)`, and draws the legacy 3-category icon (strategic / agricultural / luxury) reused from `src/lib/renderer/renderer.ts`. The overlay is wired into `MapCanvas.tsx` under the `worldView === 'underground'` branch and runs inside the same three-offset wrap loop as `drawUnderground` for east-west seam continuity.
+
+### DetailsTab marker
+
+`ResourceAggregate` gains a `subterranean: boolean` field, OR-ed across aggregated deposits of the same type. `ResourceList` displays a `▼` glyph before the resource name when any contributing deposit is underground. Tech-gating is unchanged: the existing `requiredTechField` / `requiredTechLevel` round-trip on `RegionResourceData` correctly locks underground resources until the country's `industry` tech reaches the gate.
+
+### Sweep impact
+
+Sweep seeds that fail the `${seed}_underground_present` roll consume zero additional RNG and stay byte-identical to the pre-feature baseline. Seeds that pass produce underground resources that drift trade / war / population / country counts in `HistoryStats` because resources feed those simulations. The sweep harness in `scripts/sweep-worker.ts` mirrors the worker order: roll `_underground_present`, generate the cavern graph, pass `underground` into `historyGenerator.generate`. Rebase `scripts/results/baseline-a.json` whenever the resource catalog or placement algorithm changes.
 
 ## File layout
 
@@ -244,8 +289,8 @@ src/lib/underground/
 ## Pitfalls
 
 - **Sub-stream isolation is the entire correctness contract for the sweep.** Every random draw in the underground module must use one of the listed sub-streams — never the main `rng` parameter from a calling site, never `Math.random()`. If `npm run sweep` shows a non-zero diff after underground-only changes, a draw leaked.
-- **The sweep harness deliberately does NOT mirror the underground step.** `scripts/sweep-worker.ts` only runs the terrain + history pipeline and emits `HistoryStats`. Underground generation is excluded because (a) the sweep doesn't render or output any underground field, and (b) underground RNG sub-streams are independent of history rolls. If a future change starts threading underground RNG into history (it shouldn't), the harness MUST be updated.
-- **No history coupling.** The underground layer does not place cities, regions, resources, kingdoms, characters, or anything that participates in the timeline simulation. If a future requirement wants e.g. "drow city in this cavern", that lives in the history layer, takes the `UndergroundMap` as **input**, and requires its own design + spec update.
+- **The sweep harness MUST mirror underground generation.** `scripts/sweep-worker.ts` rolls `${seed}_underground_present`, generates the cavern graph, and passes the `UndergroundMap` into `historyGenerator.generate`. Underground resources land on surface regions and feed trade / war / wealth metrics — so a sweep that skipped the underground would diverge from in-browser runs. When the resource catalog or placement algorithm changes, rebase `scripts/results/baseline-a.json` in the same commit.
+- **Geometry is render-only; resources are sim-integrated.** Caverns, tunnels, and connections never participate in the simulation — no cities, no kingdoms, no characters live there. The sim-coupling is exclusively through `attachUndergroundResources`: cavern resources project onto surface regions and ride the existing tech-discovery / trade machinery from there. If a future requirement wants e.g. "drow city in this cavern", that's a separate feature that needs its own design + spec update.
 - **Surface cells are read-only.** `generateUnderground` may not mutate `cells[i]`. Cavern footprints don't change biome, elevation, or `regionId`. The renderer paints over the surface canvas in underground mode, but the underlying `cells` array is untouched.
 - **Underground cell count = surface cell count.** `buildCellGraph` is called with `surfaceCells.length`, not a fixed constant. Don't reintroduce a fixed `UNDERGROUND_CELL_COUNT` — the user-facing contract is that polygon density matches across the two views. The graph LAYOUT remains independent (own `${seed}_underground_graph` sub-stream).
 - **World-geometry-based Poisson spacing for small caverns + maze clusters.** Don't switch back to `Math.sqrt(cells.length)`-style heuristics — those scale wrong and cause clumping/sparseness as the user changes cell count. Use `sqrt(width*height/N) * factor` so spacing stays world-stable.

@@ -166,12 +166,24 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
     // Defense-in-depth: even if the UI passes generateHistory: true, the
     // worker refuses to run history when disableHistory is set. The flag
     // is set whenever the request originated from a non-life body.
+    // Underground map: eligibility roll on an isolated sub-stream, then
+    // (if eligible) generate the cavern/tunnel graph. Generated BEFORE
+    // `buildPhysicalWorld` / `historyGenerator.generate` so cavern
+    // resources can be attached to surface regions before the year-0
+    // discovery bootstrap and yearly tech-discovery ticks. Gas-giant
+    // worlds never reach here — they return from the `profile.gasGiantMode`
+    // branch above. Sub-streams used by `maybeBuildUnderground` +
+    // `generateUnderground` are all independent of the surface / history
+    // RNG roots, so seeds without an underground stay byte-identical to
+    // the pre-feature sweep.
+    const { hasUnderground, underground } = maybeBuildUnderground(seed, width, height, cells, req.undergroundChance);
+
     if (doHistory && !req.disableHistory) {
       post({ type: 'PROGRESS', step: 'Building physical world…', pct: 65 });
       const rng = seededPRNG(seed + '_history');
 
       post({ type: 'PROGRESS', step: 'Simulating history…', pct: 72 });
-      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed, req.bodyKind);
+      const result = historyGenerator.generate(cells, width, rng, numSimYears ?? 5000, rarityWeights, seed, req.bodyKind, underground);
       cities = result.cities;
       roads = result.roads;
       history = result.historyData;
@@ -181,16 +193,10 @@ function handleGenerate(req: Extract<GenerateRequest, { type: 'GENERATE' }>): vo
     } else {
       post({ type: 'PROGRESS', step: 'Building world…', pct: 65 });
       const rng = seededPRNG(seed + '_world');
-      const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, req.bodyKind);
+      const result = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, req.bodyKind, underground);
       regions = result.regionData;
       continents = result.continentData;
     }
-
-    // Underground map: eligibility roll on an isolated sub-stream, then
-    // (if eligible) generate the cavern/tunnel graph. Gas-giant worlds
-    // never reach here — they return from the `profile.gasGiantMode`
-    // branch above.
-    const { hasUnderground, underground } = maybeBuildUnderground(seed, width, height, cells, req.undergroundChance);
 
     post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
 
@@ -238,7 +244,7 @@ function handleGenerateHistory(req: Extract<GenerateRequest, { type: 'GENERATE_H
     const rng = seededPRNG(seed + '_history');
 
     post({ type: 'PROGRESS', step: 'Simulating history…', pct: 40 });
-    const result = historyGenerator.generate(cells, width, rng, numSimYears, rarityWeights, seed);
+    const result = historyGenerator.generate(cells, width, rng, numSimYears, rarityWeights, seed, undefined, req.previousUnderground);
 
     post({ type: 'PROGRESS', step: 'Finishing…', pct: 95 });
     post({

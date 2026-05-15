@@ -25,6 +25,11 @@ import {
 } from '../src/lib/terrain/index.ts';
 import { historyGenerator } from '../src/lib/history/HistoryGenerator.ts';
 import type { HistoryStats } from '../src/lib/history/HistoryGenerator.ts';
+import {
+  DEFAULT_UNDERGROUND_CHANCE,
+  generateUnderground,
+} from '../src/lib/underground/index.ts';
+import type { UndergroundMap } from '../src/lib/underground/index.ts';
 
 export interface SweepArgs {
   seeds: number;
@@ -69,13 +74,28 @@ export function runSeed(seed: string, args: SweepArgs): SeedResult {
   assignTemperature(cells, args.width, args.height, distFromOcean, noise, sstAnomaly, profile);
   assignBiomes(cells, args.width, args.height, noise, profile);
 
+  // Underground map — mirrors `maybeBuildUnderground` in `src/workers/mapgen.worker.ts`.
+  // Eligibility rolled on an isolated sub-stream so seeds that miss leave the
+  // sweep byte-identical to the pre-underground-resource baseline. Eligible
+  // seeds bring underground cavern + resource generation into the sweep,
+  // because cavern resources land on regions before year-0 discovery and
+  // affect trade / war / wealth metrics from then on.
+  let underground: UndergroundMap | undefined;
+  const ugChance = DEFAULT_UNDERGROUND_CHANCE;
+  if (ugChance > 0) {
+    const presentRng = seededPRNG(`${seed}_underground_present`);
+    if (presentRng() < ugChance) {
+      underground = generateUnderground(seed, args.width, args.height, cells);
+    }
+  }
+
   // Worker uses `seed + '_history'` for the history RNG (see mapgen.worker.ts:127).
   const rng = seededPRNG(seed + '_history');
   // Pass `seed` so isolated PRNG sub-streams (race bias, deity binding) match
   // the worker exactly. Race bias and deity decisions don't enter HistoryStats,
   // so this trailing arg is byte-equivalent to the old call when the sweep
   // baseline was generated — the sub-stream draws don't perturb the main RNG.
-  const result = historyGenerator.generate(cells, args.width, rng, args.years, undefined, seed);
+  const result = historyGenerator.generate(cells, args.width, rng, args.years, undefined, seed, undefined, underground);
 
   return {
     seed,

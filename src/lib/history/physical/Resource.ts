@@ -25,8 +25,12 @@ function rngHex(rng: () => number): string {
 
 export class Resource {
   readonly id: string;
-  /** The cell this resource is spatially attached to. */
-  readonly cellIndex: number;
+  /** The SURFACE cell this resource is spatially attached to. For surface
+   *  resources, the cell where the deposit lives. For underground resources,
+   *  the surface cell whose region the underground cavern projects into
+   *  (so country trade / exploitation logic, which is surface-cell keyed,
+   *  finds it). */
+  cellIndex: number;
   readonly type: ResourceType;
   readonly original: number;
   available: number;
@@ -34,8 +38,23 @@ export class Resource {
   readonly requiredTechField: TechField;
   /** Minimum level of `requiredTechField` required to unlock this resource. 0 = available at year 0. */
   readonly requiredTechLevel: number;
+  /** True if this deposit lives in the underground map (cavern/tunnel) rather
+   *  than on the surface. Drives the underground renderer overlay and a UI
+   *  marker in the DetailsTab country resource list. */
+  readonly subterranean: boolean;
+  /** When `subterranean` is true, the index into `UndergroundMap.cells` for
+   *  the cavern cell the deposit lives in. Used by the underground renderer
+   *  to position the resource icon. Undefined for surface resources. */
+  readonly undergroundCellIndex: number | undefined;
 
-  constructor(cellIndex: number, type: ResourceType, rng: () => number, abundance: AbundanceDice) {
+  constructor(
+    cellIndex: number,
+    type: ResourceType,
+    rng: () => number,
+    abundance: AbundanceDice,
+    subterranean: boolean = false,
+    undergroundCellIndex: number | undefined = undefined,
+  ) {
     this.id = IdUtil.id('resource', type, rngHex(rng)) ?? 'resource_unknown';
     this.cellIndex = cellIndex;
     this.type = type;
@@ -46,5 +65,7 @@ export class Resource {
     const req = getResourceTechRequirement(type);
     this.requiredTechField = req.field;
     this.requiredTechLevel = req.level;
+    this.subterranean = subterranean;
+    this.undergroundCellIndex = undergroundCellIndex;
   }
 }

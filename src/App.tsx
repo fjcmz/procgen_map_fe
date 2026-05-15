@@ -482,6 +482,11 @@ export default function App() {
       rivers: mapData.rivers,
       numSimYears,
       resourceRarityMode: lastGenParams.resourceRarityMode,
+      // Forward the underground so its caverns' resources can be attached
+      // to surface regions before the year-0 discovery bootstrap. Without
+      // this, history-only runs would skip underground resource attachment
+      // and DetailsTab would silently lose them.
+      previousUnderground: mapData.underground,
     });
   }, [generating, mapData, lastGenParams, numSimYears]);
 

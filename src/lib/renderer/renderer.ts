@@ -1122,7 +1122,7 @@ function drawRegionBorders(
   }
 }
 
-function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
+export function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // Pickaxe: two rects forming a cross
   ctx.fillStyle = '#555';
   ctx.strokeStyle = '#333';
@@ -1134,7 +1134,7 @@ function drawStrategicIcon(ctx: CanvasRenderingContext2D, x: number, y: number, 
   ctx.strokeRect(x - s * 0.6, y - s * 0.6, s * 1.2, s * 1.2);
 }
 
-function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
+export function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // Wheat stalk: vertical stem with diagonal seeds
   ctx.strokeStyle = '#b8860b';
   ctx.lineWidth = 1 / scale;
@@ -1156,7 +1156,7 @@ function drawAgriculturalIcon(ctx: CanvasRenderingContext2D, x: number, y: numbe
   }
 }
 
-function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
+export function drawLuxuryIcon(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, scale: number = 1): void {
   // 6-pointed sparkle (lines radiating from center)
   ctx.strokeStyle = '#d4a017';
   ctx.lineWidth = 1 / scale;

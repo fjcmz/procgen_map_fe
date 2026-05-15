@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import type { MapData, MapView, PoliticalMode, LayerVisibility, Season } from '../lib/types';
 import { render } from '../lib/renderer';
-import { drawUnderground, drawConnectionOverlay } from '../lib/underground';
+import { drawUnderground, drawConnectionOverlay, drawUndergroundResourceOverlay } from '../lib/underground';
 
 interface MapCanvasProps {
   mapData: MapData | null;
@@ -160,6 +160,10 @@ export const MapCanvas = forwardRef<MapCanvasHandle, MapCanvasProps>(function Ma
         ctx.save();
         ctx.translate(dx, 0);
         drawUnderground(ctx, mapData.underground, mapData.width, mapData.height);
+        // Subterranean resource icons sit on top of the cavern fills so they
+        // read on every cavern kind. Same three-offset wrap as the cavern
+        // pass.
+        drawUndergroundResourceOverlay(ctx, mapData.regions, mapData.underground);
         ctx.restore();
       }
     } else {

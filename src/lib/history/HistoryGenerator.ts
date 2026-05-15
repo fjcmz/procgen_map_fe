@@ -6,6 +6,7 @@
  */
 
 import type { Cell, City, Road, HistoryEvent, HistoryYear, HistoryData, RegionData, ContinentData, TradeRouteEntry, TechTimeline, EmpireSnapshotEntry, WonderSnapshotEntry, WonderDetail, IllustrateDetail, ReligionDetail, BodyKind } from '../types';
+import type { UndergroundMap } from '../underground/types';
 import { DEITY_SPECS } from '../fantasy/Deity';
 import type { Trade } from './timeline/Trade';
 import { buildPhysicalWorld } from './history';
@@ -1038,6 +1039,14 @@ export class HistoryGenerator {
      * upstream so this is mostly a buildPhysicalWorld pass-through here.
      */
     bodyKind: BodyKind = 'rocky-life',
+    /**
+     * Optional underground map for this world. Passed straight through to
+     * `buildPhysicalWorld` so cavern-resource attachment happens BEFORE the
+     * year-0 discovery bootstrap and yearly tech-discovery ticks. Pass
+     * undefined to skip — every existing seed without an underground stays
+     * byte-identical.
+     */
+    underground: UndergroundMap | undefined = undefined,
   ): {
     cities: City[];
     roads: Road[];
@@ -1047,7 +1056,7 @@ export class HistoryGenerator {
     stats: HistoryStats;
   } {
     // Phase 0: Build physical world
-    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind);
+    const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind, underground);
 
     // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
     const historyRoot = HistoryRoot.INSTANCE;
