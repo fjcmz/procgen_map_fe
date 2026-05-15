@@ -210,6 +210,11 @@ export interface ResourceAggregate {
   locked: boolean;
   /** True if at least one instance of this resource is on a cell owned by a city. */
   exploited: boolean;
+  /** True if any deposit aggregated here is subterranean. A type may aggregate
+   *  both surface and underground deposits (e.g. iron mined both above and
+   *  below); the flag is set whenever at least one underground deposit
+   *  contributes, so the UI shows a "▼" marker. */
+  subterranean: boolean;
 }
 
 /**
@@ -263,14 +268,16 @@ function getCountryResources(
     for (const r of region.resources) {
       const locked = isResourceLocked(r, techLevels);
       const exploited = cityOwnedCells.has(r.cellIndex);
+      const subterranean = r.subterranean === true;
       const prev = acc.get(r.type);
       if (prev) {
         prev.amount += r.amount;
         // Any unlocked region wins (entity can already exploit it somewhere).
         if (!locked) prev.locked = false;
         if (exploited) prev.exploited = true;
+        if (subterranean) prev.subterranean = true;
       } else {
-        acc.set(r.type, { amount: r.amount, locked, exploited });
+        acc.set(r.type, { amount: r.amount, locked, exploited, subterranean });
       }
     }
   }
@@ -307,13 +314,15 @@ function getEmpireResources(
     for (const r of region.resources) {
       const locked = isResourceLocked(r, techLevels);
       const exploited = cityOwnedCells.has(r.cellIndex);
+      const subterranean = r.subterranean === true;
       const prev = acc.get(r.type);
       if (prev) {
         prev.amount += r.amount;
         if (!locked) prev.locked = false;
         if (exploited) prev.exploited = true;
+        if (subterranean) prev.subterranean = true;
       } else {
-        acc.set(r.type, { amount: r.amount, locked, exploited });
+        acc.set(r.type, { amount: r.amount, locked, exploited, subterranean });
       }
     }
   }
@@ -534,12 +543,14 @@ function CityDetails({ cellIndex, mapData, history, selectedYear, convertYears, 
       for (const r of region.resources) {
         if (!ownedSet.has(r.cellIndex)) continue;
         const locked = isResourceLocked(r, techLevels);
+        const subterranean = r.subterranean === true;
         const prev = acc.get(r.type);
         if (prev) {
           prev.amount += r.amount;
           if (!locked) prev.locked = false;
+          if (subterranean) prev.subterranean = true;
         } else {
-          acc.set(r.type, { amount: r.amount, locked, exploited: true });
+          acc.set(r.type, { amount: r.amount, locked, exploited: true, subterranean });
         }
       }
     }
@@ -1792,12 +1803,15 @@ function ResourceList({ resources }: { resources: Map<string, ResourceAggregate>
   );
   return (
     <div style={styles.techGrid}>
-      {entries.map(([type, { amount, locked, exploited }]) => {
-        const title = locked
+      {entries.map(([type, { amount, locked, exploited, subterranean }]) => {
+        const baseTitle = locked
           ? 'Locked \u2014 requires more tech to unlock for trade'
           : !exploited
             ? 'Unexploited \u2014 no city controls this resource'
             : undefined;
+        const title = subterranean
+          ? (baseTitle ? `${baseTitle} (underground)` : 'Underground deposit')
+          : baseTitle;
         return (
           <div
             key={type}
@@ -1809,7 +1823,7 @@ function ResourceList({ resources }: { resources: Map<string, ResourceAggregate>
           >
             <span style={{ ...styles.techDot, background: resourceDotColor(type) }} />
             <span style={styles.techLabel}>
-              {locked ? '\u{1F512} ' : !exploited ? '\u26D4 ' : '\u2692 '}{formatResourceType(type)}
+              {locked ? '\u{1F512} ' : !exploited ? '\u26D4 ' : '\u2692 '}{subterranean ? '\u25BC ' : ''}{formatResourceType(type)}
             </span>
             <span style={styles.techLevel}>{amount}</span>
           </div>

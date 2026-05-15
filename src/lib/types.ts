@@ -124,6 +124,18 @@ export interface RegionResourceData {
    * from city `ownedCells[].yearAdded` + resource `cellIndex`.
    */
   exploited?: boolean;
+  /** True if this deposit lives in the underground map (cavern/tunnel)
+   *  rather than on the surface. The `cellIndex` field stores the SURFACE
+   *  region cell the underground deposit projects into; the underground
+   *  cell that holds the deposit is in `undergroundCellIndex`. Drives the
+   *  underground-canvas resource icon overlay and the subterranean marker
+   *  in the country resource list. */
+  subterranean?: boolean;
+  /** When `subterranean === true`, the index into `UndergroundMap.cells` for
+   *  the cavern cell the deposit lives in. The underground renderer uses
+   *  this to position the icon on the underground view. Undefined for
+   *  surface deposits. */
+  undergroundCellIndex?: number;
 }
 
 export interface RegionData {
@@ -663,6 +675,15 @@ export interface GenerateHistoryRequest {
   rivers: River[];
   numSimYears: number;
   resourceRarityMode?: ResourceRarityMode;
+  /**
+   * Underground map carried over from the prior `GENERATE` run. The history
+   * pipeline needs it so cavern resources land on regions BEFORE the year-0
+   * discovery bootstrap, mirroring the combined `GENERATE` path. App.tsx
+   * reads it off the existing `mapData.underground` snapshot. Optional —
+   * absent means the prior run rolled no underground (or this path is
+   * being driven by a caller predating the feature).
+   */
+  previousUnderground?: import('./underground/types').UndergroundMap;
 }
 
 export type GenerateRequest = GenerateMapRequest | GenerateHistoryRequest;

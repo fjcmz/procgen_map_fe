@@ -1,5 +1,6 @@
 import type { RegionBiome } from './Region';
 import type { TechField } from '../timeline/Tech';
+import type { CavernKind } from '../../underground/types';
 
 /**
  * ResourceCatalog — declarative habitat-aware resource taxonomy.
@@ -56,7 +57,15 @@ export type ResourceType =
   | 'ivory' | 'incense' | 'furs'
   // strategic-exotic (10) — only spawn on lifeless rocky bodies without water
   | 'helium_3' | 'deuterium' | 'tritium' | 'thorium' | 'antimatter'
-  | 'iridosmium' | 'naqahdah' | 'promethium' | 'xenon_ice' | 'monatomic_gold';
+  | 'iridosmium' | 'naqahdah' | 'promethium' | 'xenon_ice' | 'monatomic_gold'
+  // subterranean_flora (5)
+  | 'cave_fungi' | 'cave_lichen' | 'glowcaps' | 'deep_moss' | 'phosphorescent_algae'
+  // subterranean_fauna (3)
+  | 'cavefish' | 'bat_guano' | 'glowworms'
+  // subterranean_mineral (6)
+  | 'rocksalt' | 'gypsum' | 'sulfur' | 'nitre' | 'geodes' | 'crystal_formations'
+  // mythic_metals (3) — late-game fantasy metals, underground only
+  | 'mithril' | 'adamantine' | 'starsteel';
 
 export type ResourceCategory =
   | 'metals'
@@ -70,7 +79,13 @@ export type ResourceCategory =
   | 'marine'
   | 'spices'
   | 'textiles'
-  | 'exotic';
+  | 'exotic'
+  // Underground-only categories. All entries flagged `requiresUnderground: true`
+  // and gated on `industry` tech (mining cost) rather than `exploration`.
+  | 'subterranean_flora'
+  | 'subterranean_fauna'
+  | 'subterranean_mineral'
+  | 'mythic_metals';
 
 export type ResourceDomain =
   | 'industry'
@@ -134,6 +149,19 @@ export interface HabitatSpec {
    *  10 sci-fi strategic resources (helium-3, deuterium, naqahdah, …) which
    *  only appear on truly barren rocky planets / satellites. */
   requiresLifeless?: boolean;
+  /** Hard gate — spec can ONLY spawn in underground caverns. Surface placement
+   *  in `ResourceGenerator.generateForRegion` / `generateSeaResourcesForRegion`
+   *  must reject any spec with this flag. Drives the underground-thematic
+   *  catalog (fungi, cave fauna, mythic metals). */
+  requiresUnderground?: boolean;
+  /** Soft flag — spec is eligible in BOTH surface and underground placement
+   *  passes. Lets a metal/coal/gem spawn in mountains above AND in caverns
+   *  below. Without this flag, surface specs are surface-only. */
+  allowsUnderground?: boolean;
+  /** Optional whitelist of cavern kinds (large/small/maze). When present and
+   *  the cavern's kind is NOT in the list, underground placement scores 0
+   *  for this spec. When absent, all kinds are eligible. */
+  cavernKinds?: readonly CavernKind[];
 }
 
 export interface AbundanceDice {
@@ -212,25 +240,25 @@ function spec(
 export const RESOURCE_SPECS: readonly ResourceSpec[] = [
   // ---------------- metals ----------------
   spec('copper', 'metals', ['industry', 'military'],
-    { biomes: ['temperate', 'arid', 'tropical'], requiresMountain: true }, 'common'),
+    { biomes: ['temperate', 'arid', 'tropical'], requiresMountain: true, allowsUnderground: true }, 'common'),
   spec('iron', 'metals', ['industry', 'military'],
-    { biomes: ['temperate', 'arid', 'tundra'], requiresMountain: true }, 'common'),
+    { biomes: ['temperate', 'arid', 'tundra'], requiresMountain: true, allowsUnderground: true }, 'common'),
   spec('tin', 'metals', ['industry', 'military'],
-    { biomes: ['temperate', 'arid'], requiresMountain: true }, 'uncommon'),
+    { biomes: ['temperate', 'arid'], requiresMountain: true, allowsUnderground: true }, 'uncommon'),
   spec('lead', 'metals', ['industry'],
-    { biomes: ['temperate', 'arid'], requiresMountain: true }, 'uncommon'),
+    { biomes: ['temperate', 'arid'], requiresMountain: true, allowsUnderground: true }, 'uncommon'),
   spec('aluminium', 'metals', ['industry'],
     { biomes: ['tropical', 'arid'], requiresMountain: true }, 'rare'),
   spec('gold', 'metals', ['luxury', 'trade', 'art'],
-    { biomes: ['arid', 'tropical', 'temperate'] }, 'rare'),
+    { biomes: ['arid', 'tropical', 'temperate'], allowsUnderground: true }, 'rare'),
   spec('silver', 'metals', ['luxury', 'trade'],
-    { biomes: ['arid', 'temperate'], requiresMountain: true }, 'uncommon'),
+    { biomes: ['arid', 'temperate'], requiresMountain: true, allowsUnderground: true }, 'uncommon'),
   spec('platinum', 'metals', ['luxury', 'industry', 'science'],
-    { biomes: ['temperate', 'tundra'], requiresMountain: true, temperature: [0, 0.5] }, 'veryRare'),
+    { biomes: ['temperate', 'tundra'], requiresMountain: true, temperature: [0, 0.5], allowsUnderground: true }, 'veryRare'),
 
   // ---------------- energy ----------------
   spec('coal', 'energy', ['industry', 'military'],
-    { biomes: ['temperate', 'tundra'] }, 'common'),
+    { biomes: ['temperate', 'tundra'], allowsUnderground: true }, 'common'),
   spec('oil', 'energy', ['industry', 'military', 'trade'],
     { biomes: ['arid', 'desert', 'tundra'], moisture: [0, 0.5], allowsSea: true }, 'uncommon'),
   spec('natural_gas', 'energy', ['industry'],
@@ -242,21 +270,21 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
 
   // ---------------- stone ----------------
   spec('marble', 'stone', ['art', 'religion', 'trade'],
-    { biomes: ['temperate', 'arid'], requiresMountain: true }, 'uncommon'),
+    { biomes: ['temperate', 'arid'], requiresMountain: true, allowsUnderground: true }, 'uncommon'),
   spec('granite', 'stone', ['industry'],
-    { biomes: ['temperate', 'tundra'], requiresMountain: true }, 'common'),
+    { biomes: ['temperate', 'tundra'], requiresMountain: true, allowsUnderground: true }, 'common'),
   spec('limestone', 'stone', ['industry', 'religion'],
-    { biomes: ['temperate', 'arid'] }, 'common'),
+    { biomes: ['temperate', 'arid'], allowsUnderground: true }, 'common'),
   spec('obsidian', 'stone', ['military', 'art', 'religion'],
-    { biomes: ['arid', 'desert', 'temperate'], requiresMountain: true, temperature: [0.45, 1] }, 'rare'),
+    { biomes: ['arid', 'desert', 'temperate'], requiresMountain: true, temperature: [0.45, 1], allowsUnderground: true }, 'rare'),
 
   // ---------------- gems ----------------
   spec('diamonds', 'gems', ['luxury', 'trade', 'science'],
-    { biomes: ['tropical', 'temperate'], requiresMountain: true }, 'veryRare'),
+    { biomes: ['tropical', 'temperate'], requiresMountain: true, allowsUnderground: true }, 'veryRare'),
   spec('rubies', 'gems', ['luxury', 'art', 'religion'],
-    { biomes: ['tropical'], requiresMountain: true }, 'rare'),
+    { biomes: ['tropical'], requiresMountain: true, allowsUnderground: true }, 'rare'),
   spec('sapphires', 'gems', ['luxury', 'art'],
-    { biomes: ['temperate', 'tropical'], requiresMountain: true }, 'rare'),
+    { biomes: ['temperate', 'tropical'], requiresMountain: true, allowsUnderground: true }, 'rare'),
   spec('jade', 'gems', ['luxury', 'art', 'religion'],
     { biomes: ['tropical', 'temperate'], requiresMountain: true }, 'uncommon'),
 
@@ -372,6 +400,55 @@ export const RESOURCE_SPECS: readonly ResourceSpec[] = [
   // Monatomic gold — ORME-style exotic metallic state from carbon worlds.
   spec('monatomic_gold', 'metals', ['luxury', 'science'],
     { biomes: ['arid'], requiresLifeless: true }, 'veryRare'),
+
+  // ---------------- subterranean_flora ----------------
+  // Cave-dwelling plants/fungi/mosses. Tech-gated on `industry` since basic
+  // mining infrastructure (shaft, ventilation) is needed to harvest.
+  spec('cave_fungi', 'subterranean_flora', ['food', 'trade'],
+    { requiresUnderground: true }, 'common'),
+  spec('cave_lichen', 'subterranean_flora', ['food'],
+    { requiresUnderground: true }, 'common'),
+  spec('glowcaps', 'subterranean_flora', ['art', 'religion', 'luxury'],
+    { requiresUnderground: true, cavernKinds: ['small', 'maze'] }, 'uncommon'),
+  spec('deep_moss', 'subterranean_flora', ['industry', 'food'],
+    { requiresUnderground: true, cavernKinds: ['large', 'small'] }, 'uncommon'),
+  spec('phosphorescent_algae', 'subterranean_flora', ['science', 'art'],
+    { requiresUnderground: true, cavernKinds: ['large'] }, 'rare'),
+
+  // ---------------- subterranean_fauna ----------------
+  // Cave-adapted creatures and their byproducts.
+  spec('cavefish', 'subterranean_fauna', ['food', 'trade'],
+    { requiresUnderground: true, cavernKinds: ['large'] }, 'common'),
+  spec('bat_guano', 'subterranean_fauna', ['industry', 'military'],
+    { requiresUnderground: true, cavernKinds: ['maze', 'small'] }, 'common'),
+  spec('glowworms', 'subterranean_fauna', ['art', 'luxury'],
+    { requiresUnderground: true, cavernKinds: ['maze', 'small'] }, 'uncommon'),
+
+  // ---------------- subterranean_mineral ----------------
+  // Cave minerals, crystals, and geochemical deposits.
+  spec('rocksalt', 'subterranean_mineral', ['food', 'trade'],
+    { requiresUnderground: true, cavernKinds: ['large', 'small'] }, 'common'),
+  spec('gypsum', 'subterranean_mineral', ['industry', 'art'],
+    { requiresUnderground: true }, 'common'),
+  spec('sulfur', 'subterranean_mineral', ['industry', 'military'],
+    { requiresUnderground: true, cavernKinds: ['small'] }, 'uncommon'),
+  spec('nitre', 'subterranean_mineral', ['military', 'trade'],
+    { requiresUnderground: true, cavernKinds: ['maze', 'small'] }, 'uncommon'),
+  spec('geodes', 'subterranean_mineral', ['luxury', 'art', 'science'],
+    { requiresUnderground: true, cavernKinds: ['small', 'maze'] }, 'rare'),
+  spec('crystal_formations', 'subterranean_mineral', ['luxury', 'art', 'religion'],
+    { requiresUnderground: true, cavernKinds: ['large'] }, 'rare'),
+
+  // ---------------- mythic_metals ----------------
+  // Late-game fantasy metals — the underground analogue of the sci-fi
+  // strategic-exotic surface tier. Gated very high on `industry` so they
+  // become trade-relevant only after deep mining infrastructure exists.
+  spec('mithril', 'mythic_metals', ['military', 'luxury', 'art'],
+    { requiresUnderground: true, cavernKinds: ['large'] }, 'rare'),
+  spec('adamantine', 'mythic_metals', ['military', 'industry'],
+    { requiresUnderground: true, cavernKinds: ['maze'] }, 'veryRare'),
+  spec('starsteel', 'mythic_metals', ['military', 'science', 'luxury'],
+    { requiresUnderground: true, cavernKinds: ['large'] }, 'veryRare'),
 ];
 
 // ---------------------------------------------------------------------------
@@ -406,12 +483,16 @@ export function getLegacyCategory(type: ResourceType): LegacyResourceCategory {
     case 'metals':
     case 'energy':
     case 'stone':
+    case 'subterranean_mineral':
+    case 'mythic_metals':
       return 'strategic';
     case 'livestock':
     case 'crops':
     case 'cashCrops':
     case 'forestry':
     case 'marine':
+    case 'subterranean_flora':
+    case 'subterranean_fauna':
       return 'agricultural';
     case 'gems':
     case 'spices':
@@ -582,6 +663,37 @@ export const RESOURCE_TECH_REQUIREMENT: Record<ResourceCategory, Record<Resource
     rare:     { field: 'exploration', level: 30 },
     veryRare: { field: 'exploration', level: 50 },
   },
+  // Underground categories — gated on `industry` (mining cost). The lowest
+  // tier is `industry 2` so no underground resource ever satisfies
+  // `isCommonUnlockedAtZero` — countries must invest in mining tech before
+  // any cave deposit enters `discoveredResources`.
+  subterranean_flora: {
+    common:   { field: 'industry', level: 2  },
+    uncommon: { field: 'industry', level: 5  },
+    rare:     { field: 'industry', level: 15 },
+    veryRare: { field: 'industry', level: 30 },
+  },
+  subterranean_fauna: {
+    common:   { field: 'industry', level: 2  },
+    uncommon: { field: 'industry', level: 5  },
+    rare:     { field: 'industry', level: 15 },
+    veryRare: { field: 'industry', level: 30 },
+  },
+  subterranean_mineral: {
+    common:   { field: 'industry', level: 3  },
+    uncommon: { field: 'industry', level: 8  },
+    rare:     { field: 'industry', level: 20 },
+    veryRare: { field: 'industry', level: 35 },
+  },
+  mythic_metals: {
+    // No mythic-metal spec uses common/uncommon rarity, but the table must
+    // be exhaustive for the post-load assertion. The values are kept
+    // monotonically non-decreasing.
+    common:   { field: 'industry', level: 20 },
+    uncommon: { field: 'industry', level: 25 },
+    rare:     { field: 'industry', level: 30 },
+    veryRare: { field: 'industry', level: 45 },
+  },
 };
 
 /** Pure lookup: returns the tech requirement for a given resource type. */
@@ -613,6 +725,7 @@ export function isCommonUnlockedAtZero(type: ResourceType): boolean {
   const categories: ResourceCategory[] = [
     'metals', 'energy', 'stone', 'gems', 'livestock', 'crops',
     'cashCrops', 'forestry', 'marine', 'spices', 'textiles', 'exotic',
+    'subterranean_flora', 'subterranean_fauna', 'subterranean_mineral', 'mythic_metals',
   ];
   const rarities: ResourceRarity[] = ['common', 'uncommon', 'rare', 'veryRare'];
   for (const cat of categories) {
