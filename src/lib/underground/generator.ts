@@ -273,7 +273,7 @@ function planLargeCaverns(
   cells: UndergroundCell[],
   totalCellCount: number,
 ): CavernPlan[] {
-  const count = randInt(rng, 2, 20);
+  const count = randInt(rng, 5, 15);
   // Target ~30% of total cells split across the chosen count.
   const targetTotalCells = Math.floor(totalCellCount * 0.30);
   const avgPer = Math.max(8, Math.floor(targetTotalCells / count));
