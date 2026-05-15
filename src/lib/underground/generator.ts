@@ -1,30 +1,36 @@
 /**
  * Underground map generator — one-shot, deterministic, side-effect-free.
  *
- * The cavern/tunnel graph is built entirely from isolated `${seed}_underground_*`
- * sub-streams so it cannot perturb the surface terrain or history RNG. See
- * `claude_specs/underground_map.md` for the full design.
+ * Builds an independent Voronoi cell graph (same primitive as the surface
+ * map) and classifies each cell as solid / cavern / tunnel:
+ *
+ * - Caverns are BFS-grown groups of cells around Poisson-disk-sampled seeds.
+ *   Three kinds: large (combined area ~30 % of the world), small, and
+ *   maze (a cluster of small caverns + maze-passage tunnel cells).
+ * - Tunnels are 1-cell-wide chains found by A* between cavern boundary cells.
+ *   Every cavern is reachable via the MST + a few loop edges.
+ * - Connections are 4–20 cavern cells mapped to land cells in the SURFACE
+ *   graph so the user can correlate the two views.
+ *
+ * All randomness routes through isolated `${seed}_underground_*` sub-streams.
+ * See `claude_specs/underground_map.md` for the full design.
  */
 
 import { seededPRNG } from '../terrain/noise';
-import type { Cell } from '../types';
+import { buildCellGraph } from '../terrain/voronoi';
+import type { Cell as SurfaceCell } from '../types';
 import type {
   Cavern,
-  MazeCluster,
-  MazeEdge,
-  Point,
-  Tunnel,
+  CavernKind,
+  UndergroundCell,
   UndergroundConnection,
   UndergroundMap,
 } from './types';
 
-interface CavernNode {
-  id: string;
-  cx: number;
-  cy: number;
-  /** Effective radius used for tunnel-endpoint trimming. */
-  radius: number;
-}
+/** Cell count for the underground Voronoi graph. Independent of the surface
+ *  cell count — caverns are big enough that 4000 cells gives a polygon
+ *  density visibly similar to a default surface map. */
+const UNDERGROUND_CELL_COUNT = 4000;
 
 function randInt(rng: () => number, lo: number, hi: number): number {
   return Math.floor(lo + rng() * (hi - lo + 1));
@@ -34,398 +40,514 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/** Poisson-disk-ish sampler (Bridson variant, simplified): rejection sampling
- *  with a min-distance check against previously accepted points. Good enough
- *  for cavern centres without the full grid-acceleration. */
-function poissonDiskSample(
+/** Poisson-disk sampler over indices into `cells`. Returns a list of cell
+ *  indices spaced at least `minDist` apart, target count `targetCount`. */
+function poissonDiskCells(
   rng: () => number,
-  width: number,
-  height: number,
+  cells: UndergroundCell[],
   minDist: number,
   targetCount: number,
   maxAttempts: number,
-  margin: number,
-): Point[] {
-  const points: Point[] = [];
+  forbidden: Set<number> = new Set(),
+): number[] {
+  const picked: number[] = [];
   const minDistSq = minDist * minDist;
   let attempts = 0;
-  while (points.length < targetCount && attempts < maxAttempts) {
+  while (picked.length < targetCount && attempts < maxAttempts) {
     attempts++;
-    const x = margin + rng() * (width - 2 * margin);
-    const y = margin + rng() * (height - 2 * margin);
+    const idx = Math.floor(rng() * cells.length);
+    if (forbidden.has(idx)) continue;
+    const c = cells[idx];
     let ok = true;
-    for (const p of points) {
-      const dx = p.x - x;
-      const dy = p.y - y;
+    for (const pIdx of picked) {
+      const p = cells[pIdx];
+      const dx = p.x - c.x;
+      const dy = p.y - c.y;
       if (dx * dx + dy * dy < minDistSq) {
         ok = false;
         break;
       }
     }
-    if (ok) points.push({ x, y });
+    if (ok) picked.push(idx);
   }
-  return points;
+  return picked;
 }
 
-/** Build an irregular blob polygon around (cx, cy). Radii are jittered along
- *  N evenly-spaced spokes; the result is a closed CCW polygon. */
-function buildBlobPolygon(
+/** BFS-grow a cavern footprint from a seed cell to `targetSize` cells,
+ *  refusing to absorb cells already owned by another cavern. */
+function growCavern(
   rng: () => number,
-  cx: number,
-  cy: number,
-  baseRadius: number,
-  jitter: number,
-  spokes: number = 18,
-): Point[] {
-  const polygon: Point[] = [];
-  // Smooth radii via a 1D low-pass over independent draws so the blob doesn't
-  // come out spiky.
-  const raw: number[] = [];
-  for (let i = 0; i < spokes; i++) {
-    raw.push(baseRadius * (1 + (rng() * 2 - 1) * jitter));
-  }
-  const smoothed: number[] = [];
-  for (let i = 0; i < spokes; i++) {
-    const a = raw[(i - 1 + spokes) % spokes];
-    const b = raw[i];
-    const c = raw[(i + 1) % spokes];
-    smoothed.push((a + b + c) / 3);
-  }
-  for (let i = 0; i < spokes; i++) {
-    const theta = (i / spokes) * Math.PI * 2;
-    const r = smoothed[i];
-    polygon.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
-  }
-  return polygon;
-}
-
-function polygonAreaApprox(polygon: Point[]): number {
-  let s = 0;
-  for (let i = 0; i < polygon.length; i++) {
-    const a = polygon[i];
-    const b = polygon[(i + 1) % polygon.length];
-    s += a.x * b.y - b.x * a.y;
-  }
-  return Math.abs(s) * 0.5;
-}
-
-function pointInPolygon(px: number, py: number, polygon: Point[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i].x;
-    const yi = polygon[i].y;
-    const xj = polygon[j].x;
-    const yj = polygon[j].y;
-    const intersect = ((yi > py) !== (yj > py)) &&
-      (px < ((xj - xi) * (py - yi)) / (yj - yi + 1e-12) + xi);
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
-/** Generate `count` large caverns whose combined area lands near `targetArea`. */
-function generateLargeCaverns(
-  seed: string,
-  width: number,
-  height: number,
-  targetArea: number,
-): Cavern[] {
-  const rng = seededPRNG(`${seed}_underground_largecaverns`);
-  const count = randInt(rng, 2, 20);
-  // Each cavern gets a share of the target area; convert to radius.
-  const areaPer = targetArea / count;
-  const baseRadius = Math.sqrt(areaPer / Math.PI);
-  const minDist = baseRadius * 1.6;
-  const margin = baseRadius * 0.9;
-  const centres = poissonDiskSample(rng, width, height, minDist, count, count * 60, margin);
-  const caverns: Cavern[] = [];
-  for (let i = 0; i < centres.length; i++) {
-    // Per-cavern radius jitter so they aren't identical.
-    const radius = baseRadius * (0.7 + rng() * 0.6);
-    const polygon = buildBlobPolygon(rng, centres[i].x, centres[i].y, radius, 0.30, 22);
-    caverns.push({
-      id: `lg_${i}`,
-      cx: centres[i].x,
-      cy: centres[i].y,
-      polygon,
-      areaApprox: polygonAreaApprox(polygon),
-    });
-  }
-  return caverns;
-}
-
-function generateSmallCaverns(
-  seed: string,
-  width: number,
-  height: number,
-  largeCaverns: Cavern[],
-): Cavern[] {
-  const rng = seededPRNG(`${seed}_underground_smallcaverns`);
-  const count = randInt(rng, 5, 50);
-  // Target ~3% of area total split across small caverns — keeps them visibly
-  // smaller than the large set.
-  const totalArea = 0.03 * width * height;
-  const areaPer = totalArea / count;
-  const baseRadius = Math.sqrt(areaPer / Math.PI);
-  const minDist = baseRadius * 2.4;
-  const margin = baseRadius;
-  const candidates = poissonDiskSample(rng, width, height, minDist, count, count * 80, margin);
-  const caverns: Cavern[] = [];
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i];
-    // Reject if centre falls inside a large cavern polygon — small caverns
-    // shouldn't overlap large ones (they should hang off them via tunnels).
-    let blocked = false;
-    for (const lg of largeCaverns) {
-      if (pointInPolygon(c.x, c.y, lg.polygon)) { blocked = true; break; }
-    }
-    if (blocked) continue;
-    const radius = baseRadius * (0.7 + rng() * 0.7);
-    const polygon = buildBlobPolygon(rng, c.x, c.y, radius, 0.35, 16);
-    caverns.push({
-      id: `sm_${caverns.length}`,
-      cx: c.x,
-      cy: c.y,
-      polygon,
-      areaApprox: polygonAreaApprox(polygon),
-    });
-  }
-  return caverns;
-}
-
-function generateMazeClusters(
-  seed: string,
-  width: number,
-  height: number,
-  blockers: { cx: number; cy: number; radius: number }[],
-): MazeCluster[] {
-  const rngTop = seededPRNG(`${seed}_underground_maze_top`);
-  const count = randInt(rngTop, 3, 10);
-  const clusters: MazeCluster[] = [];
-  // Approximate cluster radius — keep them clearly smaller than large caverns.
-  const clusterRadius = Math.min(width, height) * 0.05;
-  const minDist = clusterRadius * 3;
-  const candidates = poissonDiskSample(rngTop, width, height, minDist, count, count * 80, clusterRadius);
-  for (let i = 0; i < candidates.length; i++) {
-    const c = candidates[i];
-    // Reject if too close to a large/small cavern centre — keeps maze
-    // clusters as distinct features.
-    const blocked = blockers.some(b => {
-      const dx = b.cx - c.x;
-      const dy = b.cy - c.y;
-      return dx * dx + dy * dy < (clusterRadius + b.radius) * (clusterRadius + b.radius);
-    });
-    if (blocked) continue;
-    clusters.push(buildMazeCluster(seed, clusters.length, c.x, c.y, clusterRadius));
-  }
-  return clusters;
-}
-
-function buildMazeCluster(
-  seed: string,
-  index: number,
-  cx: number,
-  cy: number,
-  radius: number,
-): MazeCluster {
-  const rng = seededPRNG(`${seed}_underground_maze_${index}`);
-  // 4–12 mini-caverns on a jittered grid inside the cluster bbox.
-  const miniCount = randInt(rng, 4, 12);
-  const gridSide = Math.ceil(Math.sqrt(miniCount));
-  const cellSize = (radius * 2) / gridSide;
-  const miniCaverns: Cavern[] = [];
-  const slots: { x: number; y: number; idx: number }[] = [];
-  for (let gy = 0; gy < gridSide; gy++) {
-    for (let gx = 0; gx < gridSide; gx++) {
-      slots.push({
-        x: cx - radius + (gx + 0.5) * cellSize,
-        y: cy - radius + (gy + 0.5) * cellSize,
-        idx: slots.length,
-      });
-    }
-  }
-  // Fisher-Yates over slots to pick miniCount of them.
-  for (let i = slots.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    const tmp = slots[i];
-    slots[i] = slots[j];
-    slots[j] = tmp;
-  }
-  const taken = slots.slice(0, miniCount);
-  const miniRadius = cellSize * 0.32;
-  for (let i = 0; i < taken.length; i++) {
-    const s = taken[i];
-    // Jitter within the slot so the grid doesn't look mechanical.
-    const jx = s.x + (rng() * 2 - 1) * cellSize * 0.15;
-    const jy = s.y + (rng() * 2 - 1) * cellSize * 0.15;
-    const r = miniRadius * (0.8 + rng() * 0.4);
-    const polygon = buildBlobPolygon(rng, jx, jy, r, 0.25, 12);
-    miniCaverns.push({
-      id: `mz_${index}_${i}`,
-      cx: jx,
-      cy: jy,
-      polygon,
-      areaApprox: polygonAreaApprox(polygon),
-    });
-  }
-  // Build an MST over mini-caverns (Prim) + a few extra edges for loops.
-  const edges: MazeEdge[] = buildMazeEdges(rng, miniCaverns);
-  return {
-    id: `mz_${index}`,
-    bbox: { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 },
-    miniCaverns,
-    edges,
-  };
-}
-
-function buildMazeEdges(rng: () => number, miniCaverns: Cavern[]): MazeEdge[] {
-  if (miniCaverns.length <= 1) return [];
-  const n = miniCaverns.length;
-  // Prim's MST on full graph (n is small).
-  const inTree = new Array<boolean>(n).fill(false);
-  inTree[0] = true;
-  const edges: MazeEdge[] = [];
-  const usedPairs = new Set<string>();
-  while (edges.length < n - 1) {
-    let bestI = -1, bestJ = -1, bestD = Infinity;
-    for (let i = 0; i < n; i++) {
-      if (!inTree[i]) continue;
-      for (let j = 0; j < n; j++) {
-        if (inTree[j]) continue;
-        const dx = miniCaverns[i].cx - miniCaverns[j].cx;
-        const dy = miniCaverns[i].cy - miniCaverns[j].cy;
-        const d = dx * dx + dy * dy;
-        if (d < bestD) { bestD = d; bestI = i; bestJ = j; }
+  cells: UndergroundCell[],
+  seedIdx: number,
+  targetSize: number,
+  owned: Int32Array,
+): number[] {
+  const result: number[] = [];
+  if (owned[seedIdx] !== -1) return result;
+  // Frontier carries candidates; we pop one at random each step so the
+  // growth fronts come out organically irregular rather than ring-perfect.
+  const frontier: number[] = [seedIdx];
+  const inFrontier = new Set<number>([seedIdx]);
+  while (result.length < targetSize && frontier.length > 0) {
+    const fi = Math.floor(rng() * frontier.length);
+    const idx = frontier[fi];
+    frontier[fi] = frontier[frontier.length - 1];
+    frontier.pop();
+    inFrontier.delete(idx);
+    if (owned[idx] !== -1) continue;
+    owned[idx] = 1; // temporary mark; caller overrides with the cavern id
+    result.push(idx);
+    for (const nb of cells[idx].neighbors) {
+      if (owned[nb] === -1 && !inFrontier.has(nb)) {
+        frontier.push(nb);
+        inFrontier.add(nb);
       }
     }
-    if (bestI < 0) break;
-    inTree[bestJ] = true;
-    edges.push(makeJaggedEdge(rng, miniCaverns[bestI], miniCaverns[bestJ]));
-    usedPairs.add(edgeKey(miniCaverns[bestI].id, miniCaverns[bestJ].id));
   }
-  // Add 1–3 extra random edges for loops.
-  const extras = randInt(rng, 1, Math.min(3, n - 1));
-  for (let e = 0; e < extras; e++) {
-    const i = Math.floor(rng() * n);
-    let j = Math.floor(rng() * n);
-    if (j === i) j = (j + 1) % n;
-    const key = edgeKey(miniCaverns[i].id, miniCaverns[j].id);
-    if (usedPairs.has(key)) continue;
-    usedPairs.add(key);
-    edges.push(makeJaggedEdge(rng, miniCaverns[i], miniCaverns[j]));
+  return result;
+}
+
+/** Compute a cavern's centroid from its member cell centroids. */
+function centroidOf(cells: UndergroundCell[], cellIndices: number[]): { cx: number; cy: number } {
+  let sx = 0;
+  let sy = 0;
+  for (const idx of cellIndices) {
+    sx += cells[idx].x;
+    sy += cells[idx].y;
   }
-  return edges;
+  const n = Math.max(1, cellIndices.length);
+  return { cx: sx / n, cy: sy / n };
+}
+
+/** A* through the cell graph from `start` to `end`. Returns the list of
+ *  cell indices on the path (inclusive of both ends), or `null` if no
+ *  path exists. Cells in `passThrough` keep cost ~1; cells in `avoid`
+ *  cost more so tunnels prefer unclaimed territory. */
+function aStar(
+  cells: UndergroundCell[],
+  start: number,
+  end: number,
+  isBlocked: (idx: number) => boolean,
+  costOf: (idx: number) => number,
+): number[] | null {
+  if (start === end) return [start];
+  const N = cells.length;
+  const gScore = new Float64Array(N);
+  gScore.fill(Infinity);
+  gScore[start] = 0;
+  const cameFrom = new Int32Array(N);
+  cameFrom.fill(-1);
+  // Simple binary-heap priority queue keyed by fScore.
+  const open: { idx: number; f: number }[] = [{ idx: start, f: heuristic(cells, start, end) }];
+  const closed = new Uint8Array(N);
+  while (open.length > 0) {
+    // Pop min (linear scan — N is small enough that the constant beats heap bookkeeping).
+    let bestI = 0;
+    for (let i = 1; i < open.length; i++) {
+      if (open[i].f < open[bestI].f) bestI = i;
+    }
+    const current = open[bestI];
+    open[bestI] = open[open.length - 1];
+    open.pop();
+    if (current.idx === end) {
+      // Reconstruct
+      const path: number[] = [end];
+      let cur = end;
+      while (cameFrom[cur] !== -1) {
+        cur = cameFrom[cur];
+        path.push(cur);
+      }
+      path.reverse();
+      return path;
+    }
+    if (closed[current.idx]) continue;
+    closed[current.idx] = 1;
+    for (const nb of cells[current.idx].neighbors) {
+      if (closed[nb]) continue;
+      if (isBlocked(nb) && nb !== end) continue;
+      const tentativeG = gScore[current.idx] + costOf(nb);
+      if (tentativeG < gScore[nb]) {
+        gScore[nb] = tentativeG;
+        cameFrom[nb] = current.idx;
+        open.push({ idx: nb, f: tentativeG + heuristic(cells, nb, end) });
+      }
+    }
+  }
+  return null;
+}
+
+function heuristic(cells: UndergroundCell[], a: number, b: number): number {
+  const dx = cells[a].x - cells[b].x;
+  const dy = cells[a].y - cells[b].y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** Find the cell on a cavern's boundary whose centroid is nearest the
+ *  given target point. "Boundary" = cell with at least one solid neighbour. */
+function nearestBoundaryCell(
+  cells: UndergroundCell[],
+  cavernCells: number[],
+  targetX: number,
+  targetY: number,
+): number {
+  let best = cavernCells[0];
+  let bestD = Infinity;
+  for (const idx of cavernCells) {
+    const c = cells[idx];
+    // Boundary check: any neighbour outside this cavern's cell set.
+    let isBoundary = false;
+    for (const nb of c.neighbors) {
+      if (cells[nb].cavernId !== c.cavernId) { isBoundary = true; break; }
+    }
+    if (!isBoundary) continue;
+    const dx = c.x - targetX;
+    const dy = c.y - targetY;
+    const d = dx * dx + dy * dy;
+    if (d < bestD) { bestD = d; best = idx; }
+  }
+  return best;
 }
 
 function edgeKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-function makeJaggedEdge(rng: () => number, a: Cavern, b: Cavern): MazeEdge {
-  const dx = b.cx - a.cx;
-  const dy = b.cy - a.cy;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  // Maze passages are short and angular — a small jitter on the midpoint.
-  const mx = (a.cx + b.cx) / 2 + (rng() * 2 - 1) * len * 0.12;
-  const my = (a.cy + b.cy) / 2 + (rng() * 2 - 1) * len * 0.12;
-  return {
-    from: a.id,
-    to: b.id,
-    path: [{ x: a.cx, y: a.cy }, { x: mx, y: my }, { x: b.cx, y: b.cy }],
-  };
+/** Build the underground cell array from `buildCellGraph`'s output. Strips
+ *  surface-specific fields so the postMessage payload stays minimal. */
+function buildUndergroundCells(seed: string, width: number, height: number): UndergroundCell[] {
+  const { cells } = buildCellGraph(`${seed}_underground_graph`, UNDERGROUND_CELL_COUNT, width, height);
+  return cells.map((c: SurfaceCell): UndergroundCell => ({
+    index: c.index,
+    x: c.x,
+    y: c.y,
+    vertices: c.vertices,
+    wrapVertices: c.wrapVertices,
+    neighbors: c.neighbors,
+    category: 'solid',
+    cavernId: null,
+  }));
 }
 
-/** MST + a few extra edges over top-level cavern nodes. Uses Prim's; the node
- *  count is well under 100 so the O(n²) cost is fine. */
-function buildTunnelGraph(seed: string, nodes: CavernNode[]): Tunnel[] {
-  if (nodes.length <= 1) return [];
-  const rng = seededPRNG(`${seed}_underground_tunnels`);
-  const n = nodes.length;
-  const inTree = new Array<boolean>(n).fill(false);
-  inTree[0] = true;
-  const tunnels: Tunnel[] = [];
+interface CavernPlan {
+  id: string;
+  kind: CavernKind;
+  seedCell: number;
+  targetSize: number;
+}
+
+function planLargeCaverns(
+  rng: () => number,
+  cells: UndergroundCell[],
+  totalCellCount: number,
+): CavernPlan[] {
+  const count = randInt(rng, 2, 20);
+  // Target ~30% of total cells split across the chosen count.
+  const targetTotalCells = Math.floor(totalCellCount * 0.30);
+  const avgPer = Math.max(8, Math.floor(targetTotalCells / count));
+  // Min Poisson distance: roughly the radius of an average cavern (sqrt of
+  // cell area × avgPer / π), padded so caverns don't overlap.
+  const cellArea = totalCellCount > 0 ? (cells[0]
+    ? (() => {
+        // Estimate via polygon vertices of the first cell.
+        const v = cells[0].vertices;
+        let s = 0;
+        for (let i = 0; i < v.length; i++) {
+          const a = v[i];
+          const b = v[(i + 1) % v.length];
+          s += a[0] * b[1] - b[0] * a[1];
+        }
+        return Math.max(1, Math.abs(s) * 0.5);
+      })()
+      : 100) : 100;
+  const radius = Math.sqrt((cellArea * avgPer) / Math.PI);
+  const minDist = radius * 2.0;
+  const seedIndices = poissonDiskCells(rng, cells, minDist, count, count * 80);
+  return seedIndices.map((seedCell, i): CavernPlan => ({
+    id: `lg_${i}`,
+    kind: 'large',
+    seedCell,
+    targetSize: Math.max(4, Math.floor(avgPer * (0.7 + rng() * 0.6))),
+  }));
+}
+
+function planSmallCaverns(
+  rng: () => number,
+  cells: UndergroundCell[],
+  forbidden: Set<number>,
+): CavernPlan[] {
+  const count = randInt(rng, 5, 50);
+  const avgPer = randInt(rng, 4, 12);
+  // Looser min-distance; small caverns can pack tighter.
+  const minDist = Math.sqrt(cells.length) * 0.6;
+  const seedIndices = poissonDiskCells(rng, cells, minDist, count, count * 80, forbidden);
+  return seedIndices.map((seedCell, i): CavernPlan => ({
+    id: `sm_${i}`,
+    kind: 'small',
+    seedCell,
+    targetSize: Math.max(2, Math.floor(avgPer * (0.5 + rng() * 1.0))),
+  }));
+}
+
+function planMazeClusters(
+  rng: () => number,
+  cells: UndergroundCell[],
+  forbidden: Set<number>,
+): CavernPlan[] {
+  const count = randInt(rng, 3, 10);
+  const minDist = Math.sqrt(cells.length) * 1.6;
+  const seedIndices = poissonDiskCells(rng, cells, minDist, count, count * 80, forbidden);
+  return seedIndices.map((seedCell, i): CavernPlan => ({
+    id: `mz_${i}`,
+    kind: 'maze',
+    // A maze cluster's "seed cavern" is small; the cluster's character
+    // comes from extra mini-caverns placed nearby, wired with passages.
+    seedCell,
+    targetSize: randInt(rng, 2, 4),
+  }));
+}
+
+/** For a maze cluster, place 3–8 additional mini-caverns in its
+ *  neighbourhood and wire them up with single-cell tunnels. Each mini-
+ *  cavern is 1–3 cells. Tunnel cells are marked with `cavernId = clusterId`
+ *  so the renderer can paint the whole cluster cohesively. */
+function fleshOutMazeCluster(
+  seed: string,
+  index: number,
+  cells: UndergroundCell[],
+  owned: Int32Array,
+  cluster: Cavern,
+  caverns: Cavern[],
+): void {
+  const rng = seededPRNG(`${seed}_underground_maze_${index}`);
+  const radiusInCells = Math.max(4, Math.floor(Math.sqrt(cells.length) * 0.30));
+  // Candidate cell pool: BFS from cluster centroid up to `radiusInCells`
+  // hops, excluding cells already in any cavern.
+  const candidatePool: number[] = [];
+  {
+    const seen = new Uint8Array(cells.length);
+    const queue: { idx: number; d: number }[] = [];
+    // Pick the closest cell to the centroid as our BFS root.
+    let root = cluster.cellIndices[0];
+    let rootD = Infinity;
+    for (let i = 0; i < cells.length; i++) {
+      const dx = cells[i].x - cluster.cx;
+      const dy = cells[i].y - cluster.cy;
+      const d = dx * dx + dy * dy;
+      if (d < rootD) { rootD = d; root = i; }
+    }
+    queue.push({ idx: root, d: 0 });
+    seen[root] = 1;
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      if (owned[cur.idx] === -1) candidatePool.push(cur.idx);
+      if (cur.d >= radiusInCells) continue;
+      for (const nb of cells[cur.idx].neighbors) {
+        if (!seen[nb]) {
+          seen[nb] = 1;
+          queue.push({ idx: nb, d: cur.d + 1 });
+        }
+      }
+    }
+  }
+  if (candidatePool.length === 0) return;
+
+  const miniCount = randInt(rng, 3, 8);
+  // Fisher-Yates partial shuffle for deterministic selection.
+  for (let i = candidatePool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [candidatePool[i], candidatePool[j]] = [candidatePool[j], candidatePool[i]];
+  }
+  const minis: Cavern[] = [cluster];
+  for (let i = 0; i < Math.min(miniCount, candidatePool.length); i++) {
+    const seedCell = candidatePool[i];
+    if (owned[seedCell] !== -1) continue;
+    const targetSize = randInt(rng, 1, 3);
+    const grown = growCavern(rng, cells, seedCell, targetSize, owned);
+    if (grown.length === 0) continue;
+    const miniId = `${cluster.id}_${i}`;
+    for (const ci of grown) {
+      cells[ci].category = 'cavern';
+      cells[ci].cavernId = miniId;
+    }
+    const { cx, cy } = centroidOf(cells, grown);
+    const mini: Cavern = {
+      id: miniId,
+      kind: 'maze',
+      cellIndices: grown,
+      cx,
+      cy,
+    };
+    caverns.push(mini);
+    minis.push(mini);
+  }
+  // Wire minis together with single-cell tunnel chains. Use Prim over the
+  // small mini-cluster + a couple extra loop edges. Mark tunnel cells with
+  // the cluster's id so the renderer can colour the whole maze cohesively.
+  if (minis.length <= 1) return;
+  const blocker = (idx: number) => {
+    if (owned[idx] === -1) return false;
+    // Allow passing through cells already owned by ANY mini in this cluster
+    // (so chains can land directly on adjacent minis). Block everything else.
+    const cid = cells[idx].cavernId;
+    return cid === null || !minis.some(m => m.id === cid);
+  };
+  const cost = (_idx: number) => 1;
+  const inTree = new Set<string>([minis[0].id]);
   const usedPairs = new Set<string>();
-  for (let step = 0; step < n - 1; step++) {
+  while (inTree.size < minis.length) {
     let bestI = -1, bestJ = -1, bestD = Infinity;
-    for (let i = 0; i < n; i++) {
-      if (!inTree[i]) continue;
-      for (let j = 0; j < n; j++) {
-        if (inTree[j]) continue;
-        const dx = nodes[i].cx - nodes[j].cx;
-        const dy = nodes[i].cy - nodes[j].cy;
+    for (let i = 0; i < minis.length; i++) {
+      if (!inTree.has(minis[i].id)) continue;
+      for (let j = 0; j < minis.length; j++) {
+        if (inTree.has(minis[j].id)) continue;
+        const dx = minis[i].cx - minis[j].cx;
+        const dy = minis[i].cy - minis[j].cy;
         const d = dx * dx + dy * dy;
         if (d < bestD) { bestD = d; bestI = i; bestJ = j; }
       }
     }
     if (bestI < 0) break;
-    inTree[bestJ] = true;
-    tunnels.push({
-      from: nodes[bestI].id,
-      to: nodes[bestJ].id,
-      path: bendyPath(rng, nodes[bestI], nodes[bestJ]),
-      mandatory: true,
-    });
-    usedPairs.add(edgeKey(nodes[bestI].id, nodes[bestJ].id));
+    const start = nearestBoundaryCell(cells, minis[bestI].cellIndices, minis[bestJ].cx, minis[bestJ].cy);
+    const end = nearestBoundaryCell(cells, minis[bestJ].cellIndices, minis[bestI].cx, minis[bestI].cy);
+    const path = aStar(cells, start, end, blocker, cost);
+    inTree.add(minis[bestJ].id);
+    usedPairs.add(edgeKey(minis[bestI].id, minis[bestJ].id));
+    if (!path) continue;
+    for (const idx of path) {
+      if (cells[idx].category === 'solid') {
+        cells[idx].category = 'tunnel';
+        cells[idx].cavernId = cluster.id; // attribute the passage to the cluster
+        owned[idx] = 1;
+      }
+    }
   }
-  // 10–20% loop edges on top of the MST. Add randomly between distinct nodes.
-  const loopCount = clamp(Math.floor((n - 1) * (0.10 + rng() * 0.10)), 0, n);
-  for (let e = 0; e < loopCount * 5 && tunnels.length < (n - 1) + loopCount; e++) {
-    const i = Math.floor(rng() * n);
-    let j = Math.floor(rng() * n);
-    if (j === i) j = (j + 1) % n;
-    const key = edgeKey(nodes[i].id, nodes[j].id);
+  const extras = randInt(rng, 0, Math.min(2, minis.length - 1));
+  for (let e = 0; e < extras; e++) {
+    const i = Math.floor(rng() * minis.length);
+    let j = Math.floor(rng() * minis.length);
+    if (j === i) j = (j + 1) % minis.length;
+    const key = edgeKey(minis[i].id, minis[j].id);
     if (usedPairs.has(key)) continue;
     usedPairs.add(key);
-    tunnels.push({
-      from: nodes[i].id,
-      to: nodes[j].id,
-      path: bendyPath(rng, nodes[i], nodes[j]),
-      mandatory: false,
-    });
+    const start = nearestBoundaryCell(cells, minis[i].cellIndices, minis[j].cx, minis[j].cy);
+    const end = nearestBoundaryCell(cells, minis[j].cellIndices, minis[i].cx, minis[i].cy);
+    const path = aStar(cells, start, end, blocker, cost);
+    if (!path) continue;
+    for (const idx of path) {
+      if (cells[idx].category === 'solid') {
+        cells[idx].category = 'tunnel';
+        cells[idx].cavernId = cluster.id;
+        owned[idx] = 1;
+      }
+    }
   }
-  return tunnels;
 }
 
-/** Cubic Bezier-like polyline between two cavern centres, with a perpendicular
- *  bulge so tunnels don't look ruler-straight. */
-function bendyPath(rng: () => number, a: CavernNode, b: CavernNode): Point[] {
-  const dx = b.cx - a.cx;
-  const dy = b.cy - a.cy;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  if (len < 1) return [{ x: a.cx, y: a.cy }, { x: b.cx, y: b.cy }];
-  // Perpendicular unit vector.
-  const px = -dy / len;
-  const py = dx / len;
-  // Bulge proportional to length; sign random.
-  const bulge = (rng() * 2 - 1) * len * 0.15;
-  const samples = 12;
-  const path: Point[] = [];
-  for (let i = 0; i <= samples; i++) {
-    const t = i / samples;
-    // Quadratic bezier: P0=a, P1=midpoint+bulge*perp, P2=b
-    const mx = (a.cx + b.cx) / 2 + px * bulge;
-    const my = (a.cy + b.cy) / 2 + py * bulge;
-    const x = (1 - t) * (1 - t) * a.cx + 2 * (1 - t) * t * mx + t * t * b.cx;
-    const y = (1 - t) * (1 - t) * a.cy + 2 * (1 - t) * t * my + t * t * b.cy;
-    path.push({ x, y });
+/** Build the inter-cavern tunnel graph: MST + ~10–20% loop edges. Each
+ *  edge becomes a chain of `tunnel` cells running A* between cavern
+ *  boundaries. */
+function carveInterCavernTunnels(
+  seed: string,
+  cells: UndergroundCell[],
+  caverns: Cavern[],
+  owned: Int32Array,
+): void {
+  if (caverns.length <= 1) return;
+  const rng = seededPRNG(`${seed}_underground_tunnels`);
+  // Skip mini-cluster sub-cells from the top-level wiring — represent each
+  // maze cluster by its primary seed cavern (the first one created with
+  // the cluster's bare id). Filter: keep caverns whose id has no underscore
+  // beyond the kind prefix (`lg_`, `sm_`, `mz_<i>` only).
+  const isTopLevel = (id: string): boolean => {
+    // `mz_<i>_<j>` → false; `mz_<i>` → true
+    const parts = id.split('_');
+    return parts.length === 2;
+  };
+  const topNodes = caverns.filter(c => isTopLevel(c.id));
+  if (topNodes.length <= 1) return;
+
+  const blocker = (idx: number) => {
+    if (owned[idx] === -1) return false;
+    // Already in a cavern — only block if it's a DIFFERENT top-level cavern
+    // than the endpoints (we'd be tunneling through it). Other tunnels are
+    // fine to merge with.
+    return cells[idx].category === 'cavern';
+  };
+  const cost = (idx: number) => {
+    if (owned[idx] === -1) return 1.0;      // fresh solid rock
+    if (cells[idx].category === 'tunnel') return 0.4; // re-use existing tunnel cheaply
+    return 5.0;
+  };
+
+  const inTree = new Set<string>([topNodes[0].id]);
+  const mstEdges: { a: Cavern; b: Cavern }[] = [];
+  while (inTree.size < topNodes.length) {
+    let bestA: Cavern | null = null, bestB: Cavern | null = null;
+    let bestD = Infinity;
+    for (const a of topNodes) {
+      if (!inTree.has(a.id)) continue;
+      for (const b of topNodes) {
+        if (inTree.has(b.id)) continue;
+        const dx = a.cx - b.cx;
+        const dy = a.cy - b.cy;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) { bestD = d; bestA = a; bestB = b; }
+      }
+    }
+    if (!bestA || !bestB) break;
+    mstEdges.push({ a: bestA, b: bestB });
+    inTree.add(bestB.id);
   }
-  return path;
+  const allEdges: { a: Cavern; b: Cavern; mandatory: boolean }[] = mstEdges.map(e => ({ ...e, mandatory: true }));
+
+  // 10–20% loop edges.
+  const loopCount = clamp(Math.floor((topNodes.length - 1) * (0.10 + rng() * 0.10)), 0, topNodes.length);
+  const usedPairs = new Set<string>();
+  for (const { a, b } of mstEdges) usedPairs.add(edgeKey(a.id, b.id));
+  let tries = 0;
+  while (allEdges.length < mstEdges.length + loopCount && tries < loopCount * 10) {
+    tries++;
+    const i = Math.floor(rng() * topNodes.length);
+    let j = Math.floor(rng() * topNodes.length);
+    if (j === i) j = (j + 1) % topNodes.length;
+    const k = edgeKey(topNodes[i].id, topNodes[j].id);
+    if (usedPairs.has(k)) continue;
+    usedPairs.add(k);
+    allEdges.push({ a: topNodes[i], b: topNodes[j], mandatory: false });
+  }
+
+  for (const { a, b } of allEdges) {
+    const start = nearestBoundaryCell(cells, a.cellIndices, b.cx, b.cy);
+    const end = nearestBoundaryCell(cells, b.cellIndices, a.cx, a.cy);
+    const path = aStar(cells, start, end, blocker, cost);
+    if (!path) continue;
+    for (const idx of path) {
+      if (cells[idx].category === 'solid') {
+        cells[idx].category = 'tunnel';
+        // Inter-cluster tunnels: leave cavernId null so the renderer paints
+        // them with the generic tunnel colour rather than a cluster colour.
+        cells[idx].cavernId = null;
+        owned[idx] = 1;
+      }
+    }
+  }
 }
 
-/** Pick 4–20 surface entrances. Each picks a cavern (weighted by area), then
- *  finds a land surface cell whose centroid lies inside the cavern polygon. */
+/** Sample 4–20 surface entrances. Each picks a cavern (weighted by cell
+ *  count) and a cell within that cavern; then finds the nearest LAND cell
+ *  in the surface graph and records the mapping. */
 function generateConnections(
   seed: string,
-  cells: Cell[],
-  allCaverns: Cavern[],
+  surfaceCells: SurfaceCell[],
+  underground: UndergroundCell[],
+  caverns: Cavern[],
 ): UndergroundConnection[] {
-  if (allCaverns.length === 0) return [];
   const rng = seededPRNG(`${seed}_underground_connections`);
+  if (caverns.length === 0) return [];
   const count = randInt(rng, 4, 20);
 
-  // Build a CDF over caverns weighted by area so large caverns dominate but
-  // small/maze caverns still occasionally get an entrance.
-  const weights = allCaverns.map(c => Math.max(1, c.areaApprox));
+  // Weight caverns by member count; small clusters contribute less.
+  const weights = caverns.map(c => Math.max(1, c.cellIndices.length));
   const total = weights.reduce((a, b) => a + b, 0);
   const cdf: number[] = [];
   let acc = 0;
@@ -435,7 +557,8 @@ function generateConnections(
   }
 
   const connections: UndergroundConnection[] = [];
-  const usedCells = new Set<number>();
+  const usedSurface = new Set<number>();
+  const usedUnderground = new Set<number>();
   let attempts = 0;
   const maxAttempts = count * 30;
   while (connections.length < count && attempts < maxAttempts) {
@@ -443,128 +566,115 @@ function generateConnections(
     const r = rng();
     let cavIdx = cdf.findIndex(v => v >= r);
     if (cavIdx < 0) cavIdx = cdf.length - 1;
-    const cavern = allCaverns[cavIdx];
-    // Find a land cell whose centroid sits inside the cavern polygon.
-    const candidate = findLandCellInPolygon(cells, cavern, rng);
-    if (candidate === null || usedCells.has(candidate)) continue;
-    const cell = cells[candidate];
+    const cavern = caverns[cavIdx];
+    // Pick a random cell from the cavern.
+    const ugCellIdx = cavern.cellIndices[Math.floor(rng() * cavern.cellIndices.length)];
+    if (usedUnderground.has(ugCellIdx)) continue;
+    const ugCell = underground[ugCellIdx];
+    // Find the nearest land surface cell.
+    const surfaceIdx = nearestLandSurfaceCell(surfaceCells, ugCell.x, ugCell.y);
+    if (surfaceIdx < 0 || usedSurface.has(surfaceIdx)) continue;
+    const sc = surfaceCells[surfaceIdx];
     connections.push({
       cavernId: cavern.id,
-      surfaceCellIndex: candidate,
-      xy: { x: cell.x, y: cell.y },
+      surfaceCellIndex: surfaceIdx,
+      undergroundCellIndex: ugCellIdx,
+      xy: { x: sc.x, y: sc.y },
     });
-    usedCells.add(candidate);
+    usedSurface.add(surfaceIdx);
+    usedUnderground.add(ugCellIdx);
   }
   return connections;
 }
 
-function findLandCellInPolygon(
-  cells: Cell[],
-  cavern: Cavern,
-  rng: () => number,
-): number | null {
-  // Pick a few random cells; check each for (a) land and (b) centroid inside
-  // the cavern polygon. If none hit, fall back to the nearest land cell to
-  // the cavern centre.
-  const tries = 24;
-  for (let i = 0; i < tries; i++) {
-    const idx = Math.floor(rng() * cells.length);
-    const c = cells[idx];
-    if (c.isWater || c.isLake) continue;
-    if (pointInPolygon(c.x, c.y, cavern.polygon)) return idx;
-  }
-  // Fallback: nearest land cell to cavern centre. O(N) scan over all cells;
-  // OK because total connection count is small.
+function nearestLandSurfaceCell(cells: SurfaceCell[], x: number, y: number): number {
   let bestIdx = -1;
   let bestD = Infinity;
   for (let i = 0; i < cells.length; i++) {
     const c = cells[i];
     if (c.isWater || c.isLake) continue;
-    const dx = c.x - cavern.cx;
-    const dy = c.y - cavern.cy;
+    const dx = c.x - x;
+    const dy = c.y - y;
     const d = dx * dx + dy * dy;
     if (d < bestD) { bestD = d; bestIdx = i; }
   }
-  return bestIdx >= 0 ? bestIdx : null;
+  return bestIdx;
 }
 
 export function generateUnderground(
   seed: string,
   width: number,
   height: number,
-  cells: Cell[],
+  surfaceCells: SurfaceCell[],
 ): UndergroundMap {
-  const targetLargeArea = 0.30 * width * height;
-  const largeCaverns = generateLargeCaverns(seed, width, height, targetLargeArea);
-  const smallCaverns = generateSmallCaverns(seed, width, height, largeCaverns);
+  // Step 1: build the underground Voronoi graph.
+  const cells = buildUndergroundCells(seed, width, height);
+  const owned = new Int32Array(cells.length).fill(-1);
 
-  // Blockers for maze placement — keep mazes from sitting on top of caverns.
-  const blockers = [
-    ...largeCaverns.map(c => ({ cx: c.cx, cy: c.cy, radius: Math.sqrt(c.areaApprox / Math.PI) })),
-    ...smallCaverns.map(c => ({ cx: c.cx, cy: c.cy, radius: Math.sqrt(c.areaApprox / Math.PI) })),
-  ];
-  const mazeClusters = generateMazeClusters(seed, width, height, blockers);
+  // Step 2: plan + grow caverns. Each plan adds one Cavern record + marks
+  // its member cells.
+  const caverns: Cavern[] = [];
 
-  // Top-level tunnel nodes: large caverns, small caverns, and each maze cluster
-  // (treated as a single node anchored at the cluster centroid).
-  const nodes: CavernNode[] = [
-    ...largeCaverns.map(c => ({
-      id: c.id,
-      cx: c.cx,
-      cy: c.cy,
-      radius: Math.sqrt(c.areaApprox / Math.PI),
-    })),
-    ...smallCaverns.map(c => ({
-      id: c.id,
-      cx: c.cx,
-      cy: c.cy,
-      radius: Math.sqrt(c.areaApprox / Math.PI),
-    })),
-    ...mazeClusters.map(m => ({
-      id: m.id,
-      cx: m.bbox.x + m.bbox.w / 2,
-      cy: m.bbox.y + m.bbox.h / 2,
-      radius: Math.min(m.bbox.w, m.bbox.h) * 0.5,
-    })),
-  ];
-  const tunnels = buildTunnelGraph(seed, nodes);
+  const largeRng = seededPRNG(`${seed}_underground_largecaverns`);
+  const largePlans = planLargeCaverns(largeRng, cells, cells.length);
+  for (const plan of largePlans) {
+    const grown = growCavern(largeRng, cells, plan.seedCell, plan.targetSize, owned);
+    if (grown.length === 0) continue;
+    for (const ci of grown) {
+      cells[ci].category = 'cavern';
+      cells[ci].cavernId = plan.id;
+    }
+    const { cx, cy } = centroidOf(cells, grown);
+    caverns.push({ id: plan.id, kind: 'large', cellIndices: grown, cx, cy });
+  }
 
-  // Connections: sampled across caverns + maze clusters. Mazes report their
-  // bbox centroid for connection placement.
-  const cavernsForConnection: Cavern[] = [
-    ...largeCaverns,
-    ...smallCaverns,
-    // Synthesize a Cavern-like proxy for each maze cluster so the area-
-    // weighted CDF in generateConnections works uniformly.
-    ...mazeClusters.map(m => {
-      const cx = m.bbox.x + m.bbox.w / 2;
-      const cy = m.bbox.y + m.bbox.h / 2;
-      const r = Math.min(m.bbox.w, m.bbox.h) * 0.45;
-      // Build a rough octagon as the "polygon" so pointInPolygon works.
-      const polygon: Point[] = [];
-      for (let i = 0; i < 8; i++) {
-        const theta = (i / 8) * Math.PI * 2;
-        polygon.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
-      }
-      return {
-        id: m.id,
-        cx,
-        cy,
-        polygon,
-        areaApprox: Math.PI * r * r,
-      };
-    }),
-  ];
-  const connections = generateConnections(seed, cells, cavernsForConnection);
+  const usedSeeds = new Set<number>(largePlans.map(p => p.seedCell));
+  const smallRng = seededPRNG(`${seed}_underground_smallcaverns`);
+  const smallPlans = planSmallCaverns(smallRng, cells, usedSeeds);
+  for (const plan of smallPlans) {
+    const grown = growCavern(smallRng, cells, plan.seedCell, plan.targetSize, owned);
+    if (grown.length === 0) continue;
+    for (const ci of grown) {
+      cells[ci].category = 'cavern';
+      cells[ci].cavernId = plan.id;
+    }
+    const { cx, cy } = centroidOf(cells, grown);
+    caverns.push({ id: plan.id, kind: 'small', cellIndices: grown, cx, cy });
+  }
+
+  for (const p of smallPlans) usedSeeds.add(p.seedCell);
+  const mazeTopRng = seededPRNG(`${seed}_underground_maze_top`);
+  const mazePlans = planMazeClusters(mazeTopRng, cells, usedSeeds);
+  for (let mi = 0; mi < mazePlans.length; mi++) {
+    const plan = mazePlans[mi];
+    const grown = growCavern(mazeTopRng, cells, plan.seedCell, plan.targetSize, owned);
+    if (grown.length === 0) continue;
+    for (const ci of grown) {
+      cells[ci].category = 'cavern';
+      cells[ci].cavernId = plan.id;
+    }
+    const { cx, cy } = centroidOf(cells, grown);
+    const cluster: Cavern = { id: plan.id, kind: 'maze', cellIndices: grown, cx, cy };
+    caverns.push(cluster);
+    fleshOutMazeCluster(seed, mi, cells, owned, cluster, caverns);
+  }
+
+  // Step 3: carve inter-cavern tunnels (top-level caverns + maze cluster
+  // anchors). Maze cluster INTERNAL passages were already carved above.
+  carveInterCavernTunnels(seed, cells, caverns, owned);
+
+  // Step 4: pick surface↔underground entrances.
+  // Use only top-level caverns for entrance placement; mini-cavities inside
+  // maze clusters are tiny and would cluster entrances unrealistically.
+  const topLevelCaverns = caverns.filter(c => c.id.split('_').length === 2);
+  const connections = generateConnections(seed, surfaceCells, cells, topLevelCaverns);
 
   return {
     seed: `${seed}_underground`,
     width,
     height,
-    largeCaverns,
-    smallCaverns,
-    mazeClusters,
-    tunnels,
+    cells,
+    caverns,
     connections,
   };
 }

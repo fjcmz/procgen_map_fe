@@ -1,9 +1,9 @@
 export type {
   Cavern,
-  MazeCluster,
-  MazeEdge,
+  CavernKind,
   Point,
-  Tunnel,
+  UndergroundCell,
+  UndergroundCellCategory,
   UndergroundConnection,
   UndergroundMap,
 } from './types';
