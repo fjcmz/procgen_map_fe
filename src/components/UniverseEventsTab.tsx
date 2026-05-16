@@ -34,6 +34,7 @@ const EVENT_TYPE_META: { type: EventType; icon: string; label: string }[] = [
 ];
 
 const ALL_TYPES = new Set<EventType>(EVENT_TYPE_META.map(m => m.type));
+const EMPTY_EVENTS: UniverseHistoryEvent[] = [];
 
 /**
  * Universe-history events feed. Mirrors the world-map `EventsTab` shape
@@ -71,6 +72,32 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
     return m;
   }, [data.history]);
 
+  // All hooks must be called before any early return.
+  const events = data.history?.events ?? EMPTY_EVENTS;
+
+  // Count events per type up to the selected step (ignores active filter so
+  // chips always show totals, not filtered totals).
+  const countByType = useMemo(() => {
+    const m = new Map<EventType, number>();
+    for (const e of events) {
+      if (e.step <= selectedStep) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    }
+    return m;
+  }, [events, selectedStep]);
+
+  // Filtered + time-gated list. Re-runs only when events, step, or filter change.
+  const eventsUpToNow = useMemo(
+    () => events.filter(e => e.step <= selectedStep && activeTypes.has(e.type)),
+    [events, selectedStep, activeTypes],
+  );
+
+  // Reversed for display (newest-first). Memoised separately so chip toggles
+  // don't pay the reverse cost when the underlying list didn't change.
+  const eventsReversed = useMemo(
+    () => eventsUpToNow.slice().reverse(),
+    [eventsUpToNow],
+  );
+
   const history = data.history;
   if (!history) {
     return (
@@ -80,9 +107,7 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
     );
   }
 
-  const events = history.events;
   const totalEvents = events.length;
-  const eventsUpToNow = events.filter(e => e.step <= selectedStep && activeTypes.has(e.type));
   const allOn = activeTypes.size === ALL_TYPES.size;
 
   function toggleType(type: EventType) {
@@ -100,15 +125,6 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
   function toggleAll() {
     setActiveTypes(allOn ? new Set() : ALL_TYPES);
   }
-
-  // Count events per type (up to now) for the filter chips
-  const countByType = useMemo(() => {
-    const m = new Map<EventType, number>();
-    for (const e of events) {
-      if (e.step <= selectedStep) m.set(e.type, (m.get(e.type) ?? 0) + 1);
-    }
-    return m;
-  }, [events, selectedStep]);
 
   return (
     <div style={styles.wrap}>
@@ -149,12 +165,12 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
       </div>
 
       <div style={styles.list}>
-        {eventsUpToNow.length === 0 && (
+        {eventsReversed.length === 0 && (
           <div style={styles.empty}>
             <span style={styles.dim}>No events match the current filters at this point in time.</span>
           </div>
         )}
-        {eventsUpToNow.slice().reverse().map((event, i) => (
+        {eventsReversed.map((event, i) => (
           <EventRow
             key={`${event.step}-${event.bodyId}-${i}`}
             event={event}
