@@ -17,7 +17,7 @@ import type { SystemKind, StarSubtype } from './SystemKind';
 /**
  * Five-stage life evolution. Bodies always start at `unicellular` when life
  * first appears in the universe-history simulation; each subsequent stage is
- * a roll of `LIFE_ADVANCE_CHANCE_PER_STEP` (0.5%) in
+ * a roll of `LIFE_ADVANCE_CHANCE_PER_STEP` (0.07%) in
  * `UniverseHistoryGenerator`. Only `intelligent_animals` unlocks the
  * world-history hand-off — see `bodyToProfile.ts`.
  */
@@ -185,7 +185,7 @@ export interface UniverseData {
  * - `LIFE_APPEARED` fires once per body, the first time life arises. The
  *   level is always `'unicellular'` — kept as a field so future spawn-tier
  *   tweaks don't require a separate event type.
- * - `LIFE_ADVANCED` fires each time a body's biosphere clears the 0.5%
+ * - `LIFE_ADVANCED` fires each time a body's biosphere clears the 0.07%
  *   advancement roll and steps one tier up.
  */
 export interface UniverseLifeAppearedEvent {
