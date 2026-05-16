@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   CivilisationData,
   UniverseData,
@@ -21,6 +21,20 @@ interface BodyLookup {
   satellite?: { satellite: SatelliteData; planet: PlanetData; system: SolarSystemData };
 }
 
+type EventType = UniverseHistoryEvent['type'];
+
+const EVENT_TYPE_META: { type: EventType; icon: string; label: string }[] = [
+  { type: 'LIFE_APPEARED',       icon: '🌱', label: 'Life'       },
+  { type: 'LIFE_ADVANCED',       icon: '🧬', label: 'Evolution'  },
+  { type: 'CIV_FOUNDED',         icon: '✦',  label: 'Civ'        },
+  { type: 'OUTPOST_ESTABLISHED', icon: '◆',  label: 'Outpost'    },
+  { type: 'COLONY_FOUNDED',      icon: '⌂',  label: 'Colony'     },
+  { type: 'TERRAFORM_STARTED',   icon: '⚙',  label: 'Terraform'  },
+  { type: 'TERRAFORM_COMPLETED', icon: '✿',  label: 'Terraformed'},
+];
+
+const ALL_TYPES = new Set<EventType>(EVENT_TYPE_META.map(m => m.type));
+
 /**
  * Universe-history events feed. Mirrors the world-map `EventsTab` shape
  * (per-event row, click-to-focus). Today the feed surfaces life-evolution
@@ -32,6 +46,8 @@ interface BodyLookup {
  * details popup via the same `onTreeEntitySelect` path used by `UniverseTreeTab`.
  */
 export function UniverseEventsTab({ data, selectedStep, onSelectBody }: UniverseEventsTabProps) {
+  const [activeTypes, setActiveTypes] = useState<Set<EventType>>(ALL_TYPES);
+
   // Build a single id → location index so per-event resolution is O(1)
   // regardless of universe size. Recomputed only when `data` changes.
   const bodyById = useMemo(() => {
@@ -66,7 +82,33 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
 
   const events = history.events;
   const totalEvents = events.length;
-  const eventsUpToNow = events.filter(e => e.step <= selectedStep);
+  const eventsUpToNow = events.filter(e => e.step <= selectedStep && activeTypes.has(e.type));
+  const allOn = activeTypes.size === ALL_TYPES.size;
+
+  function toggleType(type: EventType) {
+    setActiveTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setActiveTypes(allOn ? new Set() : ALL_TYPES);
+  }
+
+  // Count events per type (up to now) for the filter chips
+  const countByType = useMemo(() => {
+    const m = new Map<EventType, number>();
+    for (const e of events) {
+      if (e.step <= selectedStep) m.set(e.type, (m.get(e.type) ?? 0) + 1);
+    }
+    return m;
+  }, [events, selectedStep]);
 
   return (
     <div style={styles.wrap}>
@@ -76,10 +118,40 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
           {eventsUpToNow.length} / {totalEvents} &middot; step {selectedStep}
         </span>
       </div>
+
+      {/* Filter chips */}
+      <div style={styles.filterBar}>
+        <button
+          type="button"
+          style={{ ...styles.chip, ...(allOn ? styles.chipActive : styles.chipInactive) }}
+          onClick={toggleAll}
+          title={allOn ? 'Hide all event types' : 'Show all event types'}
+        >
+          All
+        </button>
+        {EVENT_TYPE_META.map(({ type, icon, label }) => {
+          const on = activeTypes.has(type);
+          const cnt = countByType.get(type) ?? 0;
+          return (
+            <button
+              key={type}
+              type="button"
+              style={{ ...styles.chip, ...(on ? styles.chipActive : styles.chipInactive) }}
+              onClick={() => toggleType(type)}
+              title={`${on ? 'Hide' : 'Show'} "${label}" events`}
+            >
+              <span style={styles.chipIcon}>{icon}</span>
+              {label}
+              {cnt > 0 && <span style={styles.chipCount}>{cnt}</span>}
+            </button>
+          );
+        })}
+      </div>
+
       <div style={styles.list}>
         {eventsUpToNow.length === 0 && (
           <div style={styles.empty}>
-            <span style={styles.dim}>No events yet at this point in time.</span>
+            <span style={styles.dim}>No events match the current filters at this point in time.</span>
           </div>
         )}
         {eventsUpToNow.slice().reverse().map((event, i) => (
@@ -240,6 +312,41 @@ const styles: Record<string, React.CSSProperties> = {
     textTransform: 'none',
     letterSpacing: 0,
     fontWeight: 'normal',
+  },
+  filterBar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  chip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 3,
+    padding: '2px 7px',
+    borderRadius: 10,
+    fontSize: 10,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    border: '1px solid rgba(108,122,184,0.4)',
+    transition: 'background 0.1s, opacity 0.1s',
+  },
+  chipActive: {
+    background: 'rgba(108,122,184,0.30)',
+    color: '#dde0ff',
+    opacity: 1,
+  },
+  chipInactive: {
+    background: 'transparent',
+    color: '#7a82a8',
+    opacity: 0.65,
+  },
+  chipIcon: {
+    fontSize: 11,
+  },
+  chipCount: {
+    marginLeft: 2,
+    fontSize: 9,
+    color: '#a0a8d0',
   },
   list: {
     display: 'flex',
