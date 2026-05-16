@@ -4,7 +4,8 @@ import type { UniverseCanvasHandle, UniverseSceneState, PopupEntity } from './Un
 import { UniverseOverlay } from './UniverseOverlay';
 import { UniverseEntityPopup } from './UniverseEntityPopup';
 import { UniverseTimeline } from './UniverseTimeline';
-import { getLifeLevelAtStep } from '../lib/universe/habitability';
+import { getBodyStateAtStep } from '../lib/universe/habitability';
+import type { BodyStateAtStep } from '../lib/universe/habitability';
 import type {
   UniverseData,
   PlanetData,
@@ -32,16 +33,18 @@ interface UniverseScreenProps {
   onReturnToConsumed?: () => void;
   /**
    * Called when the user presses "Generate World" in a planet popup.
-   * `lifeLevelAtStep` is the step-derived biosphere stage at the time of
-   * click: when the universe carries history this overrides the body's
-   * static `.lifeLevel` field. `undefined` means "no life present yet at
-   * this step" (universe handoff should disable history).
+   * `stateAtStep` is the step-derived body snapshot (life + biome +
+   * subtype + composition + terraform flags) — overrides the body's
+   * static fields when the universe carries history. Lets the world-map
+   * hand-off respect terraformed planets' new habitable biome at
+   * post-completion steps, and the original lifeless visual at earlier
+   * steps.
    */
   onGenerateWorldFromPlanet?: (
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
-    lifeLevelAtStep: LifeLevel | undefined,
+    stateAtStep: BodyStateAtStep,
   ) => void;
   /** Called when the user presses "Generate World" in a satellite popup. */
   onGenerateWorldFromSatellite?: (
@@ -49,7 +52,7 @@ interface UniverseScreenProps {
     planet: PlanetData,
     system: SolarSystemData,
     universe: UniverseData,
-    lifeLevelAtStep: LifeLevel | undefined,
+    stateAtStep: BodyStateAtStep,
   ) => void;
 }
 
@@ -168,8 +171,8 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromPlanet) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      const level = getLifeLevelAtStep(planet.id, planet.lifeLevel, selectedStep, data.history);
-      onGenerateWorldFromPlanet(planet, system, data, level);
+      const state = getBodyStateAtStep(planet, selectedStep, data.history);
+      onGenerateWorldFromPlanet(planet, system, data, state);
     },
     [data, onGenerateWorldFromPlanet, selectedStep],
   );
@@ -179,8 +182,8 @@ export function UniverseScreen({
       if (!data || !onGenerateWorldFromSatellite) return;
       const system = data.solarSystems.find(s => s.id === systemId);
       if (!system) return;
-      const level = getLifeLevelAtStep(satellite.id, satellite.lifeLevel, selectedStep, data.history);
-      onGenerateWorldFromSatellite(satellite, planet, system, data, level);
+      const state = getBodyStateAtStep(satellite, selectedStep, data.history);
+      onGenerateWorldFromSatellite(satellite, planet, system, data, state);
     },
     [data, onGenerateWorldFromSatellite, selectedStep],
   );

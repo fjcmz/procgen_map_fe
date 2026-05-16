@@ -205,6 +205,49 @@ Events are recorded per body in chronological order, then sorted globally by ste
 
 **Renderer marker** — bodies that have reached `intelligent_animals` get **two concentric green rings** drawn around them by `drawIntelligentLifeRings` in `renderer.ts`. The marker is applied in both `drawSystemScene` (orbit-view planet disks) and `drawPlanetScene` (hero planet + its satellite disks). The renderer accepts a `liveLifeLevels: Map<string, LifeLevel>` lookup built once per (history, step) change in `UniverseScreen` — null/undefined falls back to the body's static `lifeLevel`.
 
+## Civilisation Expansion (Mode A)
+
+Once a body crosses to `intelligent_animals`, the universe-history simulation can spawn a **civilisation** rooted on that body. Civilisations then attempt yearly expansion across the universe via three mechanics: **outposts** on lifeless bodies, **colonies** on habitable bodies that don't yet carry intelligent life, and **terraforming** of lifeless rock/ice bodies. Mode A: civs are lightweight aggregates (no tech state, no inter-civ politics).
+
+**Files**:
+
+| File | Purpose |
+|------|---------|
+| `CivilisationGenerator.ts` | Founding gate + per-civ expansion loop + terraform completion. Holds the per-step `CivContext` mutated by `UniverseHistoryGenerator` |
+| `civNames.ts` | Per-flavor name pools (`hardSF`, `spaceOpera`, `fantasy`); flavor is rolled per civ so each universe is heterogeneous |
+| `civColors.ts` | Fixed 24-entry palette; civs are coloured by `civilisations.length` at founding time — no RNG draw |
+| `expansion.ts` | Reach algorithm + target-selection: held-galaxy systems plus wormhole-partner-galaxy systems, weighted inverse-distance with in-galaxy bias 1.0 / cross-galaxy 0.4 |
+
+**Loop refactor in `UniverseHistoryGenerator`**: outer loop is now per-step, inner passes are (1) per-body life rolls, (2) civ-founding, (3) per-civ expansion, (4) terraform completion. Each habitable body's PRNG sub-streams are cached so the per-body life-roll draw order is unchanged — seeds with zero civ activity stay byte-identical to the pre-feature output.
+
+**Five new sub-streams**:
+
+| Sub-stream | Purpose |
+|------------|---------|
+| `${seed}_civorigin_${bodyId}` | Per-step founding gate (0.5%/step) once a body is at `intelligent_animals` |
+| `${seed}_civflavor_${civId}` | Pick hardSF / spaceOpera / fantasy |
+| `${seed}_civname_${civId}` | Name draw (3 templates per flavor) |
+| `${seed}_civexpand_${civId}` | Per-step expansion attempt (1%/step) + bucket roll + target weighting |
+| `${seed}_terraform_${bodyId}` | Completion-step jitter (±5) + post-flip biome pick |
+
+**Bucket weights** (in `CivilisationGenerator.ts`):
+
+- `outpost` 0.5 — any lifeless body, any composition (gas giants count — atmospheric extraction)
+- `colonise` 0.3 — habitable-zone body without intelligent life, no civ origin, no current occupier
+- `terraform` 0.2 — lifeless ROCK or ICE body; gas giants excluded (no surface). Duration 20 steps ±5. Body flips at `completeStep` to `'unicellular'` with a habitable biome + ROCK composition, then climbs the regular life ladder via its existing `_lifeevolution_<id>` stream.
+
+**Five new events** in the discriminated `UniverseHistoryEvent` union: `CIV_FOUNDED`, `OUTPOST_ESTABLISHED`, `COLONY_FOUNDED`, `TERRAFORM_STARTED`, `TERRAFORM_COMPLETED`. The events tab in `UniverseOverlay` renders each with its own icon + flavor copy.
+
+**Three new fields on `UniverseHistoryData`** — all crossed over `postMessage`:
+
+- `civilisations: CivilisationData[]` — `{ id, name, flavor, originBodyId, originBodyKind, foundedStep, color }`
+- `occupancyByBody: Record<string, BodyOccupancyEntry[]>` — chronological per body; the popup's status row picks the latest entry at the selected step
+- `terraforms: TerraformResult[]` — each record preserves the pre-terraform biome / subtype / composition so scrubbing back before completion can render the body's original visual via `getBodyStateAtStep`
+
+**World-map hand-off**: `App.tsx`'s `handleGenerateWorldFromPlanet` / `..FromSatellite` now read body state via `getBodyStateAtStep` (in `habitability.ts`) before invoking `planetToGenSpec` / `satelliteToGenSpec`. At post-terraform steps, the world-map worker sees the new habitable biome + composition; at pre-completion steps it sees the original lifeless state.
+
+**Safety cap** `MAX_CIVS_PER_UNIVERSE = 50` prevents pathological saturation in 10k-system universes. Civs that hit the cap simply don't roll the founding gate; remaining sub-stream draws still happen so byte-stability for the SAME seed is preserved across re-runs.
+
 ## Hand-off to World Map
 
 The user can drill `galaxy → system → planet` (or `satellite`) in the universe canvas. The popup's "Generate World" button is enabled for every planet / satellite, but **civilizational history only unlocks when the body's life level at the selected timeline step is `'intelligent_animals'`** (gated by `planetToGenSpec` / `satelliteToGenSpec` in `bodyToProfile.ts` via `disableHistory: !intelligent`). Bodies with primitive life (unicellular / vegetation / small / large animals) still generate a terrain map with the biome palette intact — just without the 5000-year history sim.
@@ -298,6 +341,9 @@ Single star: solid circle at canvas center. Multi-star binary: stars orbit a tig
 - **Planet / satellite biomes are only assigned when `composition === 'ROCK' && life`.** Other planets / moons have `biome === undefined`. The hand-off code in `App.tsx` falls back to `'default'` for the world-map profile when biome is undefined — keep that fallback if you ever extend biome assignment.
 - **`lifeLevel` is present iff `life === true`.** Both fields are serialized; keep them in lockstep. The world-history hand-off is gated on `lifeLevel === 'intelligent_animals'` (in `bodyToProfile.ts`), NOT on `life` alone — primitive life biomes render terrain but skip civilizations.
 - **Life evolution rolls use TWO isolated sub-streams per body.** `${seed}_universe_life_${bodyId}` is the legacy spawn roll (also feeds biome + subtype on success); `${seed}_lifeevolution_${bodyId}` is the new advancement roll. Keep them separate — collapsing them would shift spawn timings for every pre-existing seed. If you add a third life-related roll, give it its own sub-stream too.
+- **Civ expansion rolls use FIVE more isolated sub-streams per civ / per body.** `${seed}_civorigin_${bodyId}` is the founding gate; `${seed}_civflavor_${civId}` / `${seed}_civname_${civId}` / `${seed}_civexpand_${civId}` are per-civ; `${seed}_terraform_${bodyId}` is per terraforming operation. Seeds that never reach `intelligent_animals` consume zero draws on any of these — pre-feature output stays byte-identical. If you add a new civ-driven behaviour, route it through its own sub-stream or be a no-op when no civ exists.
+- **Terraform completion mutates the runtime `Planet` / `Satellite` instance.** At `completeStep`, `composition` flips to `'ROCK'`, `subtype` to the new ROCK subtype, `biome` to the picked habitable biome, `life = true`, `lifeLevel = 'unicellular'`. The pre-terraform fields are preserved on the `TerraformResult` record so the popup + world-map hand-off can render the body at any step via `getBodyStateAtStep`. Do NOT mutate body fields anywhere else — the runtime entity is the single source of truth for end-of-time state.
+- **Universe-history loop is per-step outer, per-body inner.** This is a reversal from the pre-civ version (per-body outer, per-step inner). Each body's life-roll PRNG sub-streams are cached so cross-body interleaving doesn't perturb per-body draw order. If you add another per-step pass, keep it inside the step loop and use new sub-streams; don't restructure to a per-body outer loop because civ behaviour needs to read "what's claimed at step T" from the shared occupancy index.
 - **Static (no-history) life rolls always seed `lifeLevel = 'intelligent_animals'`.** Don't change this without updating the world-history gate — static-mode universes assume "any life-bearing body is generatable." If you want static mode to expose primitive biospheres, gate the popup differently or give static life a weighted level roll.
 - **Hand-off seed format is part of the determinism contract.** `${universe.seed}_${planet.id}` (or `..._${satellite.id}`) is what the user lands on. Changing this format would break "the same universe seed always gives the same world for a given planet". Treat it like a stable interface.
 - **`numSolarSystems` defaults to `rndSize(rng, 5, 1)` (1–5 systems)** for non-worker call sites and tests. The worker always passes the user's slider value. The default exists so any future test path or REPL session works without wiring an option.

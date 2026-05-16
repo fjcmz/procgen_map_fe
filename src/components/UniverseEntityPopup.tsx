@@ -1,9 +1,9 @@
 import { createPortal } from 'react-dom';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData, LifeLevel } from '../lib/universe/types';
+import type { UniverseData, SolarSystemData, PlanetData, SatelliteData, StarData, GalaxyData, SectorData, WormholeData, LifeLevel, CivilisationData, BodyOccupancyEntry } from '../lib/universe/types';
 import { SYSTEM_KIND_INFO, isStandaloneKind } from '../lib/universe/SystemKindInfo';
 import type { StarSubtype } from '../lib/universe/SystemKind';
-import { getLifeLevelAtStep } from '../lib/universe/habitability';
+import { findTerraformForBody, getBodyOccupancyAtStep, getLifeLevelAtStep } from '../lib/universe/habitability';
 import type { PopupEntity, UniverseSceneState } from './UniverseCanvas';
 
 // Scene-level parent of the user's current view. Follows the hierarchy
@@ -109,6 +109,25 @@ export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, on
     return (id: string, staticLevel: LifeLevel | undefined) =>
       getLifeLevelAtStep(id, staticLevel, selectedStep, history);
   }, [data.history, selectedStep]);
+
+  // Civilisation id → record. Cheap to build once per render — civs lists
+  // are short (≤ MAX_CIVS_PER_UNIVERSE, currently 50). Drives the
+  // occupancy rows in `PlanetDetails` and `SatelliteDetails`.
+  const civById = useMemo(() => {
+    const m = new Map<string, CivilisationData>();
+    if (data.history) {
+      for (const c of data.history.civilisations) m.set(c.id, c);
+    }
+    return m;
+  }, [data.history]);
+  const occupancyOf = useMemo(() => {
+    const history = data.history;
+    return (bodyId: string) => getBodyOccupancyAtStep(bodyId, selectedStep, history);
+  }, [data.history, selectedStep]);
+  const terraformOf = useMemo(() => {
+    const history = data.history;
+    return (bodyId: string) => findTerraformForBody(bodyId, history);
+  }, [data.history]);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -282,10 +301,27 @@ export function UniverseEntityPopup({ entity, data, sceneState, selectedStep, on
             <StarDetails star={star} parentSystem={system} />
           )}
           {entity.kind === 'planet' && planet && system && (
-            <PlanetDetails planet={planet} parentSystem={system} lifeLevelOf={lifeLevelOf} />
+            <PlanetDetails
+              planet={planet}
+              parentSystem={system}
+              lifeLevelOf={lifeLevelOf}
+              occupancyOf={occupancyOf}
+              terraformOf={terraformOf}
+              civById={civById}
+              selectedStep={selectedStep}
+            />
           )}
           {entity.kind === 'satellite' && satellite && planet && system && (
-            <SatelliteDetails satellite={satellite} parentPlanet={planet} parentSystem={system} lifeLevelOf={lifeLevelOf} />
+            <SatelliteDetails
+              satellite={satellite}
+              parentPlanet={planet}
+              parentSystem={system}
+              lifeLevelOf={lifeLevelOf}
+              occupancyOf={occupancyOf}
+              terraformOf={terraformOf}
+              civById={civById}
+              selectedStep={selectedStep}
+            />
           )}
           {entity.kind === 'wormhole' && wormhole && system && (
             <WormholeDetails
@@ -642,14 +678,20 @@ function StarDetails({ star, parentSystem }: { star: StarData; parentSystem: Sol
 }
 
 function PlanetDetails({
-  planet, parentSystem, lifeLevelOf,
+  planet, parentSystem, lifeLevelOf, occupancyOf, terraformOf, civById, selectedStep,
 }: {
   planet: PlanetData;
   parentSystem: SolarSystemData;
   lifeLevelOf: (id: string, staticLevel: LifeLevel | undefined) => LifeLevel | undefined;
+  occupancyOf: (bodyId: string) => BodyOccupancyEntry | null;
+  terraformOf: (bodyId: string) => ReturnType<typeof findTerraformForBody>;
+  civById: Map<string, CivilisationData>;
+  selectedStep: number;
 }) {
   const planetLevel = lifeLevelOf(planet.id, planet.lifeLevel);
   const planetAlive = planetLevel !== undefined;
+  const occupancy = occupancyOf(planet.id);
+  const terraform = terraformOf(planet.id);
   return (
     <>
       <NameRow humanName={planet.humanName} scientificName={planet.scientificName} />
@@ -661,6 +703,12 @@ function PlanetDetails({
       {planetAlive && planet.biome && (
         <Row label="Biome"><span style={s.biome}>{planet.biome}</span></Row>
       )}
+      <OccupancyRows
+        occupancy={occupancy}
+        terraform={terraform}
+        civById={civById}
+        selectedStep={selectedStep}
+      />
       <Row label="Radius">{planet.radius.toFixed(2)}</Row>
       <Row label="Orbit">{planet.orbit.toFixed(2)}</Row>
 
@@ -756,17 +804,23 @@ function WormholeDetails({
 }
 
 function SatelliteDetails({
-  satellite, parentPlanet, parentSystem, lifeLevelOf,
+  satellite, parentPlanet, parentSystem, lifeLevelOf, occupancyOf, terraformOf, civById, selectedStep,
 }: {
   satellite: SatelliteData;
   parentPlanet: PlanetData;
   parentSystem: SolarSystemData;
   lifeLevelOf: (id: string, staticLevel: LifeLevel | undefined) => LifeLevel | undefined;
+  occupancyOf: (bodyId: string) => BodyOccupancyEntry | null;
+  terraformOf: (bodyId: string) => ReturnType<typeof findTerraformForBody>;
+  civById: Map<string, CivilisationData>;
+  selectedStep: number;
 }) {
   const satLevel = lifeLevelOf(satellite.id, satellite.lifeLevel);
   const parentLevel = lifeLevelOf(parentPlanet.id, parentPlanet.lifeLevel);
   const satAlive = satLevel !== undefined;
   const parentAlive = parentLevel !== undefined;
+  const occupancy = occupancyOf(satellite.id);
+  const terraform = terraformOf(satellite.id);
   return (
     <>
       <NameRow humanName={satellite.humanName} scientificName={satellite.scientificName} />
@@ -778,6 +832,12 @@ function SatelliteDetails({
       {satAlive && satellite.biome && (
         <Row label="Biome"><span style={s.biome}>{satellite.biome}</span></Row>
       )}
+      <OccupancyRows
+        occupancy={occupancy}
+        terraform={terraform}
+        civById={civById}
+        selectedStep={selectedStep}
+      />
       <Row label="Radius">{satellite.radius.toFixed(2)}</Row>
 
       <Section title="Parent Planet">
@@ -797,6 +857,108 @@ function SatelliteDetails({
       </Section>
     </>
   );
+}
+
+// ── Occupancy rows ────────────────────────────────────────────────────────
+
+/**
+ * Renders the civilisation-occupancy state for a body at the selected
+ * step. Distinguishes four states based on the latest occupancy entry +
+ * any terraform record:
+ *
+ *   - Outpost of X
+ *   - Colonised by X (founded step N)
+ *   - Terraforming by X (in progress, completes step N)
+ *   - Terraformed by X (completed step N) — biome row already shows the
+ *     new biome via `getBodyStateAtStep` upstream.
+ *
+ * Renders nothing when the body has never been touched by a civilisation.
+ * `occupancy` is allowed to be null (no entries at all up to `step`).
+ */
+function OccupancyRows({
+  occupancy, terraform, civById, selectedStep,
+}: {
+  occupancy: BodyOccupancyEntry | null;
+  terraform: ReturnType<typeof findTerraformForBody>;
+  civById: Map<string, CivilisationData>;
+  selectedStep: number;
+}) {
+  // A terraform-in-progress takes priority over a "TERRAFORM_START"
+  // occupancy entry (they're the same event but the in-progress framing
+  // is clearer in the UI).
+  const inProgress = terraform
+    && selectedStep >= terraform.startStep
+    && selectedStep < terraform.completeStep;
+  if (inProgress && terraform) {
+    const civ = civById.get(terraform.civId) ?? null;
+    return (
+      <Row label="Status">
+        <CivDot civ={civ} />
+        <span>Terraforming by </span>
+        <CivLabel civ={civ} />
+        <span style={s.dim}> (completes step {terraform.completeStep} My)</span>
+      </Row>
+    );
+  }
+  if (!occupancy) return null;
+  const civ = civById.get(occupancy.civId) ?? null;
+  if (occupancy.type === 'OUTPOST') {
+    return (
+      <Row label="Status">
+        <CivDot civ={civ} />
+        <span>Outpost of </span>
+        <CivLabel civ={civ} />
+        <span style={s.dim}> (since step {occupancy.step} My)</span>
+      </Row>
+    );
+  }
+  if (occupancy.type === 'COLONY') {
+    return (
+      <Row label="Status">
+        <CivDot civ={civ} />
+        <span>Colonised by </span>
+        <CivLabel civ={civ} />
+        <span style={s.dim}> (since step {occupancy.step} My)</span>
+      </Row>
+    );
+  }
+  if (occupancy.type === 'TERRAFORM_COMPLETE') {
+    return (
+      <Row label="Status">
+        <CivDot civ={civ} />
+        <span>Terraformed by </span>
+        <CivLabel civ={civ} />
+        <span style={s.dim}> (since step {occupancy.step} My)</span>
+      </Row>
+    );
+  }
+  // TERRAFORM_START with no in-progress window means the start step is
+  // <= selectedStep but completeStep is also <= selectedStep (shouldn't
+  // happen because TERRAFORM_COMPLETE would have superseded the entry).
+  // Fall back to "Claimed by" rather than rendering nothing.
+  return (
+    <Row label="Status">
+      <CivDot civ={civ} />
+      <span>Claimed by </span>
+      <CivLabel civ={civ} />
+    </Row>
+  );
+}
+
+function CivDot({ civ }: { civ: CivilisationData | null }) {
+  return (
+    <span
+      style={{
+        ...s.civDot,
+        background: civ?.color ?? '#7a82a8',
+      }}
+    />
+  );
+}
+
+function CivLabel({ civ }: { civ: CivilisationData | null }) {
+  if (!civ) return <span>an unknown people</span>;
+  return <strong style={{ color: civ.color }}>{civ.name}</strong>;
 }
 
 // ── Name display helpers ──────────────────────────────────────────────────
@@ -1035,6 +1197,15 @@ const s: Record<string, React.CSSProperties> = {
     color: '#c8a04a',
     fontStyle: 'italic',
     fontSize: 11,
+  },
+  civDot: {
+    display: 'inline-block',
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+    verticalAlign: 'middle',
+    boxShadow: '0 0 4px rgba(0,0,0,0.6)',
   },
   navRow: {
     display: 'flex',

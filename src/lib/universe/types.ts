@@ -187,6 +187,13 @@ export interface UniverseData {
  *   tweaks don't require a separate event type.
  * - `LIFE_ADVANCED` fires each time a body's biosphere clears the 0.07%
  *   advancement roll and steps one tier up.
+ * - `CIV_FOUNDED` fires when a body that has reached `intelligent_animals`
+ *   passes the once-per-step civilisation-spawn roll. The civ's metadata
+ *   (name, flavor, colour) lives in `UniverseHistoryData.civilisations`.
+ * - `OUTPOST_ESTABLISHED`, `COLONY_FOUNDED`, `TERRAFORM_STARTED`,
+ *   `TERRAFORM_COMPLETED` fire per per-civ expansion roll outcome. Targets
+ *   and the body's resulting state live in `occupancyByBody` and
+ *   `terraforms` respectively.
  */
 export interface UniverseLifeAppearedEvent {
   type: 'LIFE_APPEARED';
@@ -205,9 +212,126 @@ export interface UniverseLifeAdvancedEvent {
   toLevel: LifeLevel;
 }
 
+export interface UniverseCivFoundedEvent {
+  type: 'CIV_FOUNDED';
+  step: number;
+  civId: string;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+}
+
+export interface UniverseOutpostEstablishedEvent {
+  type: 'OUTPOST_ESTABLISHED';
+  step: number;
+  civId: string;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+}
+
+export interface UniverseColonyFoundedEvent {
+  type: 'COLONY_FOUNDED';
+  step: number;
+  civId: string;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+}
+
+export interface UniverseTerraformStartedEvent {
+  type: 'TERRAFORM_STARTED';
+  step: number;
+  civId: string;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+  /** Step at which the body will flip into its new habitable state. */
+  completeStep: number;
+}
+
+export interface UniverseTerraformCompletedEvent {
+  type: 'TERRAFORM_COMPLETED';
+  step: number;
+  civId: string;
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+  newBiome: PlanetBiome;
+}
+
 export type UniverseHistoryEvent =
   | UniverseLifeAppearedEvent
-  | UniverseLifeAdvancedEvent;
+  | UniverseLifeAdvancedEvent
+  | UniverseCivFoundedEvent
+  | UniverseOutpostEstablishedEvent
+  | UniverseColonyFoundedEvent
+  | UniverseTerraformStartedEvent
+  | UniverseTerraformCompletedEvent;
+
+/**
+ * Naming + event-copy flavor for a civilisation. Rolled deterministically
+ * per-civ on `${seed}_civflavor_${civId}` so each universe ends up with a
+ * mix of hard-SF, space-opera, and fantasy civs.
+ */
+export type CivFlavor = 'hardSF' | 'spaceOpera' | 'fantasy';
+
+/**
+ * Civilisation metadata. Civilisations spawn on bodies that have reached
+ * `intelligent_animals` and then attempt yearly expansion via outposts,
+ * colonies, and terraforming. Lightweight: no tech state, no inter-civ
+ * politics. Holdings are recovered by walking `occupancyByBody`.
+ */
+export interface CivilisationData {
+  id: string;
+  name: string;
+  flavor: CivFlavor;
+  /** Origin body id (planet or satellite). */
+  originBodyId: string;
+  originBodyKind: 'planet' | 'satellite';
+  /** Step at which the founding roll succeeded. */
+  foundedStep: number;
+  /** Hex colour drawn from a fixed 24-entry palette. */
+  color: string;
+}
+
+/**
+ * Per-body occupancy record. Each entry is one civilisation action against
+ * the body in the order it happened. The "current" occupancy at any step T
+ * is the last entry with `step <= T` whose type is not
+ * `TERRAFORM_START` (a terraform-start is informational; the body remains
+ * lifeless and uncolonised until the matching `TERRAFORM_COMPLETE` lands).
+ */
+export interface BodyOccupancyEntry {
+  step: number;
+  type: 'OUTPOST' | 'COLONY' | 'TERRAFORM_START' | 'TERRAFORM_COMPLETE';
+  civId: string;
+}
+
+/**
+ * Result of a successful terraforming operation. Stored on the history
+ * record (not mutated onto the body) so timeline scrubbing can reveal the
+ * before/after state. The worker also applies these fields to the body's
+ * in-memory `PlanetData` / `SatelliteData` at the completion step so
+ * downstream consumers (e.g. the world-map hand-off when the user opens
+ * the body at end-of-time) see the terraformed values.
+ */
+export interface TerraformResult {
+  bodyKind: 'planet' | 'satellite';
+  bodyId: string;
+  civId: string;
+  startStep: number;
+  completeStep: number;
+  newBiome: PlanetBiome;
+  newSubtype: PlanetSubtype | SatelliteSubtype;
+  /** New composition; for terraformed ice satellites flips to 'ROCK'. */
+  newComposition: 'ROCK';
+  /** Always `'unicellular'` — terraforming seeds primitive life; the body
+   *  then climbs the regular life-advancement ladder from the completion
+   *  step onward via its existing `${seed}_lifeevolution_<id>` stream. */
+  newLifeLevel: LifeLevel;
+  /** Pre-terraform body fields, captured at `startStep`. Used by the UI +
+   *  world-map hand-off to render the body's correct visual when the
+   *  scrubber is at a step before completion. */
+  originalBiome: PlanetBiome | undefined;
+  originalSubtype: PlanetSubtype | SatelliteSubtype;
+  originalComposition: PlanetComposition | SatelliteComposition;
+}
 
 /**
  * Chronological per-body progression: `lifeAdvancesByBody[bodyId]` is the
@@ -225,6 +349,21 @@ export interface UniverseHistoryData {
   events: UniverseHistoryEvent[];
   /** bodyId → chronological list of life-stage entries. */
   lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]>;
+  /** Every civilisation that spawned during the simulation, in
+   *  foundation-step order. Empty when no body ever reached
+   *  `intelligent_animals` (or when none passed the per-step
+   *  `${seed}_civorigin_<id>` gate). */
+  civilisations: CivilisationData[];
+  /** bodyId → chronological list of occupancy entries. Each entry records
+   *  one civilisation's action against the body. To find "who holds this
+   *  body at step T", scan entries with `step <= T` and pick the latest
+   *  non-`TERRAFORM_START` entry. */
+  occupancyByBody: Record<string, BodyOccupancyEntry[]>;
+  /** Every terraforming operation that started during the simulation, in
+   *  start-step order. Used by the timeline scrubber to render
+   *  "terraforming in progress" between `startStep` and `completeStep`,
+   *  and by the world-map hand-off to surface the post-terraform biome. */
+  terraforms: TerraformResult[];
 }
 
 /** Worker request — universe pipeline mirrors the planet `WorkerMessage` schema. */
