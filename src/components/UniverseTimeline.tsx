@@ -60,6 +60,28 @@ export function UniverseTimeline({ history, selectedStep, onStepChange }: Univer
   const lifeBodyCount = Object.keys(history.lifeAdvancesByBody).length;
   const eventsSoFar = history.events.reduce((n, e) => (e.step <= selectedStep ? n + 1 : n), 0);
 
+  // Civ stats at the selected step. Walk events once; cheap even for huge
+  // simulations since the events list is already bounded by step cadence.
+  const civStats = (() => {
+    let civsFounded = 0;
+    let outposts = 0;
+    let colonies = 0;
+    let terraformsInProgress = 0;
+    let terraformsCompleted = 0;
+    for (const e of history.events) {
+      if (e.step > selectedStep) break;
+      if (e.type === 'CIV_FOUNDED') civsFounded += 1;
+      else if (e.type === 'OUTPOST_ESTABLISHED') outposts += 1;
+      else if (e.type === 'COLONY_FOUNDED') colonies += 1;
+      else if (e.type === 'TERRAFORM_STARTED') terraformsInProgress += 1;
+      else if (e.type === 'TERRAFORM_COMPLETED') {
+        terraformsInProgress -= 1;
+        terraformsCompleted += 1;
+      }
+    }
+    return { civsFounded, outposts, colonies, terraformsInProgress, terraformsCompleted };
+  })();
+
   return (
     <Draggable
       defaultPosition={{ bottom: 16, left: '50%' }}
@@ -73,6 +95,23 @@ export function UniverseTimeline({ history, selectedStep, onStepChange }: Univer
             {formatStepLabel(selectedStep, history.numSteps)} &middot; {eventsSoFar} event{eventsSoFar === 1 ? '' : 's'} &middot; {lifeBodyCount} living world{lifeBodyCount === 1 ? '' : 's'}
           </span>
         </div>
+        {civStats.civsFounded > 0 && (
+          <div style={styles.civStats}>
+            <span>{civStats.civsFounded} civilisation{civStats.civsFounded === 1 ? '' : 's'}</span>
+            <span>&middot;</span>
+            <span>{civStats.outposts} outpost{civStats.outposts === 1 ? '' : 's'}</span>
+            <span>&middot;</span>
+            <span>{civStats.colonies} colon{civStats.colonies === 1 ? 'y' : 'ies'}</span>
+            <span>&middot;</span>
+            <span>{civStats.terraformsCompleted} terraformed</span>
+            {civStats.terraformsInProgress > 0 && (
+              <>
+                <span>&middot;</span>
+                <span>{civStats.terraformsInProgress} in progress</span>
+              </>
+            )}
+          </div>
+        )}
 
         <div style={styles.sliderRow}>
           <span style={styles.stepLabel}>0 My</span>
@@ -143,6 +182,14 @@ const styles: Record<string, React.CSSProperties> = {
     color: '#a0a8d0',
     flex: 1,
     textAlign: 'center',
+  },
+  civStats: {
+    display: 'flex',
+    gap: 6,
+    justifyContent: 'center',
+    fontSize: 11,
+    color: '#a0a8d0',
+    flexWrap: 'wrap',
   },
   sliderRow: {
     display: 'flex',

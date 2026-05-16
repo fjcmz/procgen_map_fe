@@ -11,8 +11,9 @@ import { LandingScreen } from './components/LandingScreen';
 import { UniverseScreen } from './components/UniverseScreen';
 import { getOwnershipAtYear, getExpansionFlagsAtYear, getEmpiresAtYear } from './lib/history';
 import { exportWorld } from './lib/export/exportWorld';
-import type { UniverseData, PlanetData, SatelliteData, SolarSystemData, LifeLevel } from './lib/universe/types';
+import type { UniverseData, PlanetData, SatelliteData, SolarSystemData } from './lib/universe/types';
 import { planetToGenSpec, satelliteToGenSpec } from './lib/universe/bodyToProfile';
+import type { BodyStateAtStep } from './lib/universe/habitability';
 
 const DEFAULT_SEED = 'fantasy';
 const DEFAULT_CELLS = 100000;
@@ -500,7 +501,7 @@ export default function App() {
    * just sets up the form.
    */
   const handleGenerateWorldFromPlanet = useCallback(
-    (planet: PlanetData, system: SolarSystemData, universe: UniverseData, lifeLevelAtStep: LifeLevel | undefined) => {
+    (planet: PlanetData, system: SolarSystemData, universe: UniverseData, stateAtStep: BodyStateAtStep) => {
       // Tear down any previous world state so the new screen starts clean.
       workerRef.current?.terminate();
       workerRef.current = null;
@@ -514,21 +515,22 @@ export default function App() {
       // Isolated PRNG sub-stream — same convention as the existing
       // `_racebias_<id>` / `_chars_<cellIndex>` streams in the codebase.
       const planetSeed = `${universe.seed}_${planet.id}`;
-      // Body's serialized `.lifeLevel` reflects end-of-time when history is
-      // on, but the user may have scrubbed back to before life appeared (or
-      // before it reached intelligent_animals) — pass a patched view so
-      // `planetToGenSpec` picks the rocky-no-life branch (or disables
-      // civilizational history) at earlier steps.
-      const stepBody: PlanetData = lifeLevelAtStep === planet.lifeLevel
-        ? planet
-        : {
-            ...planet,
-            life: lifeLevelAtStep !== undefined,
-            lifeLevel: lifeLevelAtStep,
-            biome: lifeLevelAtStep !== undefined ? planet.biome : undefined,
-          };
+      // Body's serialised fields reflect end-of-time when history is on.
+      // `getBodyStateAtStep` rolls back terraforms that haven't completed
+      // yet at the selected step, so `planetToGenSpec` sees the body as it
+      // was AT the scrubber's position — lifeless lava world before
+      // terraform start, in-progress between start and complete (still
+      // lifeless), and habitable post-completion.
+      const stepBody: PlanetData = {
+        ...planet,
+        life: stateAtStep.life,
+        lifeLevel: stateAtStep.lifeLevel,
+        biome: stateAtStep.biome,
+        subtype: stateAtStep.subtype as PlanetData['subtype'],
+        composition: stateAtStep.composition as PlanetData['composition'],
+      };
       const spec = planetToGenSpec(stepBody);
-      const isLifeBody = lifeLevelAtStep !== undefined;
+      const isLifeBody = stateAtStep.life;
 
       setSeed(planetSeed);
       setNumCells(cellCountForPlanetRadius(planet.radius));
@@ -562,7 +564,7 @@ export default function App() {
   );
 
   const handleGenerateWorldFromSatellite = useCallback(
-    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData, lifeLevelAtStep: LifeLevel | undefined) => {
+    (satellite: SatelliteData, planet: PlanetData, system: SolarSystemData, universe: UniverseData, stateAtStep: BodyStateAtStep) => {
       workerRef.current?.terminate();
       workerRef.current = null;
       setMapData(null);
@@ -573,16 +575,16 @@ export default function App() {
       setGenerating(false);
 
       const satelliteSeed = `${universe.seed}_${satellite.id}`;
-      const stepSat: SatelliteData = lifeLevelAtStep === satellite.lifeLevel
-        ? satellite
-        : {
-            ...satellite,
-            life: lifeLevelAtStep !== undefined,
-            lifeLevel: lifeLevelAtStep,
-            biome: lifeLevelAtStep !== undefined ? satellite.biome : undefined,
-          };
+      const stepSat: SatelliteData = {
+        ...satellite,
+        life: stateAtStep.life,
+        lifeLevel: stateAtStep.lifeLevel,
+        biome: stateAtStep.biome,
+        subtype: stateAtStep.subtype as SatelliteData['subtype'],
+        composition: stateAtStep.composition as SatelliteData['composition'],
+      };
       const spec = satelliteToGenSpec(stepSat);
-      const isLifeBody = lifeLevelAtStep !== undefined;
+      const isLifeBody = stateAtStep.life;
 
       setSeed(satelliteSeed);
       setNumCells(cellCountForPlanetRadius(satellite.radius));

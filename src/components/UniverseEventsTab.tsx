@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type {
+  CivilisationData,
   UniverseData,
   UniverseHistoryEvent,
   PlanetData,
@@ -46,6 +47,14 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
     return m;
   }, [data]);
 
+  const civById = useMemo(() => {
+    const m = new Map<string, CivilisationData>();
+    if (data.history) {
+      for (const c of data.history.civilisations) m.set(c.id, c);
+    }
+    return m;
+  }, [data.history]);
+
   const history = data.history;
   if (!history) {
     return (
@@ -78,6 +87,7 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
             key={`${event.step}-${event.bodyId}-${i}`}
             event={event}
             bodyById={bodyById}
+            civById={civById}
             onSelectBody={onSelectBody}
           />
         ))}
@@ -87,10 +97,11 @@ export function UniverseEventsTab({ data, selectedStep, onSelectBody }: Universe
 }
 
 function EventRow({
-  event, bodyById, onSelectBody,
+  event, bodyById, civById, onSelectBody,
 }: {
   event: UniverseHistoryEvent;
   bodyById: Map<string, BodyLookup>;
+  civById: Map<string, CivilisationData>;
   onSelectBody: (entity: PopupEntity) => void;
 }) {
   const lookup = bodyById.get(event.bodyId);
@@ -105,8 +116,11 @@ function EventRow({
     label = `${satellite.humanName} (moon of ${planet.humanName}, ${system.humanName})`;
     entity = { kind: 'satellite', systemId: system.id, planetId: planet.id, satelliteId: satellite.id };
   }
+  const civ = event.type !== 'LIFE_APPEARED' && event.type !== 'LIFE_ADVANCED'
+    ? civById.get(event.civId) ?? null
+    : null;
   const click = entity ? () => onSelectBody(entity) : undefined;
-  const { icon, text } = formatEvent(event, label);
+  const { icon, text } = formatEvent(event, label, civ);
   return (
     <button
       type="button"
@@ -122,30 +136,85 @@ function EventRow({
   );
 }
 
+function CivName({ civ }: { civ: CivilisationData | null }) {
+  if (!civ) return <strong>an unknown people</strong>;
+  return (
+    <strong style={{ color: civ.color }}>{civ.name}</strong>
+  );
+}
+
 function formatEvent(
   event: UniverseHistoryEvent,
   bodyLabel: string,
+  civ: CivilisationData | null,
 ): { icon: string; text: React.ReactNode } {
-  if (event.type === 'LIFE_APPEARED') {
-    return {
-      icon: '🌱',
-      text: (
-        <>
-          Unicellular life appears on <strong>{bodyLabel}</strong>
-        </>
-      ),
-    };
+  switch (event.type) {
+    case 'LIFE_APPEARED':
+      return {
+        icon: '🌱',
+        text: (
+          <>
+            Unicellular life appears on <strong>{bodyLabel}</strong>
+          </>
+        ),
+      };
+    case 'LIFE_ADVANCED':
+      return {
+        icon: '🧬',
+        text: (
+          <>
+            <strong>{bodyLabel}</strong> evolves to{' '}
+            <strong>{LIFE_LEVEL_LABEL[event.toLevel]}</strong>
+          </>
+        ),
+      };
+    case 'CIV_FOUNDED':
+      return {
+        icon: '✦',
+        text: (
+          <>
+            <CivName civ={civ} /> rises on <strong>{bodyLabel}</strong>
+          </>
+        ),
+      };
+    case 'OUTPOST_ESTABLISHED':
+      return {
+        icon: '◆',
+        text: (
+          <>
+            <CivName civ={civ} /> establishes an outpost on <strong>{bodyLabel}</strong>
+          </>
+        ),
+      };
+    case 'COLONY_FOUNDED':
+      return {
+        icon: '⌂',
+        text: (
+          <>
+            <CivName civ={civ} /> colonises <strong>{bodyLabel}</strong>
+          </>
+        ),
+      };
+    case 'TERRAFORM_STARTED':
+      return {
+        icon: '⚙',
+        text: (
+          <>
+            <CivName civ={civ} /> begins terraforming <strong>{bodyLabel}</strong> (completes step {event.completeStep})
+          </>
+        ),
+      };
+    case 'TERRAFORM_COMPLETED':
+      return {
+        icon: '✿',
+        text: (
+          <>
+            <CivName civ={civ} /> completes terraforming of <strong>{bodyLabel}</strong>{' '}
+            (new biome: <em>{event.newBiome}</em>)
+          </>
+        ),
+      };
   }
-  // LIFE_ADVANCED
-  return {
-    icon: '🧬',
-    text: (
-      <>
-        <strong>{bodyLabel}</strong> evolves to{' '}
-        <strong>{LIFE_LEVEL_LABEL[event.toLevel]}</strong>
-      </>
-    ),
-  };
 }
 
 const styles: Record<string, React.CSSProperties> = {
