@@ -191,6 +191,12 @@ export class CityEntity {
    * only shrink the frontier — so step 4c skips the rebuild entirely.
    */
   frontierExhaustedAtEpoch: number = -1;
+  /**
+   * Lazily-cached "is the founding cell coastal" test (null = not yet
+   * computed). `isCoast` / `isWater` never change after terrain generation,
+   * so the answer is static. Read by CitySettlement's sea-colonisation gate.
+   */
+  cachedIsCoastal: boolean | null = null;
   // Transient
   regionId: string = '';
   contactCities: Set<CityEntity> = new Set();
