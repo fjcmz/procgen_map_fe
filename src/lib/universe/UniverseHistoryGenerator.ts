@@ -25,19 +25,30 @@ const LIFE_ADVANCE_CHANCE_PER_STEP = 0.0007;
  * when the request carries `generateHistory: true`. Each step represents
  * one million years.
  *
- * Per step, on every body in the habitable zone:
+ * On every body in the habitable zone:
  *
- * 1. Until life appears, roll 0.005% per step on the existing
- *    `${seed}_universe_life_${bodyId}` sub-stream. First success seeds the
- *    body with `lifeLevel = 'unicellular'`, picks a biome, and emits a
- *    `LIFE_APPEARED` event.
- * 2. Once life is present and below the terminal level, roll 0.07% per
- *    step on `${seed}_lifeevolution_${bodyId}` to step one tier up the
- *    `LIFE_LEVELS` ladder. Each success emits `LIFE_ADVANCED`.
+ * 1. Life appears with probability 0.005% per step, drawn from the body's
+ *    isolated `${seed}_universe_life_${bodyId}` sub-stream. First success
+ *    seeds the body with `lifeLevel = 'unicellular'`, picks a biome, and
+ *    emits a `LIFE_APPEARED` event.
+ * 2. Once life is present and below the terminal level, it climbs one tier
+ *    up the `LIFE_LEVELS` ladder with probability 0.07% per step, drawn
+ *    from `${seed}_lifeevolution_${bodyId}`. Each success emits
+ *    `LIFE_ADVANCED`.
  *
- * After the per-body life rolls, the **civilisation expansion** passes run:
+ * Both are implemented by **geometric sampling**, not per-step Bernoulli
+ * rolls: each draw directly yields the step of the next success
+ * (`stepsUntilSuccess`), and bodies sit in a per-step event schedule until
+ * then. This is distribution-identical to rolling every step but costs
+ * O(events) instead of O(bodies × steps) — the per-step roll loop was the
+ * dominant cost of the whole simulation (~880M draws at 10K systems). It
+ * consumes the per-body sub-streams differently, so same-seed histories
+ * changed once when this landed (a deliberate perf trade-off; the universe
+ * layer is not covered by the sweep harness).
  *
- * 3. Every body that just hit `intelligent_animals` rolls its civ-founding
+ * The per-step **civilisation expansion** passes:
+ *
+ * 3. Every body that has hit `intelligent_animals` rolls its civ-founding
  *    gate on `${seed}_civorigin_${bodyId}` once per step until it spawns
  *    (or the simulation ends, or `MAX_CIVS_PER_UNIVERSE` is reached).
  * 4. Every founded civ rolls one expansion attempt on
@@ -48,11 +59,6 @@ const LIFE_ADVANCE_CHANCE_PER_STEP = 0.0007;
  * 5. Any terraforms whose `completeStep === step` flip their body's
  *    composition / subtype / biome / life state — the world-map hand-off
  *    sees the new biome at step >= completeStep.
- *
- * Splitting every new roll onto isolated sub-streams keeps the original
- * `_universe_life_*` / `_lifeevolution_*` consumption unchanged, so seeds
- * that produce zero civilisation activity stay byte-identical to the
- * pre-feature output.
  */
 function pickBiome(rng: () => number): PlanetBiome {
   const r = rng();
@@ -86,15 +92,41 @@ function nextLifeLevel(current: LifeLevel): LifeLevel | null {
 }
 
 /**
- * Per-body life-roll state. Cached for the duration of the simulation so
- * each body's `appearanceRng` / `advanceRng` consume their sub-stream in
- * the same order as the pre-refactor per-body loop did.
+ * Number of failed per-step Bernoulli(p) trials before the first success,
+ * sampled directly from the geometric distribution: a body whose "first
+ * trial" happens at step S succeeds at step `S + stepsUntilSuccess(u, p)`.
+ * `u` comes from the body's isolated PRNG sub-stream, so one draw replaces
+ * the entire run of per-step rolls. `u ∈ [0, 1)` ⇒ `1 - u ∈ (0, 1]` ⇒ the
+ * result is a finite integer ≥ 0 (possibly far beyond the simulation
+ * horizon, in which case the event is simply never scheduled).
+ */
+function stepsUntilSuccess(u: number, p: number): number {
+  return Math.floor(Math.log(1 - u) / Math.log(1 - p));
+}
+
+/**
+ * Per-body life-roll state, driven by the per-step event schedule: at any
+ * time a body has at most one pending scheduled event (life appearance or
+ * the next advancement), identified by `scheduleToken`.
  */
 interface PerBodyLifeState {
   body: Planet | Satellite;
   kind: 'planet' | 'satellite';
-  appearanceRng: () => number;
-  advanceRng: () => number;
+  /** Position in the canonical `lifeStates` registration order. Used to
+   *  keep the intelligent-body founding list in canonical order. */
+  orderIdx: number;
+  /** Appearance stream — consumed once for the geometric appearance sample
+   *  and once more for the biome pick when life actually appears. */
+  appearanceRng: (() => number) | undefined;
+  /** Advance stream, created lazily on the first advancement sample — most
+   *  bodies never develop life, so eagerly hashing a sub-stream seed string
+   *  per habitable body is wasted work. The stream is isolated per body, so
+   *  creation timing doesn't affect its output. */
+  advanceRng: (() => number) | undefined;
+  /** Bumped on every (re)schedule or cancellation. A schedule-bucket entry
+   *  is live iff its token still matches — this is how a pending appearance
+   *  gets cancelled when a terraform completes on the body first. */
+  scheduleToken: number;
   currentLevel: LifeLevel | undefined;
   done: boolean;
   entries: LifeAdvanceEntry[];
@@ -107,27 +139,45 @@ interface PerBodyLifeState {
   civOriginRng: (() => number) | undefined;
 }
 
+/** One pending life event in the per-step schedule. */
+interface ScheduledLifeEvent {
+  ls: PerBodyLifeState;
+  token: number;
+}
+
 export class UniverseHistoryGenerator {
-  generate(universe: Universe, seed: string, numSteps: number): UniverseHistoryData {
+  generate(
+    universe: Universe,
+    seed: string,
+    numSteps: number,
+    onProgress?: (fraction: number) => void,
+  ): UniverseHistoryData {
     const events: UniverseHistoryEvent[] = [];
     const lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]> = {};
 
     // Build per-body life state in canonical generation order (system,
     // planet, satellites). Iteration order matters for event order within
-    // a step — the final stable sort by step preserves "planet first, then
-    // its moons" within ties.
+    // a step — "planet first, then its moons" within a step follows from
+    // walking `lifeStates` in registration order.
     const lifeStates: PerBodyLifeState[] = [];
+    const lifeStateByBodyId = new Map<string, PerBodyLifeState>();
+    const registerLifeState = (ls: PerBodyLifeState): void => {
+      lifeStates.push(ls);
+      lifeStateByBodyId.set(ls.body.id, ls);
+    };
     const planetRegistry = new Map<string, Planet>();
     const satelliteRegistry = new Map<string, Satellite>();
     for (const ss of universe.solarSystems) {
       for (const planet of ss.planets) {
         planetRegistry.set(planet.id, planet);
         if (isPlanetHabitable(planet)) {
-          lifeStates.push({
+          registerLifeState({
             body: planet,
             kind: 'planet',
-            appearanceRng: seededPRNG(`${seed}_universe_life_${planet.id}`),
-            advanceRng: seededPRNG(`${seed}_lifeevolution_${planet.id}`),
+            orderIdx: lifeStates.length,
+            appearanceRng: undefined,
+            advanceRng: undefined,
+            scheduleToken: 0,
             currentLevel: undefined,
             done: false,
             entries: [],
@@ -138,11 +188,13 @@ export class UniverseHistoryGenerator {
         for (const sat of planet.satellites) {
           satelliteRegistry.set(sat.id, sat);
           if (isSatelliteHabitable(sat, planet)) {
-            lifeStates.push({
+            registerLifeState({
               body: sat,
               kind: 'satellite',
-              appearanceRng: seededPRNG(`${seed}_universe_life_${sat.id}`),
-              advanceRng: seededPRNG(`${seed}_lifeevolution_${sat.id}`),
+              orderIdx: lifeStates.length,
+              appearanceRng: undefined,
+              advanceRng: undefined,
+              scheduleToken: 0,
               currentLevel: undefined,
               done: false,
               entries: [],
@@ -163,28 +215,148 @@ export class UniverseHistoryGenerator {
     const snapshot = buildUniverseSnapshot(universe);
     const civCtx = civilisationGenerator.initContext(seed, snapshot);
 
+    // Bodies at `intelligent_animals` that haven't founded a civ yet, kept
+    // sorted by `orderIdx` so the founding pass visits them in the same
+    // canonical order as the old full `lifeStates` walk. Tiny in practice
+    // (reaching intelligence takes 4 advance rolls at 0.07%/step), which is
+    // the point — the founding pass no longer scans every habitable body.
+    const intelligentPending: PerBodyLifeState[] = [];
+    const markIntelligent = (ls: PerBodyLifeState, step: number): void => {
+      ls.intelligentSinceStep = step;
+      let lo = 0;
+      let hi = intelligentPending.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (intelligentPending[mid].orderIdx < ls.orderIdx) lo = mid + 1;
+        else hi = mid;
+      }
+      intelligentPending.splice(lo, 0, ls);
+    };
+
+    // ── Life-event schedule ──────────────────────────────────────────────
+    // schedule[s] holds the bodies whose next life event (appearance or
+    // advancement) falls on step s. Entries whose token no longer matches
+    // the body's `scheduleToken` are stale — the body was rescheduled by a
+    // terraform completion in the meantime — and are skipped.
+    const schedule: Array<ScheduledLifeEvent[] | undefined> = new Array(numSteps);
+    const scheduleAt = (ls: PerBodyLifeState, step: number): void => {
+      // Bump the token even when the event falls beyond the horizon, so an
+      // out-of-range reschedule still cancels any pending in-range event.
+      ls.scheduleToken++;
+      if (step >= numSteps) return;
+      let bucket = schedule[step];
+      if (!bucket) {
+        bucket = [];
+        schedule[step] = bucket;
+      }
+      bucket.push({ ls, token: ls.scheduleToken });
+    };
+
+    // Sample the gap to the body's next advancement and schedule it. A body
+    // that reached its current level during step s makes its first
+    // advancement roll at step s+1, hence the +1.
+    const scheduleNextAdvance = (ls: PerBodyLifeState, step: number): void => {
+      const next = ls.currentLevel !== undefined ? nextLifeLevel(ls.currentLevel) : null;
+      if (!next) {
+        ls.done = true;
+        ls.scheduleToken++; // terminal — cancel any pending event
+        return;
+      }
+      ls.done = false;
+      if (!ls.advanceRng) {
+        ls.advanceRng = seededPRNG(`${seed}_lifeevolution_${ls.body.id}`);
+      }
+      scheduleAt(ls, step + 1 + stepsUntilSuccess(ls.advanceRng(), LIFE_ADVANCE_CHANCE_PER_STEP));
+    };
+
+    const applyLifeAppeared = (ls: PerBodyLifeState, step: number): void => {
+      const biome = pickBiome(ls.appearanceRng!);
+      // Mutate the runtime entity so subsequent biome-driven logic + the
+      // serialiser see the new state. The `Planet` and `Satellite` shapes
+      // both carry these fields.
+      if (ls.kind === 'planet') {
+        const p = ls.body as Planet;
+        p.life = true;
+        p.biome = biome;
+        p.subtype = PLANET_BIOME_TO_SUBTYPE[biome];
+      } else {
+        const s = ls.body as Satellite;
+        s.life = true;
+        s.biome = biome;
+        s.subtype = satelliteSubtypeForBiome(biome);
+      }
+      ls.currentLevel = 'unicellular';
+      ls.body.lifeLevel = ls.currentLevel;
+      ls.entries.push({ step, level: ls.currentLevel });
+      events.push({
+        type: 'LIFE_APPEARED',
+        step,
+        bodyKind: ls.kind,
+        bodyId: ls.body.id,
+        level: 'unicellular',
+      });
+      scheduleNextAdvance(ls, step);
+    };
+
+    const applyLifeAdvanced = (ls: PerBodyLifeState, step: number): void => {
+      const fromLevel = ls.currentLevel;
+      const next = fromLevel !== undefined ? nextLifeLevel(fromLevel) : null;
+      if (fromLevel === undefined || !next) {
+        ls.done = true;
+        return;
+      }
+      ls.currentLevel = next;
+      ls.body.lifeLevel = next;
+      ls.entries.push({ step, level: next });
+      events.push({
+        type: 'LIFE_ADVANCED',
+        step,
+        bodyKind: ls.kind,
+        bodyId: ls.body.id,
+        fromLevel,
+        toLevel: next,
+      });
+      // Track the step at which intelligence first appears so civ founding
+      // can fire on the same step.
+      if (next === 'intelligent_animals' && ls.intelligentSinceStep === undefined) {
+        markIntelligent(ls, step);
+      }
+      scheduleNextAdvance(ls, step);
+    };
+
+    // Seed the schedule with every body's sampled life-appearance step, in
+    // canonical registration order so same-step appearances fire in
+    // canonical order. Most bodies sample a step beyond the horizon and are
+    // never touched again.
+    for (const ls of lifeStates) {
+      ls.appearanceRng = seededPRNG(`${seed}_universe_life_${ls.body.id}`);
+      scheduleAt(ls, stepsUntilSuccess(ls.appearanceRng(), LIFE_CHANCE_PER_STEP));
+    }
+
     for (let step = 0; step < numSteps; step++) {
-      // 1+2. Per-body life rolls (preserves the pre-refactor draw order
-      // because each body's PRNG sub-stream is isolated; the only
-      // observable change is that events are emitted interleaved across
-      // bodies, then re-sorted by `step` at the end).
-      for (const ls of lifeStates) {
-        if (ls.done) continue;
-        rollLifeStep(ls, step, events);
-        // Track the step at which intelligence first appears so civ
-        // founding can fire on the same step. (Could also wait one step;
-        // immediate is simpler and the rate is gated separately anyway.)
-        if (ls.currentLevel === 'intelligent_animals' && ls.intelligentSinceStep === undefined) {
-          ls.intelligentSinceStep = step;
+      if (onProgress && step % 100 === 0) onProgress(step / numSteps);
+
+      // 1+2. Apply the life events due this step. A live entry's kind is
+      // implied by the body's current state — no life yet means appearance,
+      // otherwise the next advancement (any state change in between would
+      // have bumped the token and invalidated the entry).
+      const due = schedule[step];
+      if (due) {
+        schedule[step] = undefined;
+        for (const entry of due) {
+          if (entry.token !== entry.ls.scheduleToken) continue;
+          if (entry.ls.currentLevel === undefined) applyLifeAppeared(entry.ls, step);
+          else applyLifeAdvanced(entry.ls, step);
         }
       }
 
-      // 3. Civilisation founding pass — one roll per body per step on the
-      // body's lazy civ-origin PRNG. The same per-body order as the life
-      // pass keeps event emission stable.
-      for (const ls of lifeStates) {
-        if (ls.intelligentSinceStep === undefined) continue;
-        if (civCtx.civOriginBodyIds.has(ls.body.id)) continue;
+      // 3. Civilisation founding pass — one roll per intelligent body per
+      // step on the body's lazy civ-origin PRNG. Canonical (orderIdx) order
+      // keeps event emission stable. Founders are removed from the pending
+      // list; `tryFoundCiv` still gates the MAX_CIVS cap internally without
+      // consuming a draw, matching the old per-body behavior exactly.
+      for (let i = 0; i < intelligentPending.length; i++) {
+        const ls = intelligentPending[i];
         if (!ls.civOriginRng) {
           ls.civOriginRng = seededPRNG(`${seed}_civorigin_${ls.body.id}`);
         }
@@ -195,7 +367,11 @@ export class UniverseHistoryGenerator {
           step,
           ls.civOriginRng,
         );
-        if (evt) events.push(evt);
+        if (evt) {
+          events.push(evt);
+          intelligentPending.splice(i, 1);
+          i--;
+        }
       }
 
       // 4. Per-civ expansion. Walk in foundation order so event emission
@@ -229,32 +405,37 @@ export class UniverseHistoryGenerator {
       // lets terraformed bodies climb the life ladder normally.
       for (const evt of completions) {
         if (evt.type !== 'TERRAFORM_COMPLETED') continue;
-        const existing = lifeStates.find(ls => ls.body.id === evt.bodyId);
+        const existing = lifeStateByBodyId.get(evt.bodyId);
         if (existing) {
           existing.currentLevel = 'unicellular';
-          existing.done = false;
           existing.entries.push({ step, level: 'unicellular' });
+          // Rescheduling also cancels a still-pending natural-appearance
+          // event via the token bump.
+          scheduleNextAdvance(existing, step);
         } else {
           // Body wasn't habitable originally — start it tracking life
           // advances from the completion step onward. Sub-streams are the
           // same as for natively habitable bodies; existing seeds never
-          // consumed these for this body, so byte-stability is preserved
-          // (the sub-stream is brand new for this body).
+          // consumed these for this body, so the new stream is unentangled.
           const body = evt.bodyKind === 'planet'
             ? planetRegistry.get(evt.bodyId)
             : satelliteRegistry.get(evt.bodyId);
           if (body) {
-            lifeStates.push({
+            const ls: PerBodyLifeState = {
               body,
               kind: evt.bodyKind,
-              appearanceRng: seededPRNG(`${seed}_universe_life_${evt.bodyId}`),
-              advanceRng: seededPRNG(`${seed}_lifeevolution_${evt.bodyId}`),
+              orderIdx: lifeStates.length,
+              appearanceRng: undefined,
+              advanceRng: undefined,
+              scheduleToken: 0,
               currentLevel: 'unicellular',
               done: false,
               entries: [{ step, level: 'unicellular' }],
               intelligentSinceStep: undefined,
               civOriginRng: undefined,
-            });
+            };
+            registerLifeState(ls);
+            scheduleNextAdvance(ls, step);
           }
         }
       }
@@ -275,10 +456,10 @@ export class UniverseHistoryGenerator {
       }
     }
 
-    // Per-step iteration emits events grouped within a step; sort by step
-    // so the event log reads chronologically. Stable sort preserves
-    // intra-step "planet first, then satellites, then civs" ordering.
-    events.sort((a, b) => a.step - b.step);
+    // No sort needed: the per-step outer loop emits events in
+    // non-decreasing step order already (every push within an iteration
+    // uses the current `step`), and intra-step ordering follows the pass
+    // order (life → founding → expansion → terraform completion).
 
     return {
       numSteps,
@@ -288,62 +469,6 @@ export class UniverseHistoryGenerator {
       occupancyByBody: civCtx.occupancyByBody,
       terraforms: civCtx.terraforms,
     };
-  }
-}
-
-function rollLifeStep(
-  ls: PerBodyLifeState,
-  step: number,
-  events: UniverseHistoryEvent[],
-): void {
-  if (ls.currentLevel === undefined) {
-    if (ls.appearanceRng() < LIFE_CHANCE_PER_STEP) {
-      const biome = pickBiome(ls.appearanceRng);
-      // Mutate the runtime entity so subsequent biome-driven logic + the
-      // serialiser see the new state. The `Planet` and `Satellite`
-      // shapes both carry these fields.
-      if (ls.kind === 'planet') {
-        const p = ls.body as Planet;
-        p.life = true;
-        p.biome = biome;
-        p.subtype = PLANET_BIOME_TO_SUBTYPE[biome];
-      } else {
-        const s = ls.body as Satellite;
-        s.life = true;
-        s.biome = biome;
-        s.subtype = satelliteSubtypeForBiome(biome);
-      }
-      ls.currentLevel = 'unicellular';
-      (ls.body as Planet | Satellite).lifeLevel = ls.currentLevel;
-      ls.entries.push({ step, level: ls.currentLevel });
-      events.push({
-        type: 'LIFE_APPEARED',
-        step,
-        bodyKind: ls.kind,
-        bodyId: ls.body.id,
-        level: 'unicellular',
-      });
-    }
-    return;
-  }
-  const next = nextLifeLevel(ls.currentLevel);
-  if (!next) {
-    ls.done = true;
-    return;
-  }
-  if (ls.advanceRng() < LIFE_ADVANCE_CHANCE_PER_STEP) {
-    const fromLevel = ls.currentLevel;
-    ls.currentLevel = next;
-    (ls.body as Planet | Satellite).lifeLevel = ls.currentLevel;
-    ls.entries.push({ step, level: ls.currentLevel });
-    events.push({
-      type: 'LIFE_ADVANCED',
-      step,
-      bodyKind: ls.kind,
-      bodyId: ls.body.id,
-      fromLevel,
-      toLevel: ls.currentLevel,
-    });
   }
 }
 
