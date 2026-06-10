@@ -93,8 +93,16 @@ function nextLifeLevel(current: LifeLevel): LifeLevel | null {
 interface PerBodyLifeState {
   body: Planet | Satellite;
   kind: 'planet' | 'satellite';
-  appearanceRng: () => number;
-  advanceRng: () => number;
+  /** Position in the canonical `lifeStates` registration order. Used to
+   *  keep the intelligent-body founding list in canonical order so event
+   *  emission matches the old full-array walk. */
+  orderIdx: number;
+  /** Appearance / advance PRNGs are created lazily on first draw — most
+   *  bodies never develop life, so eagerly hashing two sub-stream seed
+   *  strings per habitable body is wasted work. The streams themselves are
+   *  isolated per body, so creation timing doesn't affect their output. */
+  appearanceRng: (() => number) | undefined;
+  advanceRng: (() => number) | undefined;
   currentLevel: LifeLevel | undefined;
   done: boolean;
   entries: LifeAdvanceEntry[];
@@ -108,26 +116,37 @@ interface PerBodyLifeState {
 }
 
 export class UniverseHistoryGenerator {
-  generate(universe: Universe, seed: string, numSteps: number): UniverseHistoryData {
+  generate(
+    universe: Universe,
+    seed: string,
+    numSteps: number,
+    onProgress?: (fraction: number) => void,
+  ): UniverseHistoryData {
     const events: UniverseHistoryEvent[] = [];
     const lifeAdvancesByBody: Record<string, LifeAdvanceEntry[]> = {};
 
     // Build per-body life state in canonical generation order (system,
     // planet, satellites). Iteration order matters for event order within
-    // a step — the final stable sort by step preserves "planet first, then
-    // its moons" within ties.
+    // a step — "planet first, then its moons" within a step follows from
+    // walking `lifeStates` in registration order.
     const lifeStates: PerBodyLifeState[] = [];
+    const lifeStateByBodyId = new Map<string, PerBodyLifeState>();
+    const registerLifeState = (ls: PerBodyLifeState): void => {
+      lifeStates.push(ls);
+      lifeStateByBodyId.set(ls.body.id, ls);
+    };
     const planetRegistry = new Map<string, Planet>();
     const satelliteRegistry = new Map<string, Satellite>();
     for (const ss of universe.solarSystems) {
       for (const planet of ss.planets) {
         planetRegistry.set(planet.id, planet);
         if (isPlanetHabitable(planet)) {
-          lifeStates.push({
+          registerLifeState({
             body: planet,
             kind: 'planet',
-            appearanceRng: seededPRNG(`${seed}_universe_life_${planet.id}`),
-            advanceRng: seededPRNG(`${seed}_lifeevolution_${planet.id}`),
+            orderIdx: lifeStates.length,
+            appearanceRng: undefined,
+            advanceRng: undefined,
             currentLevel: undefined,
             done: false,
             entries: [],
@@ -138,11 +157,12 @@ export class UniverseHistoryGenerator {
         for (const sat of planet.satellites) {
           satelliteRegistry.set(sat.id, sat);
           if (isSatelliteHabitable(sat, planet)) {
-            lifeStates.push({
+            registerLifeState({
               body: sat,
               kind: 'satellite',
-              appearanceRng: seededPRNG(`${seed}_universe_life_${sat.id}`),
-              advanceRng: seededPRNG(`${seed}_lifeevolution_${sat.id}`),
+              orderIdx: lifeStates.length,
+              appearanceRng: undefined,
+              advanceRng: undefined,
               currentLevel: undefined,
               done: false,
               entries: [],
@@ -163,28 +183,47 @@ export class UniverseHistoryGenerator {
     const snapshot = buildUniverseSnapshot(universe);
     const civCtx = civilisationGenerator.initContext(seed, snapshot);
 
+    // Bodies at `intelligent_animals` that haven't founded a civ yet, kept
+    // sorted by `orderIdx` so the founding pass visits them in the same
+    // canonical order as the old full `lifeStates` walk. Tiny in practice
+    // (reaching intelligence takes 4 advance rolls at 0.07%/step), which is
+    // the point — the founding pass no longer scans every habitable body.
+    const intelligentPending: PerBodyLifeState[] = [];
+    const markIntelligent = (ls: PerBodyLifeState, step: number): void => {
+      ls.intelligentSinceStep = step;
+      let lo = 0;
+      let hi = intelligentPending.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (intelligentPending[mid].orderIdx < ls.orderIdx) lo = mid + 1;
+        else hi = mid;
+      }
+      intelligentPending.splice(lo, 0, ls);
+    };
+
     for (let step = 0; step < numSteps; step++) {
+      if (onProgress && step % 100 === 0) onProgress(step / numSteps);
+
       // 1+2. Per-body life rolls (preserves the pre-refactor draw order
-      // because each body's PRNG sub-stream is isolated; the only
-      // observable change is that events are emitted interleaved across
-      // bodies, then re-sorted by `step` at the end).
+      // because each body's PRNG sub-stream is isolated).
       for (const ls of lifeStates) {
         if (ls.done) continue;
-        rollLifeStep(ls, step, events);
+        rollLifeStep(ls, seed, step, events);
         // Track the step at which intelligence first appears so civ
         // founding can fire on the same step. (Could also wait one step;
         // immediate is simpler and the rate is gated separately anyway.)
         if (ls.currentLevel === 'intelligent_animals' && ls.intelligentSinceStep === undefined) {
-          ls.intelligentSinceStep = step;
+          markIntelligent(ls, step);
         }
       }
 
-      // 3. Civilisation founding pass — one roll per body per step on the
-      // body's lazy civ-origin PRNG. The same per-body order as the life
-      // pass keeps event emission stable.
-      for (const ls of lifeStates) {
-        if (ls.intelligentSinceStep === undefined) continue;
-        if (civCtx.civOriginBodyIds.has(ls.body.id)) continue;
+      // 3. Civilisation founding pass — one roll per intelligent body per
+      // step on the body's lazy civ-origin PRNG. Canonical (orderIdx) order
+      // keeps event emission stable. Founders are removed from the pending
+      // list; `tryFoundCiv` still gates the MAX_CIVS cap internally without
+      // consuming a draw, matching the old per-body behavior exactly.
+      for (let i = 0; i < intelligentPending.length; i++) {
+        const ls = intelligentPending[i];
         if (!ls.civOriginRng) {
           ls.civOriginRng = seededPRNG(`${seed}_civorigin_${ls.body.id}`);
         }
@@ -195,7 +234,11 @@ export class UniverseHistoryGenerator {
           step,
           ls.civOriginRng,
         );
-        if (evt) events.push(evt);
+        if (evt) {
+          events.push(evt);
+          intelligentPending.splice(i, 1);
+          i--;
+        }
       }
 
       // 4. Per-civ expansion. Walk in foundation order so event emission
@@ -229,7 +272,7 @@ export class UniverseHistoryGenerator {
       // lets terraformed bodies climb the life ladder normally.
       for (const evt of completions) {
         if (evt.type !== 'TERRAFORM_COMPLETED') continue;
-        const existing = lifeStates.find(ls => ls.body.id === evt.bodyId);
+        const existing = lifeStateByBodyId.get(evt.bodyId);
         if (existing) {
           existing.currentLevel = 'unicellular';
           existing.done = false;
@@ -244,11 +287,12 @@ export class UniverseHistoryGenerator {
             ? planetRegistry.get(evt.bodyId)
             : satelliteRegistry.get(evt.bodyId);
           if (body) {
-            lifeStates.push({
+            registerLifeState({
               body,
               kind: evt.bodyKind,
-              appearanceRng: seededPRNG(`${seed}_universe_life_${evt.bodyId}`),
-              advanceRng: seededPRNG(`${seed}_lifeevolution_${evt.bodyId}`),
+              orderIdx: lifeStates.length,
+              appearanceRng: undefined,
+              advanceRng: undefined,
               currentLevel: 'unicellular',
               done: false,
               entries: [{ step, level: 'unicellular' }],
@@ -275,10 +319,10 @@ export class UniverseHistoryGenerator {
       }
     }
 
-    // Per-step iteration emits events grouped within a step; sort by step
-    // so the event log reads chronologically. Stable sort preserves
-    // intra-step "planet first, then satellites, then civs" ordering.
-    events.sort((a, b) => a.step - b.step);
+    // No sort needed: the per-step outer loop emits events in
+    // non-decreasing step order already (every push within an iteration
+    // uses the current `step`), and intra-step ordering follows the pass
+    // order (life → founding → expansion → terraform completion).
 
     return {
       numSteps,
@@ -293,10 +337,14 @@ export class UniverseHistoryGenerator {
 
 function rollLifeStep(
   ls: PerBodyLifeState,
+  seed: string,
   step: number,
   events: UniverseHistoryEvent[],
 ): void {
   if (ls.currentLevel === undefined) {
+    if (!ls.appearanceRng) {
+      ls.appearanceRng = seededPRNG(`${seed}_universe_life_${ls.body.id}`);
+    }
     if (ls.appearanceRng() < LIFE_CHANCE_PER_STEP) {
       const biome = pickBiome(ls.appearanceRng);
       // Mutate the runtime entity so subsequent biome-driven logic + the
@@ -330,6 +378,9 @@ function rollLifeStep(
   if (!next) {
     ls.done = true;
     return;
+  }
+  if (!ls.advanceRng) {
+    ls.advanceRng = seededPRNG(`${seed}_lifeevolution_${ls.body.id}`);
   }
   if (ls.advanceRng() < LIFE_ADVANCE_CHANCE_PER_STEP) {
     const fromLevel = ls.currentLevel;

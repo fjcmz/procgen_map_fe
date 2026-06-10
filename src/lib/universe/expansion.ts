@@ -1,6 +1,5 @@
 import type {
   BodyOccupancyEntry,
-  CivilisationData,
   GalaxyData,
   PlanetData,
   SatelliteData,
@@ -51,6 +50,15 @@ export interface ExpansionIndex {
   allBodies: BodyRef[];
   /** Universe-wide wormhole id → its parent system id. */
   wormholeToSystem: Map<string, string>;
+  /** Galaxy ids in canonical (snapshot) order. Iterating reachable galaxies
+   *  in this order, then bodies within each galaxy's `allBodies` range,
+   *  reproduces the canonical `allBodies` scan order exactly. */
+  galaxyIdsInOrder: string[];
+  /** Per-galaxy contiguous `[start, end)` range into `allBodies`. Galaxies
+   *  are sequential chunks of the solar-system array (see
+   *  `UniverseGenerator`'s grouping rules), so each galaxy's bodies occupy
+   *  one contiguous run. */
+  galaxyBodyRanges: Map<string, { start: number; end: number }>;
 }
 
 export function buildExpansionIndex(snap: UniverseSnapshot): ExpansionIndex {
@@ -77,36 +85,45 @@ export function buildExpansionIndex(snap: UniverseSnapshot): ExpansionIndex {
     }
     for (const w of sys.wormholes) wormholeToSystem.set(w.id, sys.id);
   }
-  return { bodyById, systemById, systemToGalaxyId, allBodies, wormholeToSystem };
+
+  const galaxyIdsInOrder = snap.galaxies.map(g => g.id);
+  const galaxyBodyRanges = new Map<string, { start: number; end: number }>();
+  let runGalaxyId: string | undefined;
+  let runStart = 0;
+  for (let i = 0; i < allBodies.length; i++) {
+    const gid = systemToGalaxyId.get(allBodies[i].system.id);
+    if (gid === runGalaxyId) continue;
+    if (runGalaxyId !== undefined) galaxyBodyRanges.set(runGalaxyId, { start: runStart, end: i });
+    runGalaxyId = gid;
+    runStart = i;
+  }
+  if (runGalaxyId !== undefined) {
+    galaxyBodyRanges.set(runGalaxyId, { start: runStart, end: allBodies.length });
+  }
+
+  return {
+    bodyById,
+    systemById,
+    systemToGalaxyId,
+    allBodies,
+    wormholeToSystem,
+    galaxyIdsInOrder,
+    galaxyBodyRanges,
+  };
 }
 
 /**
- * Set of held systems + reachable systems for a civ given its current
- * occupancy snapshot. "Held" = civ has the latest non-TERRAFORM_START
- * occupancy entry on at least one body in that system.
+ * Galaxies a civ can expand into, given the set of systems it currently
+ * holds: the home galaxy of every held system, plus the partner galaxy of
+ * any wormhole anchored in a held system. The held-system set itself is
+ * maintained incrementally by `CivilisationGenerator` as occupancy changes
+ * (it used to be recomputed here with a full `allBodies` occupancy scan
+ * per expansion attempt — O(bodies) each time).
  */
-export function computeCivReach(
-  civ: CivilisationData,
-  step: number,
+export function computeReachableGalaxyIds(
+  heldSystemIds: ReadonlySet<string>,
   index: ExpansionIndex,
-  occupancyByBody: Record<string, BodyOccupancyEntry[]>,
-): { heldSystemIds: Set<string>; reachableSystemIds: Set<string> } {
-  const heldSystemIds = new Set<string>();
-
-  // Origin always counts as held even before any expansion lands — a civ
-  // can outpost/colonise from its home planet immediately.
-  const origin = index.bodyById.get(civ.originBodyId);
-  if (origin) heldSystemIds.add(origin.system.id);
-
-  for (const ref of index.allBodies) {
-    const current = currentOccupant(occupancyByBody[ref.body.id], step);
-    if (current === civ.id) heldSystemIds.add(ref.system.id);
-  }
-
-  // Expand to the entire home galaxy of every held system, plus any
-  // partner galaxies reachable through a wormhole anchored in a held
-  // system. We collect galaxy ids first, then materialise their member
-  // systems via systemToGalaxyId.
+): Set<string> {
   const reachableGalaxyIds = new Set<string>();
   for (const sid of heldSystemIds) {
     const gid = index.systemToGalaxyId.get(sid);
@@ -126,12 +143,7 @@ export function computeCivReach(
       if (partnerGalaxyId) reachableGalaxyIds.add(partnerGalaxyId);
     }
   }
-
-  const reachableSystemIds = new Set<string>();
-  for (const [sid, gid] of index.systemToGalaxyId) {
-    if (reachableGalaxyIds.has(gid)) reachableSystemIds.add(sid);
-  }
-  return { heldSystemIds, reachableSystemIds };
+  return reachableGalaxyIds;
 }
 
 /** The current occupant of a body, or `null`. Ignores TERRAFORM_START
@@ -174,14 +186,17 @@ export function latestOccupancyAtStep(
  * Outpost targets are lifeless bodies (any composition) that aren't
  * currently held by another civ. Gas giants count — they're staging posts
  * in the atmosphere for resource extraction.
+ *
+ * `ownerByBody` is the running current-occupant map maintained by
+ * `CivilisationGenerator` — equivalent to `currentOccupant(entries, step)`
+ * at the simulation's current step, without the per-body entry walk.
  */
 export function isOutpostCandidate(
   ref: BodyRef,
-  occupancyByBody: Record<string, BodyOccupancyEntry[]>,
-  step: number,
+  ownerByBody: ReadonlyMap<string, string>,
 ): boolean {
   if (ref.body.life) return false;
-  return currentOccupant(occupancyByBody[ref.body.id], step) === null;
+  return !ownerByBody.has(ref.body.id);
 }
 
 /**
@@ -194,11 +209,10 @@ export function isOutpostCandidate(
  */
 export function isColonyCandidate(
   ref: BodyRef,
-  occupancyByBody: Record<string, BodyOccupancyEntry[]>,
-  step: number,
+  ownerByBody: ReadonlyMap<string, string>,
   civsByOrigin: Set<string>,
 ): boolean {
-  if (currentOccupant(occupancyByBody[ref.body.id], step) !== null) return false;
+  if (ownerByBody.has(ref.body.id)) return false;
   if (civsByOrigin.has(ref.body.id)) return false;
   if (ref.kind === 'planet') {
     if (!isPlanetHabitable(ref.body as PlanetData)) return false;
@@ -218,12 +232,11 @@ export function isColonyCandidate(
  */
 export function isTerraformCandidate(
   ref: BodyRef,
-  occupancyByBody: Record<string, BodyOccupancyEntry[]>,
-  step: number,
+  ownerByBody: ReadonlyMap<string, string>,
   inProgressBodyIds: Set<string>,
 ): boolean {
   if (ref.body.life) return false;
-  if (currentOccupant(occupancyByBody[ref.body.id], step) !== null) return false;
+  if (ownerByBody.has(ref.body.id)) return false;
   if (inProgressBodyIds.has(ref.body.id)) return false;
   if (ref.kind === 'planet') {
     if ((ref.body as PlanetData).composition === 'GAS') return false;
@@ -248,17 +261,20 @@ export function pickWeightedTarget(
   index: ExpansionIndex,
 ): BodyRef | null {
   if (candidates.length === 0) return null;
+  // Weights depend only on the candidate's galaxy, so recompute them on the
+  // fly in both passes instead of materialising a weights array. The
+  // accumulation order is identical, so the float arithmetic (and therefore
+  // the picked index) matches the previous array-based implementation
+  // exactly.
   let totalWeight = 0;
-  const weights: number[] = new Array(candidates.length);
   for (let i = 0; i < candidates.length; i++) {
     const sysGid = index.systemToGalaxyId.get(candidates[i].system.id);
-    const w = sysGid === civHomeGalaxyId ? 1.0 : 0.4;
-    weights[i] = w;
-    totalWeight += w;
+    totalWeight += sysGid === civHomeGalaxyId ? 1.0 : 0.4;
   }
   let pick = rng() * totalWeight;
   for (let i = 0; i < candidates.length; i++) {
-    pick -= weights[i];
+    const sysGid = index.systemToGalaxyId.get(candidates[i].system.id);
+    pick -= sysGid === civHomeGalaxyId ? 1.0 : 0.4;
     if (pick <= 0) return candidates[i];
   }
   return candidates[candidates.length - 1];

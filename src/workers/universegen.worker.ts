@@ -142,8 +142,15 @@ function handleGenerate(req: UniverseGenerateRequest): void {
 
     let history: UniverseHistoryData | undefined;
     if (generateHistory) {
-      post({ type: 'PROGRESS', step: 'Simulating universe history…', pct: 85 });
-      history = universeHistoryGenerator.generate(universe, seed, numHistorySteps);
+      post({ type: 'PROGRESS', step: 'Simulating universe history…', pct: physicsCeil });
+      history = universeHistoryGenerator.generate(universe, seed, numHistorySteps, (fraction) => {
+        // Map [0, 1] history progress onto [physicsCeil, 90] of the bar.
+        const pct = physicsCeil + Math.floor(fraction * (90 - physicsCeil));
+        if (pct > lastReportedPct) {
+          lastReportedPct = pct;
+          post({ type: 'PROGRESS', step: 'Simulating universe history…', pct });
+        }
+      });
     }
 
     post({ type: 'PROGRESS', step: 'Serializing…', pct: 90 });

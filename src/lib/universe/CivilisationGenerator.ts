@@ -14,7 +14,7 @@ import { generateCivName, pickCivFlavor } from './civNames';
 import {
   TERRAFORM_BIOMES,
   buildExpansionIndex,
-  computeCivReach,
+  computeReachableGalaxyIds,
   isColonyCandidate,
   isOutpostCandidate,
   isTerraformCandidate,
@@ -86,6 +86,17 @@ export interface CivRuntime {
   /** Galaxy id the civ's origin sits in. Cached so reach computation
    *  doesn't have to resolve it every step. */
   homeGalaxyId: string;
+  /** System the civ's origin body sits in. Always counts as held, even
+   *  with zero occupancy entries — a civ can expand from home immediately. */
+  originSystemId: string;
+  /** Number of bodies this civ currently occupies, per system. Maintained
+   *  incrementally on every occupancy change so reach never needs the old
+   *  full `allBodies` occupancy scan. A body mid-terraform can be outposted
+   *  by another civ and reclaimed at completion, so per-system counts (not
+   *  just a set) are needed to know when a system is genuinely lost. */
+  systemHoldCounts: Map<string, number>;
+  /** Systems where this civ holds ≥1 body, plus `originSystemId`. */
+  heldSystemIds: Set<string>;
 }
 
 /**
@@ -106,6 +117,16 @@ export interface CivContext {
   /** Body ids that have ever hosted a civ founding — these bodies are off
    *  the colony-candidate list. */
   civOriginBodyIds: Set<string>;
+  /** Running current-occupant map: bodyId → civId of the latest
+   *  non-TERRAFORM_START occupancy entry. Kept in lockstep with
+   *  `occupancyByBody` so candidate predicates and held-system tracking
+   *  read O(1) instead of walking entry arrays. */
+  ownerByBody: Map<string, string>;
+  /** civId → runtime, for held-system bookkeeping on occupancy changes. */
+  runtimeByCivId: Map<string, CivRuntime>;
+  /** Pending terraforms bucketed by `completeStep`, so per-step completion
+   *  doesn't rescan the whole `terraforms` array. */
+  terraformsByCompleteStep: Map<number, TerraformResult[]>;
 }
 
 export class CivilisationGenerator {
@@ -124,6 +145,9 @@ export class CivilisationGenerator {
       terraforms: [],
       terraformInProgress: new Set(),
       civOriginBodyIds: new Set(),
+      ownerByBody: new Map(),
+      runtimeByCivId: new Map(),
+      terraformsByCompleteStep: new Map(),
     };
   }
 
@@ -172,7 +196,16 @@ export class CivilisationGenerator {
       color,
     };
     ctx.civs.push(data);
-    ctx.civRuntimes.push({ data, expandRng, homeGalaxyId });
+    const runtime: CivRuntime = {
+      data,
+      expandRng,
+      homeGalaxyId,
+      originSystemId: ref.system.id,
+      systemHoldCounts: new Map(),
+      heldSystemIds: new Set([ref.system.id]),
+    };
+    ctx.civRuntimes.push(runtime);
+    ctx.runtimeByCivId.set(civId, runtime);
     ctx.civOriginBodyIds.add(body.id);
 
     return {
@@ -203,24 +236,32 @@ export class CivilisationGenerator {
   ): UniverseHistoryEvent | null {
     if (civ.expandRng() >= CIV_EXPAND_CHANCE_PER_STEP) return null;
 
-    const reach = computeCivReach(civ.data, step, ctx.index, ctx.occupancyByBody);
+    const reachableGalaxyIds = computeReachableGalaxyIds(civ.heldSystemIds, ctx.index);
 
     // Bucket roll first so the bucket weight controls how often each kind
     // of action happens irrespective of candidate availability.
     const bucket = pickBucket(civ.expandRng());
 
-    // Collect candidates from `index.allBodies` restricted to reachable
-    // systems. Walking allBodies preserves canonical iteration order so
-    // event emission is deterministic across runs.
+    // Collect candidates from the reachable galaxies' contiguous ranges of
+    // `index.allBodies`. Galaxies are visited in canonical order and each
+    // range preserves canonical body order, so the candidate list is
+    // identical to the old full `allBodies` scan filtered by reachable
+    // system — without touching the (usually vast) unreachable remainder.
     const candidates: BodyRef[] = [];
-    for (const ref of ctx.index.allBodies) {
-      if (!reach.reachableSystemIds.has(ref.system.id)) continue;
-      if (bucket === 'outpost') {
-        if (isOutpostCandidate(ref, ctx.occupancyByBody, step)) candidates.push(ref);
-      } else if (bucket === 'colonise') {
-        if (isColonyCandidate(ref, ctx.occupancyByBody, step, ctx.civOriginBodyIds)) candidates.push(ref);
-      } else {
-        if (isTerraformCandidate(ref, ctx.occupancyByBody, step, ctx.terraformInProgress)) candidates.push(ref);
+    const { allBodies, galaxyIdsInOrder, galaxyBodyRanges } = ctx.index;
+    for (const gid of galaxyIdsInOrder) {
+      if (!reachableGalaxyIds.has(gid)) continue;
+      const range = galaxyBodyRanges.get(gid);
+      if (!range) continue;
+      for (let i = range.start; i < range.end; i++) {
+        const ref = allBodies[i];
+        if (bucket === 'outpost') {
+          if (isOutpostCandidate(ref, ctx.ownerByBody)) candidates.push(ref);
+        } else if (bucket === 'colonise') {
+          if (isColonyCandidate(ref, ctx.ownerByBody, ctx.civOriginBodyIds)) candidates.push(ref);
+        } else {
+          if (isTerraformCandidate(ref, ctx.ownerByBody, ctx.terraformInProgress)) candidates.push(ref);
+        }
       }
     }
 
@@ -229,6 +270,7 @@ export class CivilisationGenerator {
 
     if (bucket === 'outpost') {
       appendOccupancy(ctx, target.body.id, { step, type: 'OUTPOST', civId: civ.data.id });
+      claimBody(ctx, civ.data.id, target.body.id);
       return {
         type: 'OUTPOST_ESTABLISHED',
         step,
@@ -239,6 +281,7 @@ export class CivilisationGenerator {
     }
     if (bucket === 'colonise') {
       appendOccupancy(ctx, target.body.id, { step, type: 'COLONY', civId: civ.data.id });
+      claimBody(ctx, civ.data.id, target.body.id);
       return {
         type: 'COLONY_FOUNDED',
         step,
@@ -259,7 +302,7 @@ export class CivilisationGenerator {
     const newSubtype: PlanetSubtype | SatelliteSubtype = target.kind === 'planet'
       ? TERRAFORM_PLANET_SUBTYPE[newBiome]
       : terraformSatelliteSubtype(newBiome);
-    ctx.terraforms.push({
+    const terraform: TerraformResult = {
       bodyKind: target.kind,
       bodyId: target.body.id,
       civId: civ.data.id,
@@ -272,7 +315,14 @@ export class CivilisationGenerator {
       originalBiome: target.body.biome,
       originalSubtype: target.body.subtype,
       originalComposition: target.body.composition,
-    });
+    };
+    ctx.terraforms.push(terraform);
+    let bucketArr = ctx.terraformsByCompleteStep.get(completeStep);
+    if (!bucketArr) {
+      bucketArr = [];
+      ctx.terraformsByCompleteStep.set(completeStep, bucketArr);
+    }
+    bucketArr.push(terraform);
     ctx.terraformInProgress.add(target.body.id);
     appendOccupancy(ctx, target.body.id, { step, type: 'TERRAFORM_START', civId: civ.data.id });
     // Sanity: registries are passed in so we can apply the body mutation
@@ -303,9 +353,11 @@ export class CivilisationGenerator {
     planetRegistry: Map<string, Planet>,
     satelliteRegistry: Map<string, Satellite>,
   ): UniverseHistoryEvent[] {
+    const pending = ctx.terraformsByCompleteStep.get(step);
+    if (!pending) return [];
+    ctx.terraformsByCompleteStep.delete(step);
     const events: UniverseHistoryEvent[] = [];
-    for (const tf of ctx.terraforms) {
-      if (tf.completeStep !== step) continue;
+    for (const tf of pending) {
       // Mutate runtime entity (for any post-history consumers in-worker).
       if (tf.bodyKind === 'planet') {
         const p = planetRegistry.get(tf.bodyId);
@@ -331,6 +383,7 @@ export class CivilisationGenerator {
         type: 'TERRAFORM_COMPLETE',
         civId: tf.civId,
       });
+      claimBody(ctx, tf.civId, tf.bodyId);
       ctx.terraformInProgress.delete(tf.bodyId);
       events.push({
         type: 'TERRAFORM_COMPLETED',
@@ -352,6 +405,42 @@ function appendOccupancy(ctx: CivContext, bodyId: string, entry: BodyOccupancyEn
     ctx.occupancyByBody[bodyId] = arr;
   }
   arr.push(entry);
+}
+
+/**
+ * Record `civId` as the body's current occupant and update both civs'
+ * held-system bookkeeping. Called for every owner-setting occupancy entry
+ * (OUTPOST / COLONY / TERRAFORM_COMPLETE — TERRAFORM_START leaves the body
+ * unclaimed). Ownership CAN flip between civs: a body mid-terraform is
+ * still a valid outpost/colony target for others, and the terraforming
+ * civ reclaims it at completion. The per-system hold counts make that loss
+ * exact: a civ only loses a held system when its last body there is gone
+ * (the origin system is held unconditionally).
+ */
+function claimBody(ctx: CivContext, civId: string, bodyId: string): void {
+  const ref = ctx.index.bodyById.get(bodyId);
+  if (!ref) return;
+  const systemId = ref.system.id;
+  const prevCivId = ctx.ownerByBody.get(bodyId);
+  if (prevCivId === civId) return;
+  if (prevCivId !== undefined) {
+    const prev = ctx.runtimeByCivId.get(prevCivId);
+    if (prev) {
+      const n = (prev.systemHoldCounts.get(systemId) ?? 0) - 1;
+      if (n > 0) {
+        prev.systemHoldCounts.set(systemId, n);
+      } else {
+        prev.systemHoldCounts.delete(systemId);
+        if (systemId !== prev.originSystemId) prev.heldSystemIds.delete(systemId);
+      }
+    }
+  }
+  ctx.ownerByBody.set(bodyId, civId);
+  const runtime = ctx.runtimeByCivId.get(civId);
+  if (runtime) {
+    runtime.systemHoldCounts.set(systemId, (runtime.systemHoldCounts.get(systemId) ?? 0) + 1);
+    runtime.heldSystemIds.add(systemId);
+  }
 }
 
 function pickBucket(r: number): 'outpost' | 'colonise' | 'terraform' {
