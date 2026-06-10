@@ -46,6 +46,19 @@ export class World {
   mapAliveWars: Map<string, War> = new Map();
   /** Countries removed from mapCountries by dissolution (all cities ruined). */
   mapDeadCountries: Map<string, CountryEvent> = new Map();
+  /**
+   * Refcounted claim index: cellIndex → number of USABLE cities currently
+   * holding that cell in `ownedCells`. Maintained by `claims.ts` at every
+   * claim / founding / ruin site; read (`.has`) by YearGenerator steps
+   * 4c / 4c-sea instead of rebuilding a claimed-cells map every year.
+   */
+  usableClaimRefs: Map<number, number> = new Map();
+  /**
+   * Founding cell index of every city ever created (usable or not).
+   * Maintained by `CityGenerator.generate`; read by CitySettlement instead of
+   * rebuilding the set from `mapCities` every year.
+   */
+  allCityCells: Set<number> = new Set();
   /** Global dedup set for wonder names — prevents duplicate names within a generation. */
   usedWonderNames: Set<string> = new Set();
   /** Global dedup set for illustrate names — prevents duplicate names within a generation. */

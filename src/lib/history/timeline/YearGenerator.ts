@@ -18,6 +18,7 @@ import type { War } from './War';
 import { techGenerator, getCityTechLevel, getCountryTechLevel, getCityEffectiveTechs } from './Tech';
 import { conquerGenerator } from './Conquer';
 import { empireGenerator } from './Empire';
+import { claimCell } from '../physical/claims';
 import { expandGenerator } from './Expand';
 import { citySettlementGenerator } from './CitySettlement';
 import type { CountryEvent } from './Country';
@@ -68,11 +69,10 @@ export class YearGenerator {
         const growthRate = REGION_BIOME_GROWTH[region.biome] / 100;
         let capacity = REGION_BIOME_CAPACITY[region.biome];
         if (cells) {
-          let cellCap = 0;
-          for (const ci of city.ownedCells.keys()) {
-            const cell = cells[ci];
-            if (cell) cellCap += CELL_BIOME_CAPACITY[cell.biome] ?? 0;
-          }
+          // Incrementally-maintained sum over ownedCells (claims.ts) — biomes
+          // never change during the simulation, so this equals the per-year
+          // re-sum the loop used to do here.
+          let cellCap = city.cellCapSum;
           if (cellCap === 0) {
             const cell = cells[city.cellIndex];
             if (cell) cellCap = CELL_BIOME_CAPACITY[cell.biome] ?? 12_500;
@@ -151,13 +151,12 @@ export class YearGenerator {
     if (cells) {
       const cellsLocal = cells;
       timed('expansion-cells', () => {
-      // Build a global claimed-cells index: cellIndex → cityId (prevents overlaps)
-      const claimedCells = new Map<number, string>();
-      for (const city of world.mapUsableCities.values()) {
-        for (const ci of city.ownedCells.keys()) {
-          claimedCells.set(ci, city.id);
-        }
-      }
+      // Global claimed-cells index (cell → usable-owner refcount, prevents
+      // overlaps): world.usableClaimRefs, maintained persistently by
+      // claims.ts. This step only ever needs membership (`.has`), and claims
+      // made below update the index at the same program point the local
+      // rebuild used to be updated, so within-year visibility is identical.
+      const claimedCells = world.usableClaimRefs;
 
       for (const city of world.mapUsableCities.values()) {
         // Sea cities have their own water-only expansion path immediately
@@ -244,8 +243,7 @@ export class YearGenerator {
         let toClaim = maxCells - city.ownedCells.size;
         for (const ci of frontier) {
           if (toClaim <= 0) break;
-          city.ownedCells.set(ci, absYear);
-          claimedCells.set(ci, city.id);
+          claimCell(world, city, ci, absYear, cellsLocal[ci], true);
           toClaim--;
         }
       }
@@ -266,16 +264,10 @@ export class YearGenerator {
     if (cells) {
       const cellsLocal = cells;
       timed('sea-expansion-cells', () => {
-        // Rebuild the global claimed-cells index from scratch — step 4c
-        // (land expansion) above mutated `city.ownedCells` for non-sea
-        // cities, so a fresh snapshot is the simplest way to honour the
-        // "only unclaimed polygons can be absorbed" rule.
-        const claimedCells = new Map<number, string>();
-        for (const city of world.mapUsableCities.values()) {
-          for (const ci of city.ownedCells.keys()) {
-            claimedCells.set(ci, city.id);
-          }
-        }
+        // Same persistent claim index as step 4c — it already reflects the
+        // land-expansion claims made above (claimCell updates it live), which
+        // is exactly what the from-scratch rebuild here used to capture.
+        const claimedCells = world.usableClaimRefs;
 
         for (const city of world.mapUsableCities.values()) {
           if (!city.isSeaCity) continue;
@@ -318,17 +310,17 @@ export class YearGenerator {
           let toClaim = maxCells - city.ownedCells.size;
           for (const ci of frontier) {
             if (toClaim <= 0) break;
-            // Absorb deep-ocean cells into the parent region so
-            // `computeOwnership` and the renderer keep working without a
+            // Absorb deep-ocean cells into the parent region so the
+            // ownership serializer and the renderer keep working without a
             // new entity type. Append after existing cells to preserve
-            // the land-cells-first invariant.
+            // the land-cells-first invariant. Stamp regionId BEFORE
+            // claimCell so the claim records the parent region.
             if (cellsLocal[ci].regionId === undefined) {
               region.cellIndices.push(ci);
               cellsLocal[ci].regionId = region.id;
               city.absorbedWaterCells.add(ci);
             }
-            city.ownedCells.set(ci, absYear);
-            claimedCells.set(ci, city.id);
+            claimCell(world, city, ci, absYear, cellsLocal[ci], true);
             toClaim--;
           }
         }

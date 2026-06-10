@@ -7,6 +7,7 @@ import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
 import { scoreCellForCity, scoreCellForSeaCity } from '../history';
 import { getCityTechLevel } from './Tech';
+import { claimCell, registerUsableCityClaims } from '../physical/claims';
 import { seededPRNG } from '../../terrain/noise';
 
 function rngHex(rng: () => number): string {
@@ -105,11 +106,12 @@ export class CitySettlementGenerator {
     const absYear = year.year;
     const results: CitySettlement[] = [];
 
-    // Build set of all existing city cell indices to avoid placing on them
-    const cityCellSet = new Set<number>();
-    for (const city of world.mapCities.values()) {
-      cityCellSet.add(city.cellIndex);
-    }
+    // Founding cells of every city ever created — maintained persistently by
+    // CityGenerator.generate (same key set the per-year rebuild over
+    // mapCities used to produce). New children created below are added by
+    // cityGenerator.generate at the same program point the local-set adds
+    // used to happen, so within-year visibility is unchanged.
+    const cityCellSet = world.allCityCells;
 
     // Build a map of cell index → owning city id to exclude cells claimed by others.
     // Always include each city's founding cell (city.cellIndex) regardless of ownedCells,
@@ -222,10 +224,10 @@ export class CitySettlementGenerator {
       childEntity.founded = true;
       childEntity.foundedOn = absYear;
       childEntity.currentPopulation = 500;
-      childEntity.ownedCells.set(bestCell, absYear);
+      claimCell(world, childEntity, bestCell, absYear, cells[bestCell], false);
       world.mapUsableCities.set(childEntity.id, childEntity);
       world.mapUncontactedCities.set(childEntity.id, childEntity);
-      cityCellSet.add(bestCell);
+      registerUsableCityClaims(world, childEntity);
       claimedCells.set(bestCell, childEntity.id);
 
       // Wire parent ↔ child
@@ -372,7 +374,7 @@ export class CitySettlementGenerator {
     childEntity.founded = true;
     childEntity.foundedOn = absYear;
     childEntity.currentPopulation = 500;
-    childEntity.ownedCells.set(bestCell, absYear);
+    claimCell(world, childEntity, bestCell, absYear, cells[bestCell], false);
     childEntity.isSeaCity = true;
     childEntity.foundedOnDeepOcean = best.isDeep;
     if (best.isDeep) {
@@ -381,7 +383,7 @@ export class CitySettlementGenerator {
 
     world.mapUsableCities.set(childEntity.id, childEntity);
     world.mapUncontactedCities.set(childEntity.id, childEntity);
-    cityCellSet.add(bestCell);
+    registerUsableCityClaims(world, childEntity);
     claimedCells.set(bestCell, childEntity.id);
 
     parentCity.hasHadSettlement = true;

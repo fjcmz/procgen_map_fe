@@ -175,6 +175,14 @@ export class CityEntity {
   cataclysms: string[] = [];
   /** Cells owned by this city. Keys are cell indices, values are the year the cell was claimed. */
   ownedCells: Map<number, number> = new Map();
+  /**
+   * Running sum of CELL_BIOME_CAPACITY over `ownedCells` — maintained by
+   * `claims.ts::claimCell` so the growth step doesn't re-sum every year.
+   * Valid because cell biomes never change during the simulation.
+   */
+  cellCapSum: number = 0;
+  /** Region ids touched by this city's owned cells (frontier-cache invalidation on ruin). */
+  ownedCellRegionIds: Set<string> = new Set();
   // Transient
   regionId: string = '';
   contactCities: Set<CityEntity> = new Set();

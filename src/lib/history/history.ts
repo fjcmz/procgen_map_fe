@@ -11,6 +11,7 @@ import { resourceGenerator } from './physical/ResourceGenerator';
 import { selectPrimary, isCommonUnlockedAtZero, RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
 import type { ResourceRarity } from './physical/ResourceCatalog';
 import { cityGenerator } from './physical/CityGenerator';
+import { claimCell } from './physical/claims';
 import { generateCityName, generateCountryName } from './nameGenerator';
 import { seededPRNG } from '../terrain/noise';
 
@@ -535,8 +536,10 @@ export function buildPhysicalWorld(
         if (tooClose) continue;
 
         const cityEntity = cityGenerator.generate(ci, generateCityName(rng, usedCityNames), rng, region, world);
-        // Claim founding cell as city territory (year 0 = pre-history)
-        cityEntity.ownedCells.set(ci, 0);
+        // Claim founding cell as city territory (year 0 = pre-history).
+        // The city is dormant (not usable) — claimCell tracks cellCapSum but
+        // leaves the usable claim index alone until Foundation founds it.
+        claimCell(world, cityEntity, ci, 0, cells[ci], false);
         region.cities.push(cityEntity);
         globalPlacedCityCells.push(ci);
         placed++;

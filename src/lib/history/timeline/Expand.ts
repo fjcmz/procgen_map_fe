@@ -7,6 +7,7 @@ import type { CountryEvent } from './Country';
 import { getCountryEffectiveTechs } from './Tech';
 import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
+import { registerUsableCityClaims } from '../physical/claims';
 import { scoreCellForCity } from '../history';
 
 function rngHex(rng: () => number): string {
@@ -238,6 +239,11 @@ export class ExpandGenerator {
       cityEntity.currentPopulation = 500;
       world.mapUsableCities.set(cityEntity.id, cityEntity);
       world.mapUncontactedCities.set(cityEntity.id, cityEntity);
+      // Expansion-settled cities never seed their founding cell into
+      // ownedCells (matching the historical behaviour the claim index
+      // mirrors), so this registers an empty set today — kept for the
+      // usable-entry invariant in claims.ts.
+      registerUsableCityClaims(world, cityEntity);
 
       // Consolidate: clear expansion flags, set countryId on all expansion regions
       const consolidatedRegionIds: string[] = [];

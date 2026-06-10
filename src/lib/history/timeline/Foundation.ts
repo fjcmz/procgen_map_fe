@@ -2,6 +2,7 @@ import { IdUtil } from '../IdUtil';
 import type { World } from '../physical/World';
 import type { Year } from './Year';
 import { cityVisitor } from '../physical/CityVisitor';
+import { registerUsableCityClaims } from '../physical/claims';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -39,12 +40,16 @@ export class FoundationGenerator {
     city.founded = true;
     city.foundedOn = absYear;
 
-    // Claim founding cell as city territory
+    // Claim founding cell as city territory. This is always an overwrite of
+    // the key pre-seeded at creation time in buildPhysicalWorld (only
+    // buildPhysicalWorld cities are ever unfounded), so cellCapSum needs no
+    // update here — only the claim-year value changes.
     city.ownedCells.set(city.cellIndex, absYear);
 
     // Add city to usable and uncontacted maps
     world.mapUsableCities.set(city.id, city);
     world.mapUncontactedCities.set(city.id, city);
+    registerUsableCityClaims(world, city);
 
     return foundation;
   }
