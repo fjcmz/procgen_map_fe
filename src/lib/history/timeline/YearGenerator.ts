@@ -164,6 +164,14 @@ export class YearGenerator {
         // land-based and prevent a sea city from absorbing land cells in its
         // parent region.
         if (city.isSeaCity) continue;
+        // Frontier-exhausted cache: an empty frontier stays empty until a
+        // ruin releases cells in this region (epoch bump). Recomputing would
+        // yield an empty frontier and `continue` with zero mutations and
+        // zero RNG draws — skipping is byte-equivalent.
+        if (city.frontierExhaustedAtEpoch !== -1 &&
+            city.frontierExhaustedAtEpoch === (world.regionClaimEpoch.get(city.regionId) ?? 0)) {
+          continue;
+        }
         const govLevel = getCityTechLevel(world, city, 'government');
         const maxCells = maxCellsForCity(city.currentPopulation, govLevel);
         if (city.ownedCells.size >= maxCells) continue;
@@ -189,7 +197,10 @@ export class YearGenerator {
           }
         }
 
-        if (frontier.length === 0) continue;
+        if (frontier.length === 0) {
+          city.frontierExhaustedAtEpoch = world.regionClaimEpoch.get(city.regionId) ?? 0;
+          continue;
+        }
 
         // Resource-distance map: pre-computed by TimelineGenerator when cache is
         // available (static per region); falls back to per-city BFS otherwise.
@@ -224,9 +235,13 @@ export class YearGenerator {
             }
           }
         }
-        const maxDist = resourceDist.size > 0
-          ? Math.max(...frontier.map(ci => resourceDist.get(ci) ?? 9999))
-          : 0;
+        let maxDist = 0;
+        if (resourceDist.size > 0) {
+          for (const ci of frontier) {
+            const d = resourceDist.get(ci) ?? 9999;
+            if (d > maxDist) maxDist = d;
+          }
+        }
 
         // Sort: closest to a resource first, then land over water, then biome capacity desc
         frontier.sort((a, b) => {

@@ -183,6 +183,14 @@ export class CityEntity {
   cellCapSum: number = 0;
   /** Region ids touched by this city's owned cells (frontier-cache invalidation on ruin). */
   ownedCellRegionIds: Set<string> = new Set();
+  /**
+   * Region claim epoch at which this city's land-expansion frontier was last
+   * computed empty (-1 = never). While the region's epoch is unchanged no
+   * cell can have been released, the city's own cells cannot have grown (an
+   * empty frontier blocks its only growth path), and other cities' claims
+   * only shrink the frontier — so step 4c skips the rebuild entirely.
+   */
+  frontierExhaustedAtEpoch: number = -1;
   // Transient
   regionId: string = '';
   contactCities: Set<CityEntity> = new Set();

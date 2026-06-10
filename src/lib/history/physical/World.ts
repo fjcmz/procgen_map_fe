@@ -59,6 +59,14 @@ export class World {
    * rebuilding the set from `mapCities` every year.
    */
   allCityCells: Set<number> = new Set();
+  /**
+   * Per-region claim epoch, bumped whenever a ruin releases owned cells in
+   * that region (see `claims.ts::releaseUsableCityClaims`). Cities cache
+   * "my land frontier was empty at epoch E" and skip the frontier rebuild in
+   * YearGenerator step 4c until the epoch moves — claims are monotonic within
+   * an epoch, so an empty frontier can only stay empty.
+   */
+  regionClaimEpoch: Map<string, number> = new Map();
   /** Global dedup set for wonder names — prevents duplicate names within a generation. */
   usedWonderNames: Set<string> = new Set();
   /** Global dedup set for illustrate names — prevents duplicate names within a generation. */

@@ -72,4 +72,11 @@ export function releaseUsableCityClaims(world: World, city: CityEntity): void {
     if (n <= 1) world.usableClaimRefs.delete(ci);
     else world.usableClaimRefs.set(ci, n - 1);
   }
+  // Cells may have become claimable again in these regions — invalidate the
+  // frontier-exhausted caches of cities living there.
+  if (city.ownedCells.size > 0) {
+    for (const rid of city.ownedCellRegionIds) {
+      world.regionClaimEpoch.set(rid, (world.regionClaimEpoch.get(rid) ?? 0) + 1);
+    }
+  }
 }
