@@ -99,6 +99,8 @@ export function getEmpireStandingWonderCount(world: World, empire: Empire): numb
   return count;
 }
 
+type ResourcePool = Map<ResourceType, { total: number; sources: Array<{ resource: Resource; region: Region }> }>;
+
 /**
  * Collect all available resources across the entity hierarchy
  * (region → country → empire) for a given city, respecting discovery gates.
@@ -109,8 +111,8 @@ function collectPooledResources(
   world: World,
   city: CityEntity,
   countryPooledRegions: Map<string, Region[]>,
-): Map<ResourceType, { total: number; sources: Array<{ resource: Resource; region: Region }> }> {
-  const pool = new Map<ResourceType, { total: number; sources: Array<{ resource: Resource; region: Region }> }>();
+): ResourcePool {
+  const pool: ResourcePool = new Map();
 
   // Resolve all regions belonging to this city's country and its empire.
   // countryPooledRegions was pre-built by WonderGenerator.generate() in
@@ -150,7 +152,7 @@ function collectPooledResources(
  * Returns true if all required resource types have sufficient total available.
  */
 function canAffordTier(
-  pool: Map<ResourceType, { total: number; sources: Array<{ resource: Resource; region: Region }> }>,
+  pool: ResourcePool,
   tierIndex: number,
 ): boolean {
   const req = WONDER_TIER_RESOURCES[tierIndex];
@@ -168,7 +170,7 @@ function canAffordTier(
  * Returns the consumed resources for recording on the Wonder.
  */
 function consumeResources(
-  pool: Map<ResourceType, { total: number; sources: Array<{ resource: Resource; region: Region }> }>,
+  pool: ResourcePool,
   tierIndex: number,
 ): Array<{ type: ResourceType; amount: number }> {
   const req = WONDER_TIER_RESOURCES[tierIndex];
@@ -202,18 +204,40 @@ function consumeResources(
  * it once per year and pass it into `WonderGenerator.generate`.
  */
 export function buildCountryPooledRegions(world: World): Map<string, Region[]> {
+  // Single pass over mapRegions grouping by owner, then a per-country merge of
+  // its own group with empire-sibling groups. `countryId` and
+  // `expansionOwnerId` are mutually exclusive on a region (expansion only
+  // targets unowned regions; consolidation clears the expansion owner), so
+  // each region lands in exactly one group and the merge needs no dedupe.
+  // Sorting by static insertion index restores mapRegions iteration order —
+  // load-bearing because `entry.sources` order drives consumeResources'
+  // greedy deduction.
+  const regionOrder = new Map<Region, number>();
+  const byOwner = new Map<string, Region[]>();
+  {
+    let i = 0;
+    for (const r of world.mapRegions.values()) {
+      regionOrder.set(r, i++);
+      const owner = r.countryId ?? r.expansionOwnerId;
+      if (!owner) continue;
+      const arr = byOwner.get(owner);
+      if (arr) arr.push(r);
+      else byOwner.set(owner, [r]);
+    }
+  }
   const countryPooledRegions = new Map<string, Region[]>();
   for (const [cId, country] of world.mapCountries) {
-    const ids = new Set<string>([cId]);
+    let rs: Region[];
     if (country.memberOf) {
-      for (const m of country.memberOf.countries) ids.add(m);
-    }
-    const rs: Region[] = [];
-    for (const r of world.mapRegions.values()) {
-      if ((r.countryId && ids.has(r.countryId)) ||
-          (r.expansionOwnerId && ids.has(r.expansionOwnerId))) {
-        rs.push(r);
+      rs = [...(byOwner.get(cId) ?? [])];
+      for (const m of country.memberOf.countries) {
+        if (m === cId) continue;
+        const sibling = byOwner.get(m);
+        if (sibling) rs.push(...sibling);
       }
+      rs.sort((a, b) => (regionOrder.get(a) ?? 0) - (regionOrder.get(b) ?? 0));
+    } else {
+      rs = byOwner.get(cId) ?? [];
     }
     countryPooledRegions.set(cId, rs);
   }
@@ -234,6 +258,23 @@ export class WonderGenerator {
 
     // Phase 1: Build candidates with feasible tier and weight
     const candidates: Array<{ city: CityEntity; weight: number; tier: number }> = [];
+
+    // The pool depends only on the city's country (or, for stateless cities,
+    // its region), and phase 1 only READS pools (canAffordTier is pure), so
+    // cities sharing a country share one pool computation. Scoped to this
+    // call: phase 3 consumes resources, so the next generate() in the same
+    // year must rebuild.
+    const poolCache = new Map<string, ResourcePool>();
+    const getPool = (c: CityEntity): ResourcePool => {
+      const region = world.mapRegions.get(c.regionId);
+      const key = region?.countryId ?? `region:${c.regionId}`;
+      let pool = poolCache.get(key);
+      if (!pool) {
+        pool = collectPooledResources(world, c, pooledRegions);
+        poolCache.set(key, pool);
+      }
+      return pool;
+    };
 
     const absYear = year.year;
 
@@ -275,7 +316,7 @@ export class WonderGenerator {
       if (c.size === 'megalopolis' && maxTier > 10) maxTier = 10;
 
       // Collect pooled resources for this city's entity hierarchy
-      const pool = collectPooledResources(world, c, pooledRegions);
+      const pool = getPool(c);
 
       // Find highest affordable tier
       let feasibleTier = 0;
