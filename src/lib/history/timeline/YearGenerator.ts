@@ -656,9 +656,6 @@ export class YearGenerator {
         if (city.founded) {
           year.cityPopulations[city.cellIndex] = city.currentPopulation;
           year.citySizeByCell[city.cellIndex] = CITY_SIZE_TO_INDEX[city.size];
-          if (city.ownedCells.size > 0) {
-            year.cityOwnedCellsByCell[city.cellIndex] = Array.from(city.ownedCells.keys());
-          }
           // Effective max-field tech level (region → country → empire-founder).
           // Pure read, no RNG: sweep-baseline-safe. Used by the renderer to
           // apply a per-cell tint over polygons in City.ownedCells.

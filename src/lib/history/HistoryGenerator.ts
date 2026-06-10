@@ -1058,9 +1058,11 @@ export class HistoryGenerator {
     // Phase 0: Build physical world
     const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind, underground);
 
-    // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
-    const historyRoot = HistoryRoot.INSTANCE;
-    const timeline = timelineGenerator.generate(rng, historyRoot, world, cells, usedCityNames);
+    // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation).
+    // numSimYears bounds the simulation itself — a 500-year request simulates
+    // 500 years (matching the CLAUDE.md contract), not 5000 truncated at
+    // serialization time.
+    const timeline = timelineGenerator.generate(rng, HistoryRoot.INSTANCE, world, cells, usedCityNames, numSimYears);
 
     // Phase 1b: Update region resource exploitation status from city territory.
     // Build a global set of all cells owned by any founded city, then mark each
