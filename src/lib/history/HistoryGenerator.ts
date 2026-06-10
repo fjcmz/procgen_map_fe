@@ -14,6 +14,7 @@ import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
 import type { ResourceRarity } from './physical/ResourceCatalog';
 import { aStar, computeDistanceFromLand, generateTradeRoutePath } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
+import { DEBUG_HISTORY_TIMING } from './timeline/timing';
 import { HistoryRoot } from './HistoryRoot';
 import type { World } from './physical/World';
 import type { Year } from './timeline/Year';
@@ -1028,6 +1029,11 @@ export class HistoryGenerator {
     // Compute ownership at year 0 (before any events)
     let prevOwnership: Int16Array | null = null;
 
+    // Wall-clock probe for the serialization loop — it runs OUTSIDE the
+    // TimelineGenerator timing accumulator, so without this its cost is
+    // invisible to the per-step breakdown. No RNG, no state mutation.
+    const serializeLoopStart = DEBUG_HISTORY_TIMING ? performance.now() : 0;
+
     for (let i = 0; i < yearsToSerialize; i++) {
       const yearObj = timeline.years[i];
       const events = serializeYearEvents(yearObj, world, countryMap);
@@ -1256,6 +1262,10 @@ export class HistoryGenerator {
       }
 
       prevOwnership = ownership;
+    }
+
+    if (DEBUG_HISTORY_TIMING) {
+      console.log(`HistoryGenerator serialization loop: ${(performance.now() - serializeLoopStart).toFixed(1)} ms (${yearsToSerialize} years)`);
     }
 
     // Always snapshot final year

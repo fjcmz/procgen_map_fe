@@ -12,7 +12,7 @@ The world-map worker pipeline runs end-to-end on a single thread:
 voronoi → … → biomes → buildPhysicalWorld → HistoryGenerator (5000 yrs) → roads
 ```
 
-History is the dominant cost when `generateHistory = true` — a 5000-iteration sequential loop where each year's outputs are next year's inputs. At default settings (~5,000 cells), a full run takes 20–50 seconds. There is no test suite, so wall-clock regressions are easy to introduce silently.
+History is the dominant cost when `generateHistory = true` — a 5000-iteration sequential loop where each year's outputs are next year's inputs, followed by a per-year serialization loop in `HistoryGenerator`. After the June 2026 optimization pass a full default-settings run takes ~13–20s per seed (down from ~40–60s). There is no test suite, so wall-clock regressions are easy to introduce silently.
 
 ## The Timing Module
 
@@ -75,20 +75,25 @@ city-settlements            4006.5     18.2%      5000       801.3
 
 The `Accounted` percentage measures coverage — large gaps mean significant uninstrumented code paths.
 
-## Current Hot Paths (May 2026 baseline)
+## Current Hot Paths (June 2026, post-optimization)
 
-From a 5000-yr sweep on default settings, the top time sinks are:
+The June 2026 optimization pass (7 commits, sweep-byte-identical throughout) cut a single-seed sequential run from **~61s to ~13s** on default settings. Two cost classes were addressed:
+
+1. **The serialization loop in `HistoryGenerator.generate` was the single largest cost (~33s of the 61s) and was invisible to `timed()`** — it runs after `TimelineGenerator` returns. `computeOwnership` + `computeExpansionFlags` replayed the entire timeline from year 0 for *every* serialized year (O(years²·events)). Replaced with incremental replay state + an O(cells) per-year fill (~1.5s total). See `world_history.md` pitfalls for the two structural invariants the incremental replay depends on. A flag-gated wall-clock probe around this loop prints alongside the timeline tables when `DEBUG_HISTORY_TIMING` is on.
+2. **Per-year rebuild of derived indexes inside the year loop** — replaced with incrementally-maintained state: the refcounted `world.usableClaimRefs` claim index + per-city frontier-exhausted epochs (`expansion-cells` 6.2s → 0.07s), per-country wonder pool memoization (`wonder` 6.6s → 3.5s), incremental `city.cellCapSum` (`growth` 1.6s → 0.5s), a hoisted population map (`expand` 1.8s → 0.5s), and assorted pure-read caches. All maintained via the `claims.ts` choke point — see `world_history.md` pitfalls before touching any claim site.
+
+Timeline-loop breakdown after the pass (single seed, 5000 yr, ~11.4s loop wall):
 
 | Rank | Label | Share | What it does |
 |------|-------|-------|--------------|
-| 1 | `expansion-cells` | ~32% | Step 4c — rebuilds `claimedCells` + `regionCellSet` + multi-source BFS every year for every usable city |
-| 2 | `wonder` | ~25% | Phase 5 wonder generation; `getStandingWonderTierSum` walks the wonder map |
-| 3 | `city-settlements` | ~19% | Step 4d — `citySettlementGenerator.generate` |
-| 4 | `expand` | ~7% | Step 3b territorial expansion across regions |
-| 5 | `growth` | ~6% | Steps 3–4b — population sum + logistic growth + size recompute |
-| ≤2% each | every other Phase 5 generator | trivial | foundation/contact/country/war/conquer/empire/illustrate/religion/trade/cataclysm/tech/ruin |
+| 1 | `city-settlements` | ~44% | Step 4d — dominated by the per-year `claimedCells` value-map rebuild, kept deliberately (its values feed `isTooCloseToOtherCity` and depend on `mapUsableCities` iteration order — not reproducible incrementally) |
+| 2 | `wonder` | ~31% | Phase 5 wonder generation — candidate scan over all large+ cities with per-country memoized pools |
+| 3 | `snapshot` | ~5% | End-of-year per-city capture (`getCityEffectiveTechs` per founded city) |
+| 4 | `growth` | ~4% | Steps 3–4b — logistic growth + size recompute |
+| 5 | `expand` | ~4% | Step 3b territorial expansion across regions |
+| ≤2.5% each | everything else | trivial | sea-expansion / religion-drift / tech / all other Phase 5 generators; `expansion-cells` is now ~0.6% |
 
-**Implication**: optimizing the named Phase 5 generators (foundation, contact, country, war, conquer, empire, …) yields almost nothing. The wins are in the per-cell territory bookkeeping (`expansion-cells` recomputes `regionCellSet` per city per year — a clear caching opportunity) and `wonderGenerator.generate` / `getStandingWonderTierSum`.
+**Implication**: the remaining wins are in `city-settlements` (the order-sensitive claimed-cells rebuild — would need a proof that the value semantics can be relaxed, which shifts the sweep) and the `wonder` candidate scan. Everything else is noise.
 
 ## Why Per-Year Parallelization is Blocked
 
@@ -116,7 +121,7 @@ Three structural blockers:
 
 ## Other Performance Levers (No Code Changes)
 
-- **Lower `numSimYears`** for dev iteration (UI slider exposes 50–5000). The bulk of a full run is years 3000–5000 where city/empire counts are largest.
+- **Lower `numSimYears`** for dev iteration (UI slider exposes 50–5000). Since June 2026 this truncates the simulation itself (previously it only truncated serialization, so the full 5000 years were always paid). The bulk of a full run is years 3000–5000 where city/empire counts are largest.
 - **Lower `numCells`** to ~2,000 for terrain-only iteration; history cost scales roughly with `numCells × numSimYears`.
 - **Parallelize the sweep across seeds** — `scripts/sweep-history.ts` runs 5 seeds sequentially; a worker-pool variant would give ~5× wall-clock speedup for the sweep specifically (not for in-browser single-map gen). Out of scope for the current harness.
 
@@ -126,5 +131,6 @@ Three structural blockers:
 - **Don't commit with `DEBUG_HISTORY_TIMING = true`.** Production builds should not log timing.
 - **Don't add probes inside hot inner loops.** `timed()` overhead is ~2 μs per call; instrumenting per-cell or per-iteration code distorts measurements. Probe at the step boundary.
 - **Re-run the sweep after any optimization to a hot path.** Any non-zero diff against `scripts/results/baseline-a.json` (excluding `elapsedMs` fields) means RNG order changed and the optimization is incorrect.
+- **The speed now rests on incrementally-maintained indexes.** `world.usableClaimRefs`, `city.cellCapSum`, `world.regionClaimEpoch`, `world.allCityCells`, and the incremental ownership replay in `HistoryGenerator` all assume every mutation goes through its choke point (`claims.ts`, `CityGenerator.generate`, the serialization-loop replay block). See `world_history.md` pitfalls before adding a new claim/founding/ruin site or new conquest/expansion semantics — a missed site reintroduces no slowdown, just silent divergence.
 - **`Accounted` percentage well below 99%** means there's significant uninstrumented code in the timeline. Add probes around the gap before drawing conclusions about hot paths.
 - **TS narrowing doesn't reach into closures.** When wrapping a block guarded by an `if (cells && usedCityNames)` check, capture the narrowed values into local consts before passing to `timed()`.
