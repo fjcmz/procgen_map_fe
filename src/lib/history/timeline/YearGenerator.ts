@@ -417,16 +417,20 @@ export class YearGenerator {
         }
       }
     }
-    // Recompute religion member counts
-    for (const religion of world.mapReligions.values()) {
-      let members = 0;
-      for (const city of world.mapUsableCities.values()) {
-        const adherence = city.religions.get(religion.id);
+    // Recompute religion member counts — one pass over cities accumulating
+    // per-religion integer sums (order-independent), instead of a full city
+    // scan per religion. Religions with no adherents reset to 0 as before.
+    const religionMembers = new Map<string, number>();
+    for (const city of world.mapUsableCities.values()) {
+      if (city.religions.size === 0) continue;
+      for (const [relId, adherence] of city.religions) {
         if (adherence) {
-          members += Math.floor(city.currentPopulation * adherence);
+          religionMembers.set(relId, (religionMembers.get(relId) ?? 0) + Math.floor(city.currentPopulation * adherence));
         }
       }
-      religion.members = members;
+    }
+    for (const religion of world.mapReligions.values()) {
+      religion.members = religionMembers.get(religion.id) ?? 0;
     }
     });
 
