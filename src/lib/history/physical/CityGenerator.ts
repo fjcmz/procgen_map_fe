@@ -7,6 +7,7 @@ export class CityGenerator {
     const city = new CityEntity(cellIndex, name, rng);
     city.regionId = region.id;
     world.mapCities.set(city.id, city);
+    world.allCityCells.add(cellIndex);
     return city;
   }
 }

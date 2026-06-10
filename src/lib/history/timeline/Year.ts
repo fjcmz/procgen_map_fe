@@ -39,7 +39,6 @@ export class Year {
   // Per-city snapshots captured at end of year (after all events applied)
   cityPopulations: Record<number, number> = {};  // cellIndex → population
   citySizeByCell: Record<number, number> = {};   // cellIndex → size index (0-4)
-  cityOwnedCellsByCell: Record<number, number[]> = {};  // city cellIndex → array of owned cell indices
   cityMaxTechByCell: Record<number, number> = {};  // cellIndex → max level across the 9 TechFields (effective via region→country→empire)
 
   // Transient

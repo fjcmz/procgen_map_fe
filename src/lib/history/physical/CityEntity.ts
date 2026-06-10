@@ -175,6 +175,28 @@ export class CityEntity {
   cataclysms: string[] = [];
   /** Cells owned by this city. Keys are cell indices, values are the year the cell was claimed. */
   ownedCells: Map<number, number> = new Map();
+  /**
+   * Running sum of CELL_BIOME_CAPACITY over `ownedCells` — maintained by
+   * `claims.ts::claimCell` so the growth step doesn't re-sum every year.
+   * Valid because cell biomes never change during the simulation.
+   */
+  cellCapSum: number = 0;
+  /** Region ids touched by this city's owned cells (frontier-cache invalidation on ruin). */
+  ownedCellRegionIds: Set<string> = new Set();
+  /**
+   * Region claim epoch at which this city's land-expansion frontier was last
+   * computed empty (-1 = never). While the region's epoch is unchanged no
+   * cell can have been released, the city's own cells cannot have grown (an
+   * empty frontier blocks its only growth path), and other cities' claims
+   * only shrink the frontier — so step 4c skips the rebuild entirely.
+   */
+  frontierExhaustedAtEpoch: number = -1;
+  /**
+   * Lazily-cached "is the founding cell coastal" test (null = not yet
+   * computed). `isCoast` / `isWater` never change after terrain generation,
+   * so the answer is static. Read by CitySettlement's sea-colonisation gate.
+   */
+  cachedIsCoastal: boolean | null = null;
   // Transient
   regionId: string = '';
   contactCities: Set<CityEntity> = new Set();

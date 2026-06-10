@@ -14,6 +14,7 @@ import { RARITY_WEIGHTS_BY_MODE } from './physical/ResourceCatalog';
 import type { ResourceRarity } from './physical/ResourceCatalog';
 import { aStar, computeDistanceFromLand, generateTradeRoutePath } from './roads';
 import { timelineGenerator } from './timeline/TimelineGenerator';
+import { DEBUG_HISTORY_TIMING } from './timeline/timing';
 import { HistoryRoot } from './HistoryRoot';
 import type { World } from './physical/World';
 import type { Year } from './timeline/Year';
@@ -665,224 +666,6 @@ function serializeYearEvents(
 }
 
 /**
- * Compute cell-level ownership from the region-based country model at a given year index.
- * Returns an Int16Array mapping cellIndex → numeric country index (or -1 unclaimed, -2 impassable).
- */
-function computeOwnership(
-  cells: Cell[],
-  world: World,
-  yearObj: Year,
-  countryMap: CountryIndexMap,
-): Int16Array {
-  const n = cells.length;
-  const ownership = new Int16Array(n).fill(-1);
-
-  // Mark impassable cells — deep ocean only.
-  // Coastal water cells that belong to a region (have regionId) stay claimable
-  // so countries can own their territorial waters. Mountains are claimable too,
-  // so they fill in inside their surrounding country's borders.
-  for (let i = 0; i < n; i++) {
-    if (cells[i].isWater && !cells[i].regionId) {
-      ownership[i] = -2;
-    }
-  }
-
-  // For each country, if it exists by this year, mark its region's cells
-  for (const [countryId, country] of world.mapCountries) {
-    const ce = country as CountryEvent;
-    if (ce.foundedOn > yearObj.year) continue;
-    const numIdx = countryMap.idToIndex.get(countryId);
-    if (numIdx === undefined) continue;
-    const region = world.mapRegions.get(ce.governingRegion);
-    if (!region) continue;
-    for (const ci of region.cellIndices) {
-      if (ownership[ci] !== -2) {
-        ownership[ci] = numIdx;
-      }
-    }
-  }
-
-  // Also seed dead countries (dissolved via ruinifyCity) — their governing
-  // regions should appear in historical snapshots for years before dissolution.
-  // Only fill unclaimed cells so live countries take priority.
-  for (const [countryId, country] of world.mapDeadCountries) {
-    const ce = country as CountryEvent;
-    if (ce.foundedOn > yearObj.year) continue;
-    const numIdx = countryMap.idToIndex.get(countryId);
-    if (numIdx === undefined) continue;
-    const region = world.mapRegions.get(ce.governingRegion);
-    if (!region) continue;
-    for (const ci of region.cellIndices) {
-      if (ownership[ci] === -1) {
-        ownership[ci] = numIdx;
-      }
-    }
-  }
-
-  // Handle conquests: conquered country's region transfers to conqueror
-  // We need to replay all conquests up to this year
-  // The conquer events mutate country membership in empires but the region's countryId
-  // doesn't change in the current model. So we track conquest-based region transfers.
-  // Actually, looking at ConquerGenerator, it doesn't transfer region ownership.
-  // We need to build a region→owner map from conquests.
-  const regionOwner = new Map<string, string>(); // regionId → countryId
-  for (const [countryId, country] of world.mapCountries) {
-    const ce = country as CountryEvent;
-    if (ce.foundedOn <= yearObj.year) {
-      regionOwner.set(ce.governingRegion, countryId);
-    }
-  }
-  // Include dead countries so conquest chains involving dissolved countries
-  // can still transfer their regions. Only seed if not already claimed by
-  // a live country.
-  for (const [countryId, country] of world.mapDeadCountries) {
-    const ce = country as CountryEvent;
-    if (ce.foundedOn <= yearObj.year) {
-      if (!regionOwner.has(ce.governingRegion)) {
-        regionOwner.set(ce.governingRegion, countryId);
-      }
-    }
-  }
-
-  // Now apply conquests in chronological order up to this year.
-  // Transitive: when C conquers B (who had conquered A), all regions
-  // owned by B (including A's formerly-conquered region) transfer to C.
-  const timeline = yearObj.timeline;
-  for (const y of timeline.years) {
-    if (y.year > yearObj.year) break;
-    for (const conquer of y.conquers) {
-      const conqueredCountry = (world.mapCountries.get(conquer.conquered)
-        ?? world.mapDeadCountries.get(conquer.conquered)) as CountryEvent | undefined;
-      if (!conqueredCountry) continue;
-      // Transfer ALL regions currently owned by the conquered to the conqueror.
-      // This handles transitive chains (C beats B who beat A → C gets A's region).
-      for (const [regionId, ownerId] of regionOwner) {
-        if (ownerId === conquer.conquered) {
-          regionOwner.set(regionId, conquer.conqueror);
-        }
-      }
-    }
-  }
-
-  // Now rebuild ownership from regionOwner
-  for (const [regionId, ownerId] of regionOwner) {
-    const numIdx = countryMap.idToIndex.get(ownerId);
-    if (numIdx === undefined) continue;
-    const region = world.mapRegions.get(regionId);
-    if (!region) continue;
-    for (const ci of region.cellIndices) {
-      if (ownership[ci] !== -2) {
-        ownership[ci] = numIdx;
-      }
-    }
-  }
-
-  // Overlay expansion territory: replay expansion events up to this year.
-  // Track current owner of each expansion event's cells so transitive
-  // conquests work: when C conquers B who inherited A's expansions, C
-  // inherits them too.
-  const expansionOwner = new Map<string, string>(); // exp.countryId → current owner
-  for (const y of timeline.years) {
-    if (y.year > yearObj.year) break;
-    for (const exp of y.expansions) {
-      const owner = expansionOwner.get(exp.countryId) ?? exp.countryId;
-      const numIdx = countryMap.idToIndex.get(owner);
-      if (numIdx === undefined) continue;
-      for (const ci of exp.cellIndices) {
-        if (ownership[ci] !== -2) {
-          ownership[ci] = numIdx;
-        }
-      }
-    }
-    // Conquests transfer expansion ownership transitively
-    for (const conquer of y.conquers) {
-      // Transfer all expansion events currently owned by the conquered
-      for (const [origId, ownerId] of expansionOwner) {
-        if (ownerId === conquer.conquered) {
-          expansionOwner.set(origId, conquer.conqueror);
-        }
-      }
-      // Also transfer the conquered country's own (original) expansion events
-      if (!expansionOwner.has(conquer.conquered)) {
-        expansionOwner.set(conquer.conquered, conquer.conqueror);
-      }
-      // Re-apply all expansion cells up to this year with updated ownership
-      const conquerorIdx = countryMap.idToIndex.get(conquer.conqueror);
-      if (conquerorIdx === undefined) continue;
-      for (const prevY of timeline.years) {
-        if (prevY.year > y.year) break;
-        for (const prevExp of prevY.expansions) {
-          const currentOwner = expansionOwner.get(prevExp.countryId);
-          if (currentOwner === conquer.conqueror) {
-            for (const ci of prevExp.cellIndices) {
-              if (ownership[ci] !== -2) {
-                ownership[ci] = conquerorIdx;
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return ownership;
-}
-
-/**
- * Compute expansion flags: which cells are expansion territory at a given year.
- * Returns a Uint8Array where 1 = expansion territory, 0 = core/unclaimed.
- */
-function computeExpansionFlags(
-  cells: Cell[],
-  yearObj: Year,
-  _countryMap: CountryIndexMap,
-): Uint8Array {
-  const n = cells.length;
-  const flags = new Uint8Array(n); // all 0
-
-  // Track which cells are expansion territory and who owns them
-  // We need to handle: expansions add cells, settlements clear them, conquests transfer them
-  const expansionOwner = new Map<number, string>(); // cellIndex → countryId
-
-  const timeline = yearObj.timeline;
-  for (const y of timeline.years) {
-    if (y.year > yearObj.year) break;
-
-    // Expansions: mark cells as expansion territory
-    for (const exp of y.expansions) {
-      for (const ci of exp.cellIndices) {
-        expansionOwner.set(ci, exp.countryId);
-      }
-    }
-
-    // Settlements: clear expansion flags for consolidated cells
-    for (const settle of y.settlements) {
-      for (const ci of settle.cellIndices) {
-        expansionOwner.delete(ci);
-      }
-    }
-
-    // Conquests: transfer expansion ownership
-    for (const conquer of y.conquers) {
-      for (const [ci, owner] of expansionOwner) {
-        if (owner === conquer.conquered) {
-          expansionOwner.set(ci, conquer.conqueror);
-        }
-      }
-    }
-  }
-
-  // Write flags
-  for (const ci of expansionOwner.keys()) {
-    if (ci >= 0 && ci < n) {
-      flags[ci] = 1;
-    }
-  }
-
-  return flags;
-}
-
-/**
  * Return rich snapshot entries for cities that have a standing wonder at the given absolute year.
  */
 function computeWonderSnapshots(world: World, absYear: number): WonderSnapshotEntry[] {
@@ -1058,9 +841,11 @@ export class HistoryGenerator {
     // Phase 0: Build physical world
     const { world, regionData, continentData, usedCityNames } = buildPhysicalWorld(cells, width, rng, rarityWeights, seed, bodyKind, underground);
 
-    // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation)
-    const historyRoot = HistoryRoot.INSTANCE;
-    const timeline = timelineGenerator.generate(rng, historyRoot, world, cells, usedCityNames);
+    // Phase 1: Generate timeline (runs Phase 5 year-by-year simulation).
+    // numSimYears bounds the simulation itself — a 500-year request simulates
+    // 500 years (matching the CLAUDE.md contract), not 5000 truncated at
+    // serialization time.
+    const timeline = timelineGenerator.generate(rng, HistoryRoot.INSTANCE, world, cells, usedCityNames, numSimYears);
 
     // Phase 1b: Update region resource exploitation status from city territory.
     // Build a global set of all cells owned by any founded city, then mark each
@@ -1188,8 +973,66 @@ export class HistoryGenerator {
       return entries;
     };
 
+    // --- Incremental ownership replay state -------------------------------
+    // The legacy computeOwnership/computeExpansionFlags replayed the ENTIRE
+    // timeline from year 0 on every serialized year — O(years²·events), with
+    // an O(years·expansions) nested re-apply per conquest on top. The loop
+    // below already iterates years chronologically, so we maintain running
+    // replay state and rebuild the ownership array from it in O(cells) per
+    // year instead.
+    //
+    // Exact equivalence rests on two structural invariants of the simulation:
+    //  (A) `governingRegion` is unique per region forever: CountryGenerator
+    //      only forms a country on a region with no countryId/expansionOwnerId
+    //      and all cities founded+contacted+non-ruin; after _dissolveCountry
+    //      every city in the region is a ruin, so the predicate can never pass
+    //      again. Hence seeding a region at its country's foundedOn year and
+    //      applying conquest transfers at their own years yields the same
+    //      regionOwner map the full replay produced at every year.
+    //  (B) Expansion events have pairwise-disjoint cell sets: a region is an
+    //      expansion candidate only while unowned, and expansion/consolidation
+    //      permanently marks it, so each region is expanded at most once.
+    //      Under (B) the legacy conquest-triggered "re-apply all expansion
+    //      cells" loop reduces to painting every expansion event with its
+    //      CURRENT transitive owner — which is what the per-year fill does.
+    // If a future feature lets a region host a second country or be expanded
+    // twice, this incremental replay must be revisited.
+    const numCells = cells.length;
+    // Static base template: -1 unclaimed, -2 impassable (deep ocean: water
+    // cells without a regionId). Coastal water with a region stays claimable.
+    const baseOwnership = new Int16Array(numCells).fill(-1);
+    for (let ci = 0; ci < numCells; ci++) {
+      if (cells[ci].isWater && !cells[ci].regionId) baseOwnership[ci] = -2;
+    }
+    // Countries (live + dead) indexed by founding year. Under invariant (A)
+    // live/dead seeding order is irrelevant — no two countries share a region.
+    const countriesByFoundedYear = new Map<number, Array<{ id: string; regionId: string }>>();
+    {
+      const addByFounded = (id: string, ce: CountryEvent) => {
+        let arr = countriesByFoundedYear.get(ce.foundedOn);
+        if (!arr) { arr = []; countriesByFoundedYear.set(ce.foundedOn, arr); }
+        arr.push({ id, regionId: ce.governingRegion });
+      };
+      for (const [id, c] of world.mapCountries) addByFounded(id, c as CountryEvent);
+      for (const [id, c] of world.mapDeadCountries) {
+        if (!world.mapCountries.has(id)) addByFounded(id, c as CountryEvent);
+      }
+    }
+    const regionOwner = new Map<string, string>();          // regionId → countryId
+    const expansionOwner = new Map<string, string>();        // exp.countryId → current transitive owner
+    const allExpansions: Array<{ countryId: string; cellIndices: number[] }> = []; // chronological
+    const expansionFlagOwner = new Map<number, string>();    // cellIndex → countryId (expansion territory)
+    // Ping-pong buffers: one holds the current year, the other prevOwnership.
+    const ownershipBufA = new Int16Array(numCells);
+    const ownershipBufB = new Int16Array(numCells);
+
     // Compute ownership at year 0 (before any events)
     let prevOwnership: Int16Array | null = null;
+
+    // Wall-clock probe for the serialization loop — it runs OUTSIDE the
+    // TimelineGenerator timing accumulator, so without this its cost is
+    // invisible to the per-step breakdown. No RNG, no state mutation.
+    const serializeLoopStart = DEBUG_HISTORY_TIMING ? performance.now() : 0;
 
     for (let i = 0; i < yearsToSerialize; i++) {
       const yearObj = timeline.years[i];
@@ -1304,8 +1147,76 @@ export class HistoryGenerator {
         }
       }
 
-      // Compute ownership for this year
-      const ownership = computeOwnership(cells, world, yearObj, countryMap);
+      // Advance the incremental replay state to year i (see notes above).
+      // 1. Seed governing regions of countries founded this year.
+      const foundedNow = countriesByFoundedYear.get(yearObj.year);
+      if (foundedNow) {
+        for (const f of foundedNow) regionOwner.set(f.regionId, f.id);
+      }
+      // 2. Conquests transfer every region currently owned by the conquered
+      //    (transitive chains: C beats B who beat A → C gets A's region too).
+      for (const conquer of yearObj.conquers) {
+        const conqueredCountry = world.mapCountries.get(conquer.conquered)
+          ?? world.mapDeadCountries.get(conquer.conquered);
+        if (!conqueredCountry) continue;
+        for (const [regionId, ownerId] of regionOwner) {
+          if (ownerId === conquer.conquered) {
+            regionOwner.set(regionId, conquer.conqueror);
+          }
+        }
+      }
+      // 3. Record this year's expansions; conquests transfer expansion
+      //    ownership transitively (matching the legacy replay order:
+      //    expansions first, then conquers, within each year).
+      for (const exp of yearObj.expansions) allExpansions.push(exp);
+      for (const conquer of yearObj.conquers) {
+        for (const [origId, ownerId] of expansionOwner) {
+          if (ownerId === conquer.conquered) {
+            expansionOwner.set(origId, conquer.conqueror);
+          }
+        }
+        if (!expansionOwner.has(conquer.conquered)) {
+          expansionOwner.set(conquer.conquered, conquer.conqueror);
+        }
+      }
+      // 4. Expansion-flag state: expansions mark cells, settlements clear
+      //    them, conquests transfer them (legacy computeExpansionFlags order).
+      for (const exp of yearObj.expansions) {
+        for (const ci of exp.cellIndices) expansionFlagOwner.set(ci, exp.countryId);
+      }
+      for (const settle of yearObj.settlements) {
+        for (const ci of settle.cellIndices) expansionFlagOwner.delete(ci);
+      }
+      for (const conquer of yearObj.conquers) {
+        for (const [ci, owner] of expansionFlagOwner) {
+          if (owner === conquer.conquered) {
+            expansionFlagOwner.set(ci, conquer.conqueror);
+          }
+        }
+      }
+
+      // Rebuild the ownership array for this year from the replay state:
+      // base template, then region fill, then expansion overlay (expansion
+      // paint wins, matching the legacy fill order).
+      const ownership = i % 2 === 0 ? ownershipBufA : ownershipBufB;
+      ownership.set(baseOwnership);
+      for (const [regionId, ownerId] of regionOwner) {
+        const numIdx = countryMap.idToIndex.get(ownerId);
+        if (numIdx === undefined) continue;
+        const region = world.mapRegions.get(regionId);
+        if (!region) continue;
+        for (const ci of region.cellIndices) {
+          if (ownership[ci] !== -2) ownership[ci] = numIdx;
+        }
+      }
+      for (const exp of allExpansions) {
+        const owner = expansionOwner.get(exp.countryId) ?? exp.countryId;
+        const numIdx = countryMap.idToIndex.get(owner);
+        if (numIdx === undefined) continue;
+        for (const ci of exp.cellIndices) {
+          if (ownership[ci] !== -2) ownership[ci] = numIdx;
+        }
+      }
 
       // Compute delta from previous
       const delta = new Map<number, number>();
@@ -1324,9 +1235,6 @@ export class HistoryGenerator {
         worldPopulation: yearObj.worldPopulation,
       });
 
-      // Compute expansion flags for this year
-      const expFlags = computeExpansionFlags(cells, yearObj, countryMap);
-
       // Snapshot every 20 years
       if (i % 20 === 0) {
         snapshots[i] = new Int16Array(ownership);
@@ -1335,7 +1243,14 @@ export class HistoryGenerator {
         wonderSnapshots[i] = computeWonderSnapshots(world, yearObj.year);
         religionSnapshots[i] = computeReligionCells(world, yearObj.year);
         empireSnapshots[i] = buildEmpireSnapshot();
-        expansionSnapshots[i] = new Uint8Array(expFlags);
+        // Materialize expansion flags from the running state (the legacy code
+        // recomputed a full-replay Uint8Array EVERY year but only stored it
+        // at snapshot years).
+        const expFlags = new Uint8Array(numCells);
+        for (const ci of expansionFlagOwner.keys()) {
+          if (ci >= 0 && ci < numCells) expFlags[ci] = 1;
+        }
+        expansionSnapshots[i] = expFlags;
         // City sizes: store size tier index for all city entities
         const sizeArr = new Uint8Array(allCityEntities.length);
         for (let ci = 0; ci < allCityEntities.length; ci++) {
@@ -1349,6 +1264,10 @@ export class HistoryGenerator {
       prevOwnership = ownership;
     }
 
+    if (DEBUG_HISTORY_TIMING) {
+      console.log(`HistoryGenerator serialization loop: ${(performance.now() - serializeLoopStart).toFixed(1)} ms (${yearsToSerialize} years)`);
+    }
+
     // Always snapshot final year
     const finalAbsYear = timeline.years[yearsToSerialize - 1]?.year ?? 0;
     if (prevOwnership) {
@@ -1358,9 +1277,14 @@ export class HistoryGenerator {
       wonderSnapshots[yearsToSerialize] = computeWonderSnapshots(world, finalAbsYear);
       religionSnapshots[yearsToSerialize] = computeReligionCells(world, finalAbsYear);
       empireSnapshots[yearsToSerialize] = buildEmpireSnapshot();
-      const finalYearObj = timeline.years[yearsToSerialize - 1];
-      if (finalYearObj) {
-        expansionSnapshots[yearsToSerialize] = computeExpansionFlags(cells, finalYearObj, countryMap);
+      // Materialize final expansion flags from the running replay state —
+      // after the loop it reflects exactly the final serialized year.
+      {
+        const finalExpFlags = new Uint8Array(numCells);
+        for (const ci of expansionFlagOwner.keys()) {
+          if (ci >= 0 && ci < numCells) finalExpFlags[ci] = 1;
+        }
+        expansionSnapshots[yearsToSerialize] = finalExpFlags;
       }
       // Final city size snapshot
       const finalYear = timeline.years[yearsToSerialize - 1];

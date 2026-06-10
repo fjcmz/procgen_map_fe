@@ -267,18 +267,18 @@ The sweep is **byte-deterministic** — re-running with the same args produces b
 
 ### Current baseline (`scripts/results/baseline-a.json`)
 
-The baseline was rebased on **2026-05-15** for the underground-resources sim-integration feature (new `subterranean_flora` / `_fauna` / `_mineral` / `mythic_metals` categories in `ResourceCatalog.ts`; new `attachUndergroundResources` step in `buildPhysicalWorld` that projects cavern deposits onto surface regions before year-0 discovery via the isolated `${seed}_underground_resources` sub-stream; sweep harness now rolls `${seed}_underground_present` and threads the resulting `UndergroundMap` into `historyGenerator.generate`). Of the 5 sweep seeds, 3 fail the underground eligibility roll and stay byte-identical to the pre-feature baseline; the other 2 carry underground deposits, which shift trade / war / population metrics in `HistoryStats`. The previous rebaseline on **2026-05-10** covered the maritime-resources + sea-city expansion feature. Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired earlier — `baseline-a.json` is the only checked-in sweep result.
+The baseline was re-rolled on **2026-06-10** to repair drift: commit `0469ea6` ("Underground: narrow large cavern count to 5–15" — a deliberate balance change to underground layouts) landed ~19 minutes *after* the 2026-05-15 baseline was generated and skipped the same-commit rebaseline rule below. Only seed-02 (one of the 2 underground-eligible sweep seeds) shifted; the other 4 seeds are byte-identical to the 2026-05-15 file. The prior rebase on **2026-05-15** covered the underground-resources sim-integration feature (new `subterranean_flora` / `_fauna` / `_mineral` / `mythic_metals` categories in `ResourceCatalog.ts`; new `attachUndergroundResources` step in `buildPhysicalWorld` that projects cavern deposits onto surface regions before year-0 discovery via the isolated `${seed}_underground_resources` sub-stream; sweep harness now rolls `${seed}_underground_present` and threads the resulting `UndergroundMap` into `historyGenerator.generate`). Of the 5 sweep seeds, 3 fail the underground eligibility roll and stay byte-identical to the pre-feature baseline; the other 2 carry underground deposits, which shift trade / war / population metrics in `HistoryStats`. The previous rebaseline on **2026-05-10** covered the maritime-resources + sea-city expansion feature. Earlier per-experiment snapshots (`tuning-1.json`, `ecumenopolis.json`, etc.) were retired earlier — `baseline-a.json` is the only checked-in sweep result.
 
 - **Args**: `seeds=5`, `years=5000`, `cells=3000`, `width=1600`, `height=1000`, `waterRatio=0.4`, `profile=DEFAULT_PROFILE` (no overlay).
 - **Wall clock**: ~80s on 4-way concurrency (per-seed 38–56s). Wall-clock numbers are noisy and not part of the diff contract — `elapsedMs` fields are excluded from regression checks.
 - **Headline aggregates** (min / median / max across 5 seeds; sanity check that your local run is in the same regime before diffing):
-  - `peakPopulation`: 752M / 1.49B / 1.56B
-  - `totalTechs`: ~1.9K (each seed in the 1789–1959 range)
-  - `totalCountries`: 25 / 37 / 41
-  - `totalWars`: 99 / 219 / 255
-  - `totalConquests`: 97 / 214 / 246
-  - `totalEmpires`: 30 / 40 / 43
-  - `totalCataclysms`: ~2.5–2.6K
+  - `peakPopulation`: 752M / 1.09B / 1.56B
+  - `totalTechs`: ~1.8K (each seed in the 1789–1959 range)
+  - `totalCountries`: 25 / 34 / 41
+  - `totalWars`: 99 / 219 / 262
+  - `totalConquests`: 97 / 214 / 256
+  - `totalEmpires`: 30 / 38 / 43
+  - `totalCataclysms`: ~2.4–2.5K
   - `worldEndedCount`: 0 / 5 (no seed wipes itself out)
   - `peakTechLevelByField` extremes: `exploration` 46–103 (lowest), `military` / `art` / `government` 132–285 (highest); `industry` 88–174 range.
 

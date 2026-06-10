@@ -7,6 +7,7 @@ import type { Illustrate } from './Illustrate';
 import type { CountryEvent } from './Country';
 import type { Wonder } from './Wonder';
 import { TRADE_USE } from '../physical/Resource';
+import { releaseUsableCityClaims } from '../physical/claims';
 
 function rngHex(rng: () => number): string {
   return Array.from({ length: 3 }, () =>
@@ -68,9 +69,12 @@ export function ruinifyCity(
   city.ruinCause = cause;
   city.currentPopulation = 0;
 
-  // 2. Remove from active simulation maps
+  // 2. Remove from active simulation maps. Releasing the claim index mirrors
+  // the legacy per-year claimed-cells rebuild over mapUsableCities: a ruined
+  // city's cells become claimable again the moment it leaves the map.
   world.mapUsableCities.delete(city.id);
   world.mapUncontactedCities.delete(city.id);
+  releaseUsableCityClaims(world, city);
 
   // 3. Sever all contacts (bidirectional)
   for (const other of city.contactCities) {

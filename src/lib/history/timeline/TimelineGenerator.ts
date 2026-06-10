@@ -8,7 +8,7 @@ import { DEBUG_HISTORY_TIMING, historyTiming } from './timing';
 const NUM_YEARS = 5000;
 
 export class TimelineGenerator {
-  generate(rng: () => number, history: HistoryRoot, world: World, cells?: Cell[], usedCityNames?: Set<string>): Timeline {
+  generate(rng: () => number, history: HistoryRoot, world: World, cells?: Cell[], usedCityNames?: Set<string>, numYears: number = NUM_YEARS): Timeline {
     if (DEBUG_HISTORY_TIMING) historyTiming.reset();
 
     const timeline = new Timeline(rng);
@@ -50,7 +50,12 @@ export class TimelineGenerator {
       cache = { regionCellSets, regionResourceDists };
     }
 
-    for (let i = 0; i < NUM_YEARS; i++) {
+    // Simulate exactly the requested number of years. The per-year loop is
+    // strictly forward (year N+1 only reads state produced by years 0..N), so
+    // truncating here yields byte-identical years 0..numYears-1 compared to a
+    // full 5000-year run — the sweep baseline (always 5000) is unaffected.
+    const yearsToRun = Math.max(1, Math.min(NUM_YEARS, Math.floor(numYears)));
+    for (let i = 0; i < yearsToRun; i++) {
       const year = yearGenerator.generate(rng, timeline, world, cells, usedCityNames, cache);
       timeline.years.push(year);
     }

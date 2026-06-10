@@ -7,6 +7,7 @@ import type { CountryEvent } from './Country';
 import { getCountryEffectiveTechs } from './Tech';
 import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
+import { registerUsableCityClaims } from '../physical/claims';
 import { scoreCellForCity } from '../history';
 
 function rngHex(rng: () => number): string {
@@ -71,19 +72,25 @@ export class ExpandGenerator {
       [countries[i], countries[j]] = [countries[j], countries[i]];
     }
 
+    // Population gate, one pass instead of per-country city scans:
+    // countryId and expansionOwnerId are mutually exclusive on a region, and
+    // mid-loop claims below only flip unowned regions to the claiming
+    // country's id — which the old per-country scan (run before that
+    // country's own claims) never counted either, so hoisting is exact.
+    const countryPop = new Map<string, number>();
+    for (const city of world.mapUsableCities.values()) {
+      if (!city.founded || city.isRuin) continue;
+      const region = world.mapRegions.get(city.regionId);
+      if (!region) continue;
+      const owner = region.countryId ?? region.expansionOwnerId;
+      if (!owner) continue;
+      countryPop.set(owner, (countryPop.get(owner) ?? 0) + city.currentPopulation);
+    }
+
     for (const country of countries) {
       if (country.foundedOn > absYear) continue;
 
-      // Population gate: sum city populations in country's regions
-      let totalPop = 0;
-      for (const city of world.mapUsableCities.values()) {
-        if (!city.founded || city.isRuin) continue;
-        const region = world.mapRegions.get(city.regionId);
-        if (!region) continue;
-        if (region.countryId === country.id || region.expansionOwnerId === country.id) {
-          totalPop += city.currentPopulation;
-        }
-      }
+      const totalPop = countryPop.get(country.id) ?? 0;
       if (totalPop < EXPANSION_POP_GATE) continue;
 
       // Tech levels via scope ladder — resolve the country's effective tech map
@@ -238,6 +245,11 @@ export class ExpandGenerator {
       cityEntity.currentPopulation = 500;
       world.mapUsableCities.set(cityEntity.id, cityEntity);
       world.mapUncontactedCities.set(cityEntity.id, cityEntity);
+      // Expansion-settled cities never seed their founding cell into
+      // ownedCells (matching the historical behaviour the claim index
+      // mirrors), so this registers an empty set today — kept for the
+      // usable-entry invariant in claims.ts.
+      registerUsableCityClaims(world, cityEntity);
 
       // Consolidate: clear expansion flags, set countryId on all expansion regions
       const consolidatedRegionIds: string[] = [];

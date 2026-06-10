@@ -7,6 +7,7 @@ import { cityGenerator } from '../physical/CityGenerator';
 import { generateCityName } from '../nameGenerator';
 import { scoreCellForCity, scoreCellForSeaCity } from '../history';
 import { getCityTechLevel } from './Tech';
+import { claimCell, registerUsableCityClaims } from '../physical/claims';
 import { seededPRNG } from '../../terrain/noise';
 
 function rngHex(rng: () => number): string {
@@ -105,11 +106,12 @@ export class CitySettlementGenerator {
     const absYear = year.year;
     const results: CitySettlement[] = [];
 
-    // Build set of all existing city cell indices to avoid placing on them
-    const cityCellSet = new Set<number>();
-    for (const city of world.mapCities.values()) {
-      cityCellSet.add(city.cellIndex);
-    }
+    // Founding cells of every city ever created — maintained persistently by
+    // CityGenerator.generate (same key set the per-year rebuild over
+    // mapCities used to produce). New children created below are added by
+    // cityGenerator.generate at the same program point the local-set adds
+    // used to happen, so within-year visibility is unchanged.
+    const cityCellSet = world.allCityCells;
 
     // Build a map of cell index → owning city id to exclude cells claimed by others.
     // Always include each city's founding cell (city.cellIndex) regardless of ownedCells,
@@ -123,6 +125,22 @@ export class CitySettlementGenerator {
       }
     }
 
+    // Per-country maritime level, resolved lazily once per country — the
+    // scope ladder gives every city of a country the same level, and tech
+    // doesn't change during this step. Stateless cities keep the direct path.
+    const maritimeByCountry = new Map<string, number>();
+    const maritimeLevelFor = (city: import('../physical/CityEntity').CityEntity): number => {
+      const region = world.mapRegions.get(city.regionId);
+      const countryId = region?.countryId;
+      if (!countryId) return getCityTechLevel(world, city, 'maritime');
+      let lvl = maritimeByCountry.get(countryId);
+      if (lvl === undefined) {
+        lvl = getCityTechLevel(world, city, 'maritime');
+        maritimeByCountry.set(countryId, lvl);
+      }
+      return lvl;
+    };
+
     for (const city of world.mapUsableCities.values()) {
       if (!city.founded || city.isRuin) continue;
       if (city.hasHadSettlement) continue;
@@ -135,11 +153,15 @@ export class CitySettlementGenerator {
       // All randomness inside this branch comes from an isolated `seaRng`
       // sub-stream so even post-tech years don't perturb the timeline RNG
       // for cities/years that don't actually settle a sea city.
-      const maritimeLevel = getCityTechLevel(world, city, 'maritime');
+      const maritimeLevel = maritimeLevelFor(city);
       if (maritimeLevel >= SEA_SETTLEMENT_MARITIME_GATE) {
-        const parentCell = cells[city.cellIndex];
-        const parentCoastal = parentCell.isCoast
-          || parentCell.neighbors.some(n => cells[n].isWater);
+        let parentCoastal = city.cachedIsCoastal;
+        if (parentCoastal === null) {
+          const parentCell = cells[city.cellIndex];
+          parentCoastal = parentCell.isCoast
+            || parentCell.neighbors.some(n => cells[n].isWater);
+          city.cachedIsCoastal = parentCoastal;
+        }
         if (parentCoastal) {
           const seaResult = this._tryFoundSeaCity(
             city, cells, world, year,
@@ -222,10 +244,10 @@ export class CitySettlementGenerator {
       childEntity.founded = true;
       childEntity.foundedOn = absYear;
       childEntity.currentPopulation = 500;
-      childEntity.ownedCells.set(bestCell, absYear);
+      claimCell(world, childEntity, bestCell, absYear, cells[bestCell], false);
       world.mapUsableCities.set(childEntity.id, childEntity);
       world.mapUncontactedCities.set(childEntity.id, childEntity);
-      cityCellSet.add(bestCell);
+      registerUsableCityClaims(world, childEntity);
       claimedCells.set(bestCell, childEntity.id);
 
       // Wire parent ↔ child
@@ -372,7 +394,7 @@ export class CitySettlementGenerator {
     childEntity.founded = true;
     childEntity.foundedOn = absYear;
     childEntity.currentPopulation = 500;
-    childEntity.ownedCells.set(bestCell, absYear);
+    claimCell(world, childEntity, bestCell, absYear, cells[bestCell], false);
     childEntity.isSeaCity = true;
     childEntity.foundedOnDeepOcean = best.isDeep;
     if (best.isDeep) {
@@ -381,7 +403,7 @@ export class CitySettlementGenerator {
 
     world.mapUsableCities.set(childEntity.id, childEntity);
     world.mapUncontactedCities.set(childEntity.id, childEntity);
-    cityCellSet.add(bestCell);
+    registerUsableCityClaims(world, childEntity);
     claimedCells.set(bestCell, childEntity.id);
 
     parentCity.hasHadSettlement = true;
